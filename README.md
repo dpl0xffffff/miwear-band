@@ -96,4 +96,6 @@ You can also set MAC and auth key in the UI before connecting.
 
 ## License
 
-See repository license file if present; third-party trees under `third_party/` retain their own terms.
+This project is licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE).
+
+Third-party material under `third_party/` (Mi Fitness schemas, sleep models, reference parsers, etc.) remains under its respective upstream terms.
