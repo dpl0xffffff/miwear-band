@@ -1,0 +1,29 @@
+#ifndef MIWEAR_ACTIVITY_MI_FITNESS_SLEEP_STAGES_H
+#define MIWEAR_ACTIVITY_MI_FITNESS_SLEEP_STAGES_H
+
+#include "miwear/activity/mi_fitness_full_day_sleep.h"
+#include "miwear/app.h"
+
+#include <json-glib/json-glib.h>
+#include <stddef.h>
+#include <stdint.h>
+
+/* Mi Fitness: AllDaySleepSchemaParser → featureData → splitAllDaySleepBytes → MiDevSleepAlgo.parseSleep. */
+
+void mi_fitness_apply_sleep_stages_from_feature(AppState *state,
+                                                const uint8_t *full_payload,
+                                                size_t full_payload_len,
+                                                int version,
+                                                const uint8_t *feature_data,
+                                                size_t feature_len,
+                                                uint32_t bed_sec,
+                                                uint32_t wake_sec);
+
+void mi_fitness_apply_sleep_stages_from_schema_body(AppState *state,
+                                                    JsonObject *body,
+                                                    const uint8_t *full_payload,
+                                                    size_t full_payload_len,
+                                                    uint32_t bed_sec,
+                                                    uint32_t wake_sec);
+
+#endif

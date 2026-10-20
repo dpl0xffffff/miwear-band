@@ -1,0 +1,334 @@
+{
+  "$types": {
+    "$comment": "将二进制 header 中的原始数字映射为语义字符串。key 为原始数字（字符串形式），value 为语义 activityType 或 dataType。映射缺失时回退到硬编码逻辑。",
+    "category": {
+      "0": "health",
+      "1": "sport"
+    },
+    "activityType": {
+      "health": {
+        "0": "daily_activity",
+        "2": "daytime_sleep",
+        "3": "night_sleep",
+        "6": "manual_measurement",
+        "8": "full_day_sleep",
+        "9": "abnormal",
+        "10": "weight_fat",
+        "11": "ecg",
+        "12": "temperature",
+        "13": "osa"
+      },
+      "sport": {
+        "3": "indoor_running",
+        "7": "indoor_cycling",
+        "8": "free_training",
+        "9": "swimming",
+        "10": "swimming",
+        "11": "elliptical_training",
+        "12": "yoga",
+        "13": "rowing_workout",
+        "14": "rope_skipping",
+        "16": "hiit",
+        "17": "triathlon",
+        "18": "ball_games",
+        "19": "basketball",
+        "20": "golf",
+        "21": "skiing",
+        "22": "outdoor_foot",
+        "23": "outdoor_non_foot",
+        "24": "climbing",
+        "25": "diving",
+        "26": "esports"
+      }
+    },
+    "fileType": {
+      "$comment": "按 category 区分：健康(daily)仅用 0/1，2/3 预留给扩展；运动(sport)用 0=record,1=report,2=gps,3=hrr。",
+      "health": {
+        "0": "record",
+        "1": "report"
+      },
+      "sport": {
+        "0": "record",
+        "1": "report",
+        "2": "gps",
+        "3": "hrr"
+      }
+    }
+  },
+  "abnormal": {
+    "record": {
+      "v2": "abnormal/record/abnormal_record_v2.json"
+    }
+  },
+  "ball_games": {
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    },
+    "record": {
+      "v1": "ball_games/record/ball_games_record_v1.json"
+    },
+    "report": {
+      "v5": "ball_games/report/ball_games_report_v5.json"
+    }
+  },
+  "basketball": {
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    },
+    "record": {
+      "v1": "basketball/record/basketball_record_v1.json"
+    },
+    "report": {
+      "v5": "basketball/report/basketball_report_v5.json"
+    }
+  },
+  "climbing": {
+    "gps": {
+      "v3": "climbing/gps/climbing_gps_v3.json"
+    },
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    },
+    "record": {
+      "v1": "climbing/record/climbing_record_v1.json",
+      "v2": "climbing/record/climbing_record_v2.json"
+    },
+    "report": {
+      "v2": "climbing/report/climbing_report_v2.json"
+    }
+  },
+  "daily_activity": {
+    "record": {
+      "v3": "daily_activity/record/daily_activity_record_v3.json",
+      "v4": "daily_activity/record/daily_activity_record_v4.json",
+      "v5": "daily_activity/record/daily_activity_record_v5.json"
+    },
+    "report": {
+      "v5": "daily_activity/report/daily_activity_report_v5.json",
+      "v6": "daily_activity/report/daily_activity_report_v6.json"
+    }
+  },
+  "diving": {
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    },
+    "record": {
+      "v2": "diving/record/diving_record_v2.json"
+    },
+    "report": {
+      "v2": "diving/report/diving_report_v2.json"
+    }
+  },
+  "ecg": {
+    "record": {
+      "v1": "ecg/record/ecg_record_v1.json",
+      "v2": "ecg/record/ecg_record_v2.json"
+    }
+  },
+  "elliptical_training": {
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    },
+    "record": {
+      "v3": "elliptical_training/record/elliptical_training_record_v3.json"
+    },
+    "report": {
+      "v7": "elliptical_training/report/elliptical_training_report_v7.json"
+    }
+  },
+  "free_training": {
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    },
+    "record": {
+      "v4": "free_training/record/free_training_record_v4.json",
+      "v5": "free_training/record/free_training_record_v5.json",
+      "v6": "free_training/record/free_training_record_v6.json"
+    },
+    "report": {
+      "v11": "free_training/report/free_training_report_v11.json",
+      "v12": "free_training/report/free_training_report_v12.json",
+      "v13": "free_training/report/free_training_report_v13.json",
+      "v14": "free_training/report/free_training_report_v14.json"
+    }
+  },
+  "full_day_sleep": {
+    "report": {
+      "v5": "full_day_sleep/report/full_day_sleep_report_v5.json",
+      "v6": "full_day_sleep/report/full_day_sleep_report_v6.json"
+    },
+    "record": {
+      "v5": "full_day_sleep/report/full_day_sleep_report_v5.json",
+      "v6": "full_day_sleep/report/full_day_sleep_report_v6.json"
+    }
+  },
+  "golf": {
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    },
+    "record": {
+      "v1": "golf/record/golf_record_v1.json"
+    },
+    "report": {
+      "v4": "golf/report/golf_report_v4.json"
+    }
+  },
+  "hiit": {
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    },
+    "record": {
+      "v2": "hiit/record/hiit_record_v2.json"
+    },
+    "report": {
+      "v7": "hiit/report/hiit_report_v7.json"
+    }
+  },
+  "indoor_cycling": {
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    },
+    "record": {
+      "v6": "indoor_cycling/record/indoor_cycling_record_v6.json"
+    },
+    "report": {
+      "v10": "indoor_cycling/report/indoor_cycling_report_v10.json"
+    }
+  },
+  "indoor_running": {
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    },
+    "record": {
+      "v9": "indoor_running/record/indoor_running_record_v9.json",
+      "v10": "indoor_running/record/indoor_running_record_v10.json"
+    },
+    "report": {
+      "v13": "indoor_running/report/indoor_running_report_v13.json",
+      "v14": "indoor_running/report/indoor_running_report_v14.json"
+    }
+  },
+  "manual_measurement": {
+    "record": {
+      "v2": "manual_measurement/record/manual_measurement_record_v2.json"
+    }
+  },
+  "outdoor_foot": {
+    "gps": {
+      "v3": "outdoor_foot/gps/outdoor_foot_gps_v3.json",
+      "v4": "outdoor_foot/gps/outdoor_foot_gps_v4.json",
+      "v5": "outdoor_foot/gps/outdoor_foot_gps_v5.json"
+    },
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    },
+    "record": {
+      "v9": "outdoor_foot/record/outdoor_foot_record_v9.json"
+    },
+    "report": {
+      "v8": "outdoor_foot/report/outdoor_foot_report_v8.json",
+      "v9": "outdoor_foot/report/outdoor_foot_report_v9.json"
+    }
+  },
+  "outdoor_non_foot": {
+    "gps": {
+      "v3": "outdoor_non_foot/gps/outdoor_non_foot_gps_v3.json",
+      "v4": "outdoor_non_foot/gps/outdoor_non_foot_gps_v4.json"
+    },
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    },
+    "record": {
+      "v6": "outdoor_non_foot/record/outdoor_non_foot_record_v6.json",
+      "v7": "outdoor_non_foot/record/outdoor_non_foot_record_v7.json"
+    },
+    "report": {
+      "v8": "outdoor_non_foot/report/outdoor_non_foot_report_v8.json",
+      "v9": "outdoor_non_foot/report/outdoor_non_foot_report_v9.json"
+    }
+  },
+  "rope_skipping": {
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    },
+    "record": {
+      "v6": "rope_skipping/record/rope_skipping_record_v6.json"
+    },
+    "report": {
+      "v7": "rope_skipping/report/rope_skipping_report_v7.json"
+    }
+  },
+  "rowing_workout": {
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    },
+    "record": {
+      "v4": "rowing_workout/record/rowing_workout_record_v4.json"
+    },
+    "report": {
+      "v8": "rowing_workout/report/rowing_workout_report_v8.json"
+    }
+  },
+  "skiing": {
+    "gps": {
+      "v3": "skiing/gps/skiing_gps_v3.json"
+    },
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    },
+    "record": {
+      "v4": "skiing/record/skiing_record_v4.json"
+    },
+    "report": {
+      "v6": "skiing/report/skiing_report_v6.json"
+    }
+  },
+  "swimming": {
+    "gps": {
+      "v3": "swimming/gps/swimming_gps_v3.json"
+    },
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    },
+    "record": {
+      "v3": "swimming/record/swimming_record_v3.json"
+    },
+    "report": {
+      "v8": "swimming/report/swimming_report_v8.json"
+    }
+  },
+  "temperature": {
+    "report": {
+      "v1": "temperature/report/temperature_report_v1.json"
+    }
+  },
+  "triathlon": {
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    }
+  },
+  "weight_fat": {
+    "report": {
+      "v1": "weight_fat/report/weight_fat_report_v1.json"
+    }
+  },
+  "yoga": {
+    "hrr": {
+      "v1": "hrr/hrr_v1.json"
+    },
+    "record": {
+      "v1": "yoga/record/yoga_record_v1.json"
+    },
+    "report": {
+      "v7": "yoga/report/yoga_report_v7.json"
+    }
+  },
+  "esports": {
+    "record": {
+      "v1": "esports/record/esports_record_v1.json"
+    },
+    "report": {
+      "v1": "esports/report/esports_report_v1.json"
+    }
+  }
+}

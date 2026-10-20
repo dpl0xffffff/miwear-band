@@ -1,0 +1,52 @@
+[
+  {
+    "type": -1,
+    "byte_count": 4,
+    "support_version": 1,
+    "is_float": false,
+    "is_unsigned": false,
+    "counts_type": null,
+    "has_depend": 1,
+    "depend_profile": 0
+  },
+  {
+    "type": -2,
+    "byte_count": 4,
+    "support_version": 1,
+    "is_float": false,
+    "is_unsigned": false,
+    "counts_type": null,
+    "has_depend": 1,
+    "depend_profile": 0
+  },
+  {
+    "type": -3,
+    "byte_count": 1,
+    "support_version": 1,
+    "is_float": false,
+    "is_unsigned": false,
+    "counts_type": null,
+    "has_depend": 1,
+    "depend_profile": 0
+  },
+  {
+    "type": -4,
+    "byte_count": 1,
+    "support_version": 2,
+    "is_float": false,
+    "is_unsigned": false,
+    "counts_type": null,
+    "has_depend": 1,
+    "depend_profile": 0
+  },
+  {
+    "type": -5,
+    "byte_count": 2,
+    "support_version": 1,
+    "is_float": false,
+    "is_unsigned": false,
+    "counts_type": null,
+    "has_depend": 1,
+    "depend_profile": 0
+  }
+]

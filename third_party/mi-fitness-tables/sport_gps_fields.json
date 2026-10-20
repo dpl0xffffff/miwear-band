@@ -1,0 +1,82 @@
+[
+  {
+    "type": 0,
+    "byte_count": 4,
+    "support_version": 1,
+    "is_float": false,
+    "is_unsigned": false,
+    "counts_type": null,
+    "has_depend": 0,
+    "depend_profile": 0
+  },
+  {
+    "type": 1,
+    "byte_count": 4,
+    "support_version": 1,
+    "is_float": true,
+    "is_unsigned": false,
+    "counts_type": null,
+    "has_depend": 0,
+    "depend_profile": 0
+  },
+  {
+    "type": 2,
+    "byte_count": 4,
+    "support_version": 1,
+    "is_float": true,
+    "is_unsigned": false,
+    "counts_type": null,
+    "has_depend": 0,
+    "depend_profile": 0
+  },
+  {
+    "type": 3,
+    "byte_count": 4,
+    "support_version": 2,
+    "is_float": true,
+    "is_unsigned": false,
+    "counts_type": null,
+    "has_depend": 0,
+    "depend_profile": 0
+  },
+  {
+    "type": 4,
+    "byte_count": 2,
+    "support_version": 2,
+    "is_float": false,
+    "is_unsigned": false,
+    "counts_type": null,
+    "has_depend": 0,
+    "depend_profile": 0
+  },
+  {
+    "type": 5,
+    "byte_count": 0,
+    "support_version": 2,
+    "is_float": false,
+    "is_unsigned": false,
+    "counts_type": null,
+    "has_depend": 0,
+    "depend_profile": 0
+  },
+  {
+    "type": 6,
+    "byte_count": 4,
+    "support_version": 3,
+    "is_float": true,
+    "is_unsigned": false,
+    "counts_type": null,
+    "has_depend": 0,
+    "depend_profile": 0
+  },
+  {
+    "type": 7,
+    "byte_count": 4,
+    "support_version": 3,
+    "is_float": true,
+    "is_unsigned": false,
+    "counts_type": null,
+    "has_depend": 0,
+    "depend_profile": 0
+  }
+]

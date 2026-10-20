@@ -1,0 +1,16 @@
+/build/
+/build-no-ml/
+/build-asan/
+/.venv/
+/tools/**/.venv/
+/tools/miwear-sleep-algo/bin/
+/tools/miwear-sleep-algo/android-qemu-root/
+/tools/miwear-sleep-algo/__pycache__/
+*.pyc
+*.o
+*.a
+.DS_Store
+*.swp
+.env
+.env.*
+**/config.ini

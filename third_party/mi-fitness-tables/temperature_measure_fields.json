@@ -1,0 +1,12 @@
+[
+  {
+    "type": 0,
+    "byte_count": 4,
+    "support_version": 1,
+    "is_float": false,
+    "is_unsigned": false,
+    "counts_type": null,
+    "has_depend": 0,
+    "depend_profile": 0
+  }
+]
