@@ -9,6 +9,27 @@
 #include <stdlib.h>
 #include <string.h>
 
+int64_t miwear_sleep_packet_timestamp_ms(uint64_t ts_raw) {
+    if (ts_raw == 0) {
+        return 0;
+    }
+    if (ts_raw >= 1000000000000ULL) {
+        return (int64_t)ts_raw;
+    }
+    if (ts_raw >= 1000000000ULL) {
+        return (int64_t)ts_raw * 1000LL;
+    }
+    return 0;
+}
+
+gboolean miwear_sleep_timestamp_plausible(int64_t ts_ms) {
+    if (ts_ms <= 0) {
+        return FALSE;
+    }
+    /* 2020-01-01 .. 2035-01-01 UTC */
+    return ts_ms >= 1577836800000LL && ts_ms <= 2051222400000LL;
+}
+
 static gboolean read_sleep_stage_packet_header(const uint8_t *buf, size_t len, size_t *off) {
     while (*off + 17 <= len) {
         if ((buf[*off] == 0xFF && buf[*off + 1] == 0xFC && buf[*off + 2] == 0xFA && buf[*off + 3] == 0xFB) ||
@@ -207,6 +228,10 @@ typedef struct EmbeddedStageCtx {
     size_t count;
     size_t cap;
     MiwearSleepStageDurations durations;
+    uint32_t bed_sec;
+    uint32_t wake_sec;
+    int64_t stream_ms;
+    gboolean stream_valid;
 } EmbeddedStageCtx;
 
 static gboolean collect_embedded_stage_packet(const MiwearSleepPacketView *pkt, void *user_data) {
@@ -230,13 +255,28 @@ static gboolean collect_embedded_stage_packet(const MiwearSleepPacketView *pkt, 
     if (pkt->type != 17) {
         return TRUE;
     }
-    int64_t current_ms = (int64_t)pkt->ts_raw * 1000LL;
+    int64_t current_ms = miwear_sleep_packet_timestamp_ms(pkt->ts_raw);
+    if (!miwear_sleep_timestamp_plausible(current_ms)) {
+        if (ctx->stream_valid) {
+            current_ms = ctx->stream_ms;
+        } else if (ctx->bed_sec > 0) {
+            current_ms = (int64_t)ctx->bed_sec * 1000LL;
+        } else {
+            current_ms = 0;
+        }
+    }
     for (uint16_t i = 0; i + 1 < pkt->data_len; i += 2) {
         const uint16_t val = ((uint16_t)pkt->data[i] << 8) | pkt->data[i + 1];
         const int stage = (val >> 12) & 0x0F;
-        const int offset_min = val & 0x0FFF;
-        if (offset_min <= 0 || offset_min > 720) {
+        int offset_min = (int)(val & 0x0FFF);
+        if (offset_min < 0 || offset_min > 720) {
             continue;
+        }
+        if (offset_min == 0) {
+            offset_min = 1;
+        }
+        if (current_ms <= 0 && ctx->bed_sec > 0) {
+            current_ms = (int64_t)ctx->bed_sec * 1000LL;
         }
         if (ctx->count >= ctx->cap) {
             size_t new_cap = ctx->cap == 0 ? 64 : ctx->cap * 2;
@@ -251,12 +291,16 @@ static gboolean collect_embedded_stage_packet(const MiwearSleepPacketView *pkt, 
         ctx->rows[ctx->count].stage = miwear_normalize_sleep_stage(stage);
         ctx->count++;
         current_ms += (int64_t)offset_min * 60000LL;
+        ctx->stream_ms = current_ms;
+        ctx->stream_valid = TRUE;
     }
     return TRUE;
 }
 
 gboolean mi_sleep_try_embedded_stage_packets(const uint8_t *sleep_src,
                                              size_t sleep_src_len,
+                                             uint32_t bed_sec,
+                                             uint32_t wake_sec,
                                              MiwearSleepStageRow **rows_out,
                                              size_t *count_out,
                                              MiwearSleepStageDurations *durations_out) {
@@ -266,6 +310,8 @@ gboolean mi_sleep_try_embedded_stage_packets(const uint8_t *sleep_src,
     *rows_out = NULL;
     *count_out = 0;
     EmbeddedStageCtx ctx = {0};
+    ctx.bed_sec = bed_sec;
+    ctx.wake_sec = wake_sec;
     if (!miwear_sleep_foreach_packet(sleep_src, sleep_src_len, collect_embedded_stage_packet, &ctx)) {
         g_free(ctx.rows);
         return FALSE;

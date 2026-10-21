@@ -30,6 +30,13 @@ static void probe_sleep_file_ids_if_needed(AppState *state,
                                            size_t listed_len,
                                            guint n_sleep,
                                            guint n_sleep_stages);
+static void probe_manual_file_ids_if_needed(AppState *state,
+                                            const uint8_t *listed_ids,
+                                            size_t listed_len,
+                                            guint n_manual);
+static void prioritize_advertised_manual_samples(AppState *state, const uint8_t *ids, size_t len);
+static int activity_file_id_subtype(const uint8_t *id);
+static gboolean activity_file_id_is_sleep_probe(int subtype);
 void trigger_next_activity_fetch(AppState *state);
 static gboolean send_encrypted_simple_command(AppState *state, uint32_t type, uint32_t subtype, const char *label);
 static void send_activity_fetch_past_channels(AppState *state, const char *label_prefix);
@@ -187,7 +194,15 @@ static void append_friendly_command_log(AppState *state, const Xiaomi__Command *
         if (rt->has_steps) g_string_append_printf(s, " steps=%u", rt->steps);
         if (rt->has_heartrate) g_string_append_printf(s, " hr=%u", rt->heartrate);
         if (rt->has_calories) g_string_append_printf(s, " calories=%u", rt->calories);
-        if (rt->has_unknown5) g_string_append_printf(s, " moving=%u", rt->unknown5);
+        if (rt->has_unknown3 || rt->has_unknown5) {
+            const guint activity_min = miwear_activity_time_from_realtime(
+                rt->has_unknown3, rt->unknown3, rt->has_unknown5, rt->unknown5,
+                rt->has_steps, rt->steps);
+            if (activity_min > 0) {
+                g_string_append_printf(s, " activity=%u", activity_min);
+            }
+        }
+        if (rt->has_unknown5) g_string_append_printf(s, " rt5=%u", rt->unknown5);
         if (rt->has_unknown3) g_string_append_printf(s, " rt3=%u", rt->unknown3);
         if (rt->has_standinghours) g_string_append_printf(s, " standing=%u", rt->standinghours);
     } else if (cmd->type == 8 && cmd->has_subtype &&
@@ -389,7 +404,11 @@ static void log_decoded_command_proto(AppState *state, const uint8_t *plain, siz
             log_activity_file_ids(ids, len, "Activity file ids");
             enqueue_activity_file_ids(state, ids, len);
             if (cmd->subtype == 1) {
+                if (n_manual > 0) {
+                    prioritize_advertised_manual_samples(state, ids, len);
+                }
                 probe_sleep_file_ids_if_needed(state, ids, len, n_sleep, n_sleep_stages);
+                probe_manual_file_ids_if_needed(state, ids, len, n_manual);
             }
             trigger_next_activity_fetch(state);
         }
@@ -831,6 +850,17 @@ static void cancel_activity_fetch_timeout(AppState *state) {
     }
 }
 
+static int activity_file_id_subtype(const uint8_t *id) {
+    if (id == NULL) {
+        return -1;
+    }
+    return (id[6] & 127) >> 2;
+}
+
+static gboolean activity_file_id_is_sleep_probe(int subtype) {
+    return subtype == 3 || subtype == 8;
+}
+
 static gboolean activity_fetch_timeout_cb(gpointer user_data) {
     AppState *state = user_data;
     state->activity_fetch_timeout_source_id = 0;
@@ -838,11 +868,24 @@ static gboolean activity_fetch_timeout_cb(gpointer user_data) {
         return G_SOURCE_REMOVE;
     }
 
+    const int subtype = activity_file_id_subtype(state->activity_fetch_current_id);
+    const int detail = state->activity_fetch_current_id[6] & 3;
+    const char *sub_name = activity_subtype_name(0, subtype >= 0 ? subtype : 0);
     gchar *id_txt = activity_file_id_key(state->activity_fetch_current_id);
-    gchar *line = g_strdup_printf("Timed out waiting for activity file %s; requesting next.", id_txt);
+    gchar *line = g_strdup_printf(
+        "Timed out waiting for activity file %s (subtype=%d/%s detail=%d); requesting next.",
+        id_txt,
+        subtype,
+        sub_name != NULL ? sub_name : "?",
+        detail);
     append_log(state, line);
     g_free(line);
     g_free(id_txt);
+    if (activity_file_id_is_sleep_probe(subtype) && state->activity_fetch_seen != NULL) {
+        gchar *key = activity_file_id_key(state->activity_fetch_current_id);
+        g_hash_table_remove(state->activity_fetch_seen, key);
+        g_free(key);
+    }
     miwear_log_fetch_transition(state, "timeout", state->activity_fetch_current_id);
 
     state->activity_fetch_inflight = FALSE;
@@ -851,9 +894,20 @@ static gboolean activity_fetch_timeout_cb(gpointer user_data) {
     return G_SOURCE_REMOVE;
 }
 
+static guint activity_fetch_timeout_ms(const uint8_t *file_id7) {
+    if (file_id7 != NULL) {
+        const int subtype = ((file_id7[6] & 127) >> 2);
+        if (subtype == 6) {
+            return 15000u;
+        }
+    }
+    return 5000u;
+}
+
 static void schedule_activity_fetch_timeout(AppState *state) {
     cancel_activity_fetch_timeout(state);
-    state->activity_fetch_timeout_source_id = g_timeout_add(5000, activity_fetch_timeout_cb, state);
+    const guint ms = activity_fetch_timeout_ms(state->activity_fetch_current_id);
+    state->activity_fetch_timeout_source_id = g_timeout_add(ms, activity_fetch_timeout_cb, state);
 }
 
 static int activity_detail_fetch_order(uint8_t detail) {
@@ -864,6 +918,25 @@ static int activity_detail_fetch_order(uint8_t detail) {
         case 2: return 2; /* gps track */
         default: return 3;
     }
+}
+
+static int activity_file_fetch_priority(const uint8_t *id) {
+    const uint8_t flags = id[6];
+    const int subtype = (flags & 127) >> 2;
+    const int detail = flags & 3;
+    if (subtype == 0 && detail == 1) {
+        return 0; /* daily summary */
+    }
+    if (subtype == 6) {
+        return 1; /* manual stress / SpO₂ / HR samples */
+    }
+    if (subtype == 0) {
+        return 2; /* daily detail chunks */
+    }
+    if (subtype == 3 || subtype == 8) {
+        return 9; /* sleep probe candidates — fetch after health data */
+    }
+    return 5;
 }
 
 static gint activity_file_id_compare(gconstpointer a, gconstpointer b, gpointer user_data) {
@@ -884,6 +957,10 @@ static gint activity_file_id_compare(gconstpointer a, gconstpointer b, gpointer 
     const int type_a = (flags_a >> 7) & 1;
     const int type_b = (flags_b >> 7) & 1;
     if (type_a != type_b) return (type_a < type_b) ? -1 : 1;
+
+    const int pri_a = activity_file_fetch_priority(aa);
+    const int pri_b = activity_file_fetch_priority(bb);
+    if (pri_a != pri_b) return (pri_a < pri_b) ? -1 : 1;
 
     const int subtype_a = (flags_a & 127) >> 2;
     const int subtype_b = (flags_b & 127) >> 2;
@@ -913,6 +990,17 @@ void reset_activity_fetch_state(AppState *state) {
         g_hash_table_remove_all(state->activity_fetch_seen);
     }
     miwear_log_fetch_transition(state, "reset", NULL);
+}
+
+static void resync_activity_fetch_state(AppState *state) {
+    cancel_activity_fetch_timeout(state);
+    state->activity_fetch_inflight = FALSE;
+    state->activity_past_requested = FALSE;
+    memset(state->activity_fetch_current_id, 0, sizeof(state->activity_fetch_current_id));
+    if (state->activity_fetch_seen != NULL) {
+        g_hash_table_remove_all(state->activity_fetch_seen);
+    }
+    miwear_log_fetch_transition(state, "resync-pause", NULL);
 }
 
 static gchar *activity_file_id_key(const uint8_t *id7);
@@ -1025,17 +1113,178 @@ static void probe_sleep_file_ids_if_needed(AppState *state,
     }
 
     if (probe->len >= 7) {
-        gchar *line = g_strdup_printf("Sleep probe: queued %u candidate file ID(s) for fetch.",
-                                      (unsigned)(probe->len / 7u));
+        gchar *line = g_strdup_printf(
+            "Sleep probe: %u candidate ID(s) skipped (not queued — avoids blocking stress/activity fetch).",
+            (unsigned)(probe->len / 7u));
         append_log(state, line);
         g_free(line);
-        enqueue_activity_file_ids(state, probe->data, probe->len);
     } else {
         append_log(state, "Sleep probe: no candidate IDs generated.");
     }
 
     g_byte_array_unref(probe);
     g_hash_table_unref(seen);
+}
+
+static void probe_manual_file_ids_if_needed(AppState *state,
+                                            const uint8_t *listed_ids,
+                                            size_t listed_len,
+                                            guint n_manual) {
+    if (state == NULL || state->manual_stress_probe_done || n_manual > 0 || listed_ids == NULL ||
+        listed_len < 7) {
+        return;
+    }
+
+    uint32_t day_ts = 0;
+    int8_t tz = 8;
+    for (size_t off = 0; off + 7 <= listed_len; off += 7) {
+        const uint8_t flags = listed_ids[off + 6];
+        const int type = (flags >> 7) & 1;
+        const int subtype = (flags & 127) >> 2;
+        const int detail = flags & 3;
+        if (type == 0 && subtype == 0 && detail == 1) {
+            day_ts = miwear_read_u32_le(listed_ids + off);
+            tz = (int8_t)listed_ids[off + 4];
+            break;
+        }
+    }
+    if (day_ts == 0) {
+        return;
+    }
+
+    state->manual_stress_probe_done = TRUE;
+    append_log(state,
+               "Manual stress: band did not list MANUAL_SAMPLES yet — will fetch when a later today-ID "
+               "response includes subtype 6 (auto follow-up / resync).");
+}
+
+static void remove_file_id_from_fetch_queue(AppState *state, const uint8_t *id7) {
+    if (state == NULL || state->activity_fetch_queue == NULL || id7 == NULL) {
+        return;
+    }
+    GQueue *kept = g_queue_new();
+    while (!g_queue_is_empty(state->activity_fetch_queue)) {
+        uint8_t *item = g_queue_pop_head(state->activity_fetch_queue);
+        if (item != NULL && memcmp(item, id7, 7) == 0) {
+            g_free(item);
+        } else if (item != NULL) {
+            g_queue_push_tail(kept, item);
+        }
+    }
+    g_queue_free(state->activity_fetch_queue);
+    state->activity_fetch_queue = kept;
+}
+
+static void purge_sleep_probe_ids_from_fetch_queue(AppState *state) {
+    if (state == NULL || state->activity_fetch_queue == NULL) {
+        return;
+    }
+    GQueue *kept = g_queue_new();
+    guint removed = 0;
+    while (!g_queue_is_empty(state->activity_fetch_queue)) {
+        uint8_t *item = g_queue_pop_head(state->activity_fetch_queue);
+        if (item == NULL) {
+            continue;
+        }
+        const int subtype = activity_file_id_subtype(item);
+        if (activity_file_id_is_sleep_probe(subtype)) {
+            gchar *key = activity_file_id_key(item);
+            if (state->activity_fetch_seen != NULL) {
+                g_hash_table_remove(state->activity_fetch_seen, key);
+            }
+            g_free(key);
+            g_free(item);
+            removed++;
+        } else {
+            g_queue_push_tail(kept, item);
+        }
+    }
+    g_queue_free(state->activity_fetch_queue);
+    state->activity_fetch_queue = kept;
+    if (removed > 0) {
+        gchar *line = g_strdup_printf("Fetch queue: dropped %u sleep probe ID(s) to prioritize health data.",
+                                      removed);
+        append_log(state, line);
+        g_free(line);
+    }
+}
+
+static void abort_inflight_sleep_probe_fetch(AppState *state) {
+    if (state == NULL || !state->activity_fetch_inflight) {
+        return;
+    }
+    const int subtype = activity_file_id_subtype(state->activity_fetch_current_id);
+    if (!activity_file_id_is_sleep_probe(subtype)) {
+        return;
+    }
+    gchar *key = activity_file_id_key(state->activity_fetch_current_id);
+    if (state->activity_fetch_seen != NULL) {
+        g_hash_table_remove(state->activity_fetch_seen, key);
+    }
+    g_free(key);
+    cancel_activity_fetch_timeout(state);
+    state->activity_fetch_inflight = FALSE;
+    memset(state->activity_fetch_current_id, 0, sizeof(state->activity_fetch_current_id));
+    append_log(state, "Fetch queue: cancelled in-flight sleep probe to prioritize MANUAL_SAMPLES.");
+}
+
+static gboolean manual_file_id_equal(const uint8_t *a, const uint8_t *b) {
+    return a != NULL && b != NULL && memcmp(a, b, 7) == 0;
+}
+
+static void prioritize_advertised_manual_samples(AppState *state, const uint8_t *ids, size_t len) {
+    if (state == NULL || ids == NULL || len < 7) {
+        return;
+    }
+
+    const uint8_t *manual_id = NULL;
+    for (size_t off = 0; off + 7 <= len; off += 7) {
+        if (activity_file_id_subtype(ids + off) == 6) {
+            manual_id = ids + off;
+            break;
+        }
+    }
+    if (manual_id == NULL) {
+        return;
+    }
+
+    if (state->manual_listed_file_id_valid && manual_file_id_equal(state->manual_listed_file_id, manual_id)) {
+        if (state->activity_fetch_inflight && manual_file_id_equal(state->activity_fetch_current_id, manual_id)) {
+            return;
+        }
+        if (state->activity_fetch_queue != NULL && !g_queue_is_empty(state->activity_fetch_queue)) {
+            const uint8_t *head = g_queue_peek_head(state->activity_fetch_queue);
+            if (head != NULL && manual_file_id_equal(head, manual_id)) {
+                return;
+            }
+        }
+    }
+
+    memcpy(state->manual_listed_file_id, manual_id, 7);
+    state->manual_listed_file_id_valid = TRUE;
+
+    purge_sleep_probe_ids_from_fetch_queue(state);
+    abort_inflight_sleep_probe_fetch(state);
+
+    if (state->activity_fetch_queue == NULL) {
+        state->activity_fetch_queue = g_queue_new();
+    }
+    if (state->activity_fetch_seen == NULL) {
+        state->activity_fetch_seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    }
+
+    gchar *key = activity_file_id_key(manual_id);
+    g_hash_table_remove(state->activity_fetch_seen, key);
+    remove_file_id_from_fetch_queue(state, manual_id);
+    g_hash_table_add(state->activity_fetch_seen, key);
+    g_queue_push_head(state->activity_fetch_queue, g_memdup2(manual_id, 7));
+
+    gchar *id_txt = activity_file_id_key(manual_id);
+    gchar *line = g_strdup_printf("Band advertised MANUAL_SAMPLES — prioritized fetch for %s.", id_txt);
+    append_log(state, line);
+    g_free(line);
+    g_free(id_txt);
+    trigger_next_activity_fetch(state);
 }
 
 static void enqueue_activity_file_ids(AppState *state, const uint8_t *ids, size_t len) {
@@ -1086,6 +1335,20 @@ void trigger_next_activity_fetch(AppState *state) {
     if (next_id == NULL) {
         return;
     }
+
+    const int fetch_subtype = activity_file_id_subtype(next_id);
+    const int fetch_detail = next_id[6] & 3;
+    const char *fetch_name = activity_subtype_name(0, fetch_subtype >= 0 ? fetch_subtype : 0);
+    gchar *id_txt = activity_file_id_key(next_id);
+    gchar *line = g_strdup_printf("Fetching activity file %s (subtype=%d/%s detail=%d ver=%u) …",
+                                  id_txt,
+                                  fetch_subtype,
+                                  fetch_name != NULL ? fetch_name : "?",
+                                  fetch_detail,
+                                  (unsigned)next_id[5]);
+    append_log(state, line);
+    g_free(line);
+    g_free(id_txt);
 
     if (send_activity_fetch_request(state, next_id, 7)) {
         state->activity_fetch_inflight = TRUE;
@@ -1594,7 +1857,10 @@ void miwear_wire_begin_file_sync(AppState *state, const char *today_label) {
 }
 
 void miwear_wire_resync_file_lists(AppState *state, const char *today_label) {
-    reset_activity_fetch_state(state);
+    resync_activity_fetch_state(state);
+    state->manual_stress_probe_done = FALSE;
+    state->manual_listed_file_id_valid = FALSE;
+    memset(state->manual_listed_file_id, 0, sizeof(state->manual_listed_file_id));
     send_activity_fetch_today_channels(state, today_label != NULL ? today_label : "Today file IDs");
     send_activity_fetch_past_channels(state, "History file IDs");
     state->activity_refetch_round = 0;
@@ -1604,6 +1870,7 @@ void miwear_wire_resync_file_lists(AppState *state, const char *today_label) {
     }
     state->activity_refetch_source_id = g_timeout_add_seconds(6, auto_history_followup_cb, state);
     start_activity_live_poll(state);
+    trigger_next_activity_fetch(state);
 }
 
 static void handle_command_payload(AppState *state, const uint8_t *payload, size_t len) {
@@ -2067,6 +2334,9 @@ gpointer connect_worker_main(gpointer user_data) {
     state->protocol_version = 0;
     state->spp_v2_seq = 0;
     state->sleep_hint_logged = FALSE;
+    state->manual_stress_probe_done = FALSE;
+    state->manual_listed_file_id_valid = FALSE;
+    memset(state->manual_listed_file_id, 0, sizeof(state->manual_listed_file_id));
     reset_activity_fetch_state(state);
     if (state->activity_chunk_accumulator != NULL) {
         g_byte_array_set_size(state->activity_chunk_accumulator, 0);

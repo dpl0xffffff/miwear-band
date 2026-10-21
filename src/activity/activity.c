@@ -1,4 +1,5 @@
 #include "miwear/app.h"
+#include "miwear/ui/dashboard.h"
 #include "miwear/ui/health_data.h"
 #include "miwear/activity/mi_fitness_full_day_sleep.h"
 #include "miwear/activity/manual.h"
@@ -569,8 +570,9 @@ static void parse_daily_details_for_log(AppState *state,
 
         if (xiaomi_complex_next_group(&p, 8, payload, payload_end, &cursor) && xiaomi_complex_has(&p, 0)) {
             const uint32_t hr = xiaomi_complex_get(&p, 0, 8);
-            sample.heart_rate = (int)hr;
-            if (hr > 0u && hr < 240u) {
+            /* v4 detail chunks often mis-decode non-HR bytes (e.g. 228) when layout drifts. */
+            if (hr > 0u && hr <= 220u) {
+                sample.heart_rate = (int)hr;
                 hr_count++;
                 hr_sum += hr;
                 if (hr < hr_min) hr_min = hr;
@@ -595,6 +597,15 @@ static void parse_daily_details_for_log(AppState *state,
                 const int st = (int)xiaomi_complex_get(&p, 0, 8);
                 /* DailyDetailsParser: if (stress != 255) sample.setStress(stress); */
                 sample.stress = (st != 255) ? st : -1;
+                if (miwear_stress_value_valid(sample.stress)) {
+                    gchar *stline = g_strdup_printf(
+                        "Daily detail stress: file_ts=%u row=%u value=%d",
+                        ts,
+                        (unsigned)minutes,
+                        sample.stress);
+                    append_log(state, stline);
+                    g_free(stline);
+                }
             }
         }
         if (include_extra_entry == 1) {
@@ -691,6 +702,36 @@ static void parse_daily_details_for_log(AppState *state,
                                                     (const MiwearXiaomiActivityRow *)act_rows->data,
                                                     act_rows->len);
                 (void)miwear_db_replace_xiaomi_activity_batch((const MiwearXiaomiActivityRow *)act_rows->data, act_rows->len);
+                int latest_stress = -1;
+                int32_t latest_stress_ts = 0;
+                for (guint ri = 0; ri < act_rows->len; ri++) {
+                    const MiwearXiaomiActivityRow *row = &g_array_index(act_rows, MiwearXiaomiActivityRow, ri);
+                    if (miwear_stress_value_valid(row->stress) && row->timestamp_sec >= latest_stress_ts) {
+                        latest_stress_ts = row->timestamp_sec;
+                        latest_stress = row->stress;
+                    }
+                }
+                if (latest_stress >= 0) {
+                    state->live_stress_ts_sec = latest_stress_ts;
+                    gchar *stress_txt = g_strdup_printf("%d", latest_stress);
+                    schedule_metrics_update(state,
+                                            FALSE,
+                                            0,
+                                            FALSE,
+                                            0,
+                                            FALSE,
+                                            0,
+                                            FALSE,
+                                            0,
+                                            FALSE,
+                                            0,
+                                            FALSE,
+                                            0,
+                                            NULL,
+                                            stress_txt);
+                    g_free(stress_txt);
+                    miwear_dashboard_refresh(state);
+                }
                 g_array_unref(act_rows);
                 g_date_time_unref(start_min);
             }
@@ -768,9 +809,20 @@ static void parse_daily_summary_for_log(AppState *state,
     gchar *hr_max_txt = fmt_unix_ts(hr_max_ts);
     gchar *hr_min_txt = fmt_unix_ts(hr_min_ts);
     const guint standing_metric = miwear_standing_display_value((int)standing_bits);
-    gchar *line = g_strdup_printf("Daily summary %s: steps=%u calories=%u HR(rest/avg/min/max)=%u/%u/%u/%u stress=%u/%u/%u standing=%u",
-                                  ts_txt, steps, calories, hr_rest, hr_avg, hr_min, hr_max, stress_avg, stress_max, stress_min,
-                                  standing_metric);
+    gchar *line = g_strdup_printf(
+        "Daily summary %s: steps=%u calories=%u HR(rest/avg/min/max)=%u/%u/%u/%u "
+        "stress avg/min/max=%u/%u/%u (day aggregate, not last manual reading) standing=%u",
+        ts_txt,
+        steps,
+        calories,
+        hr_rest,
+        hr_avg,
+        hr_min,
+        hr_max,
+        stress_avg,
+        stress_min,
+        stress_max,
+        standing_metric);
     append_log(state, line);
     g_free(line);
     line = g_strdup_printf("  HR extrema timestamps: min@%s max@%s", hr_min_txt, hr_max_txt);
@@ -913,7 +965,7 @@ static size_t parse_sleep_hr_series(GArray *samples,
         }
         const uint32_t sec = first_sec + (uint32_t)unit_sec * (uint32_t)i;
         RecordedSample s = {0};
-        s.minute_of_day = (uint16_t)((sec / 60u) % 1440u);
+        s.minute_of_day = local_minute_of_day((gint64)sec);
         s.steps = s.active_calories = s.distance_cm = s.energy = s.spo2 = s.stress = s.sleep_stage = -1;
         s.heart_rate = (int)hr;
         s.sleep_source = 1;
@@ -960,6 +1012,10 @@ typedef struct {
     SleepSummaryMinutes *summary_out;
     guint stage_packets;
     long long last_hb_ms;
+    uint32_t bed_sec;
+    uint32_t wake_sec;
+    int64_t stage_stream_ms;
+    gboolean stage_stream_valid;
 } ParseSleepFeatureCtx;
 
 static gboolean parse_sleep_feature_packet(const MiwearSleepPacketView *pkt, void *user_data) {
@@ -1003,27 +1059,42 @@ static gboolean parse_sleep_feature_packet(const MiwearSleepPacketView *pkt, voi
         }
     } else if (type == 17) {
         ctx->stage_packets++;
-        int64_t current_ms = (int64_t)pkt->ts_raw * 1000LL;
-        uint32_t cur_sec = (uint32_t)pkt->ts_raw;
+        int64_t current_ms = miwear_sleep_packet_timestamp_ms(pkt->ts_raw);
+        if (!miwear_sleep_timestamp_plausible(current_ms)) {
+            if (ctx->stage_stream_valid) {
+                current_ms = ctx->stage_stream_ms;
+            } else if (ctx->bed_sec > 0) {
+                current_ms = (int64_t)ctx->bed_sec * 1000LL;
+            } else {
+                current_ms = 0;
+            }
+        }
         for (uint16_t i = 0; i + 1 < data_len; i += 2) {
             const uint16_t val = ((uint16_t)d[i] << 8) | d[i + 1];
             const int stage = miwear_normalize_sleep_stage((val >> 12) & 0x0F);
-            const int offset_min = val & 0x0FFF;
-            if (offset_min <= 0 || offset_min > 720) {
+            int offset_min = (int)(val & 0x0FFF);
+            if (offset_min < 0 || offset_min > 720) {
                 continue;
+            }
+            if (offset_min == 0) {
+                offset_min = 1;
+            }
+            if (current_ms <= 0 && ctx->bed_sec > 0) {
+                current_ms = (int64_t)ctx->bed_sec * 1000LL;
             }
             MiwearSleepStageRow gr = {current_ms, stage};
             g_array_append_val(ctx->stage_rows, gr);
-            current_ms += (int64_t)offset_min * 60000LL;
             for (int m = 0; m < offset_min; m++) {
                 RecordedSample s = {0};
-                s.minute_of_day = (uint16_t)(((cur_sec / 60u) + (uint32_t)m) % 1440u);
+                s.minute_of_day = local_minute_of_day(current_ms / 1000LL + (gint64)m * 60LL);
                 s.steps = s.active_calories = s.distance_cm = s.energy = s.heart_rate = s.spo2 = s.stress = -1;
                 s.sleep_stage = stage;
                 s.sleep_source = 1;
                 g_array_append_val(ctx->samples, s);
             }
-            cur_sec += (uint32_t)offset_min * 60u;
+            current_ms += (int64_t)offset_min * 60000LL;
+            ctx->stage_stream_ms = current_ms;
+            ctx->stage_stream_valid = TRUE;
         }
     } else if (type == 16 && data_len >= 11 && ctx->summary_out != NULL) {
         ctx->stage_packets++;
@@ -1045,6 +1116,8 @@ static gboolean parse_sleep_feature_packet(const MiwearSleepPacketView *pkt, voi
 static guint parse_sleep_feature_data(const uint8_t *payload,
                                       size_t end,
                                       size_t pos,
+                                      uint32_t bed_sec,
+                                      uint32_t wake_sec,
                                       GArray *samples,
                                       GArray *stage_rows,
                                       GArray *pulse_rows,
@@ -1059,6 +1132,10 @@ static guint parse_sleep_feature_data(const uint8_t *payload,
         .summary_out = summary_out,
         .stage_packets = 0,
         .last_hb_ms = 0,
+        .bed_sec = bed_sec,
+        .wake_sec = wake_sec,
+        .stage_stream_ms = 0,
+        .stage_stream_valid = FALSE,
     };
     (void)miwear_sleep_foreach_packet(payload + pos, end - pos, parse_sleep_feature_packet, &ctx);
     return ctx.stage_packets;
@@ -1219,7 +1296,8 @@ static void finalize_sleep_parse(AppState *state,
     } else {
         append_log(state, "Sleep stages: no hypnogram packets in featureData (check advanced sleep tracking).");
     }
-    if (stage_rows->len > 0 || (summary != NULL && summary->valid)) {
+    if (stage_rows->len > 0 || (summary != NULL && summary->valid) ||
+        (bed_time != 0 && wake_time != 0 && wake_time > bed_time)) {
         schedule_recorded_rebuild(state);
     }
     g_free(bed_txt);
@@ -1320,9 +1398,22 @@ static void parse_full_day_sleep_report(AppState *state,
         }
     }
 
-    const size_t feature_len = off < crc_end ? crc_end - off : 0;
+    const size_t feature_off = miwear_full_day_sleep_structured_end(payload, payload_len, version);
+    const size_t feature_len =
+        feature_off > 0 && feature_off < crc_end ? crc_end - feature_off : 0;
     SleepSummaryMinutes summary = {0};
-    const guint stage_packets = 0;
+    guint stage_packets = 0;
+    if (feature_len > 0) {
+        stage_packets = parse_sleep_feature_data(payload,
+                                                 crc_end,
+                                                 feature_off,
+                                                 bed_time,
+                                                 wake_time,
+                                                 samples,
+                                                 stage_rows,
+                                                 pulse_rows,
+                                                 &summary);
+    }
 
     finalize_sleep_parse(state,
                          ts,
@@ -1444,8 +1535,15 @@ static void parse_sleep_details_for_log(AppState *state,
     const size_t crc_end = payload_len >= 4 ? payload_len - 4 : payload_len;
     const size_t feature_len = off < crc_end ? crc_end - off : 0;
     SleepSummaryMinutes summary = {0};
-    const guint stage_packets =
-        parse_sleep_feature_data(payload, crc_end, off, samples, stage_rows, pulse_rows, &summary);
+    const guint stage_packets = parse_sleep_feature_data(payload,
+                                                         crc_end,
+                                                         off,
+                                                         bed_time,
+                                                         wake_time,
+                                                         samples,
+                                                         stage_rows,
+                                                         pulse_rows,
+                                                         &summary);
 
     finalize_sleep_parse(state,
                          ts,
@@ -1549,8 +1647,14 @@ void handle_activity_payload(AppState *state, const uint8_t *payload, size_t pay
         parse_sleep_details_for_log(state, ts, version, payload, payload_len);
         mi_fitness_apply_health_payload(state, ts, tz, subtype, detail, version, payload, payload_len);
     } else if (type == 0 && subtype == 6) {
+        miwear_manual_entries_reset();
         miwear_apply_manual_samples(state, ts, payload, payload_len);
         mi_fitness_apply_health_payload(state, ts, tz, subtype, detail, version, payload, payload_len);
+        if (version >= 2 && miwear_manual_entries_committed() == 0) {
+            append_log(state,
+                       "Manual samples (v2): no stress/SpO₂/HR extracted — not acking so the band can retry.");
+            ack_allowed = FALSE;
+        }
     } else if (type == 0 && (subtype == 9 || subtype == 10 || subtype == 11 || subtype == 12)) {
         mi_fitness_apply_health_payload(state, ts, tz, subtype, detail, version, payload, payload_len);
     } else if (type == 0) {

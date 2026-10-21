@@ -114,6 +114,12 @@ typedef gboolean (*MiwearDbSleepTimeRowFn)(const MiwearSleepTimeRow *row, gpoint
 typedef gboolean (*MiwearDbDailySummaryRowFn)(const MiwearDailySummaryRow *row, gpointer user_data);
 
 gboolean miwear_db_foreach_xiaomi_activity(MiwearDbActivityRowFn fn, gpointer user_data);
+
+/* Latest manual/minute stress sample on device for [start_sec, end_sec] (unix, inclusive). */
+gboolean miwear_db_latest_stress_in_range(int32_t start_sec,
+                                        int32_t end_sec,
+                                        int *stress_out,
+                                        int32_t *timestamp_sec_out);
 gboolean miwear_db_foreach_sleep_stage(MiwearDbSleepStageRowFn fn, gpointer user_data);
 gboolean miwear_db_foreach_sleep_time(MiwearDbSleepTimeRowFn fn, gpointer user_data);
 gboolean miwear_db_foreach_daily_summary(MiwearDbDailySummaryRowFn fn, gpointer user_data);

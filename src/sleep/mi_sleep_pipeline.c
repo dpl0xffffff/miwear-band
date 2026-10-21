@@ -24,12 +24,6 @@ size_t mi_sleep_build_hr_epoch_features(const uint8_t *sleep_src,
                                         float *features_out,
                                         size_t max_epochs);
 
-gboolean mi_sleep_try_embedded_stage_packets(const uint8_t *sleep_src,
-                                             size_t sleep_src_len,
-                                             MiwearSleepStageRow **rows_out,
-                                             size_t *count_out,
-                                             MiwearSleepStageDurations *durations_out);
-
 void miwear_sleep_algo_result_clear(MiwearSleepAlgoResult *result) {
     if (result == NULL) {
         return;
@@ -154,7 +148,13 @@ gboolean miwear_sleep_run_mi_fitness_algo(const uint8_t *sleep_src,
     MiwearSleepStageDurations embedded_d = {0};
     MiwearSleepStageRow *embedded_rows = NULL;
     size_t embedded_n = 0;
-    if (mi_sleep_try_embedded_stage_packets(sleep_src, sleep_src_len, &embedded_rows, &embedded_n, &embedded_d)) {
+    if (mi_sleep_try_embedded_stage_packets(sleep_src,
+                                            sleep_src_len,
+                                            bed_sec,
+                                            wake_sec,
+                                            &embedded_rows,
+                                            &embedded_n,
+                                            &embedded_d)) {
         result_out->stage_rows = embedded_rows;
         result_out->stage_count = embedded_n;
         result_out->durations = embedded_d;

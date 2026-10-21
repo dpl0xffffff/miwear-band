@@ -58,6 +58,7 @@ struct MiwearDashboardUi {
     GtkWidget *find_phone_status;
     GtkWidget *nav_icons[4];
     guint nav_icon_count;
+    GtkWidget *bottom_nav;
     double ui_scale;
     gboolean ui_scale_ready;
 };
@@ -66,6 +67,18 @@ static GtkCssProvider *g_dashboard_css_provider;
 
 static int ui_px(double base, double scale) {
     return (int)(base * scale + 0.5);
+}
+
+static int dashboard_nav_bar_height_px(double scale) {
+    return ui_px(68.0, scale);
+}
+
+static int dashboard_nav_icon_px(double scale) {
+    const int bar_h = dashboard_nav_bar_height_px(scale);
+    const int vertical_pad = ui_px(12.0, scale);
+    const int max_for_bar = bar_h - vertical_pad;
+    const int scaled = ui_px(34.0, scale);
+    return CLAMP(scaled, 24, max_for_bar > 24 ? max_for_bar : scaled);
 }
 
 static double viewport_ui_scale(int width, int height) {
@@ -107,8 +120,6 @@ static void dashboard_css_load(double scale) {
         "  background-color: @window_bg_color;"
         "}"
         ".mi-nav-btn { border-radius: %dpx; padding: %dpx %dpx; }"
-        ".mi-nav-btn label { font-size: %dpx; opacity: 0.82; }"
-        ".mi-nav-btn:checked label { opacity: 1; font-weight: 600; }"
         ".mi-nav-btn:checked { background: alpha(currentColor, 0.1); }",
         ui_px(13.0, scale),
         ui_px(16.0, scale),
@@ -122,14 +133,13 @@ static void dashboard_css_load(double scale) {
         ui_px(4.0, scale),
         ui_px(10.0, scale),
         ui_px(11.0, scale),
-        ui_px(68.0, scale),
+        dashboard_nav_bar_height_px(scale),
         ui_px(8.0, scale),
         ui_px(10.0, scale),
         ui_px(12.0, scale),
         ui_px(12.0, scale),
         ui_px(6.0, scale),
-        ui_px(4.0, scale),
-        ui_px(11.5, scale));
+        ui_px(4.0, scale));
 
     gtk_css_provider_load_from_string(g_dashboard_css_provider, css->str);
     g_string_free(css, TRUE);
@@ -163,10 +173,14 @@ static void miwear_dashboard_apply_ui_scale(MiwearDashboardUi *dash, double scal
         gtk_widget_set_size_request(dash->sleep_hypnogram, -1, ui_px(220.0, scale));
         gtk_widget_queue_draw(dash->sleep_hypnogram);
     }
+    const int nav_icon_px = dashboard_nav_icon_px(scale);
     for (guint i = 0; i < dash->nav_icon_count; i++) {
         if (dash->nav_icons[i] != NULL) {
-            gtk_image_set_pixel_size(GTK_IMAGE(dash->nav_icons[i]), ui_px(22.0, scale));
+            gtk_image_set_pixel_size(GTK_IMAGE(dash->nav_icons[i]), nav_icon_px);
         }
+    }
+    if (dash->bottom_nav != NULL) {
+        gtk_widget_set_size_request(dash->bottom_nav, -1, dashboard_nav_bar_height_px(scale));
     }
 }
 
@@ -383,24 +397,26 @@ static GtkWidget *make_bottom_nav_button(MiwearDashboardUi *dash,
     GtkWidget *btn = gtk_toggle_button_new();
     gtk_widget_add_css_class(btn, "mi-nav-btn");
     gtk_widget_set_hexpand(btn, TRUE);
+    gtk_widget_set_vexpand(btn, FALSE);
+    gtk_widget_set_valign(btn, GTK_ALIGN_FILL);
+    gtk_widget_set_tooltip_text(btn, title);
     if (group != NULL) {
         gtk_toggle_button_set_group(GTK_TOGGLE_BUTTON(btn), group);
     }
 
-    GtkWidget *col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
     GtkWidget *icon = gtk_image_new_from_file(path);
     g_free(path);
-    const double icon_scale = dash != NULL && dash->ui_scale > 0.0 ? dash->ui_scale : 1.0;
-    gtk_image_set_pixel_size(GTK_IMAGE(icon), ui_px(22.0, icon_scale));
+    const double icon_scale =
+        dash != NULL && dash->ui_scale_ready && dash->ui_scale > 0.0 ? dash->ui_scale : 1.0;
+    gtk_image_set_pixel_size(GTK_IMAGE(icon), dashboard_nav_icon_px(icon_scale));
     if (dash != NULL && dash->nav_icon_count < G_N_ELEMENTS(dash->nav_icons)) {
         dash->nav_icons[dash->nav_icon_count++] = icon;
     }
-    GtkWidget *label = gtk_label_new(title);
-    gtk_label_set_xalign(GTK_LABEL(label), 0.5f);
-    gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
-    gtk_box_append(GTK_BOX(col), icon);
-    gtk_box_append(GTK_BOX(col), label);
-    gtk_button_set_child(GTK_BUTTON(btn), col);
+    GtkWidget *center = gtk_center_box_new();
+    gtk_widget_set_hexpand(center, TRUE);
+    gtk_widget_set_halign(center, GTK_ALIGN_FILL);
+    gtk_center_box_set_center_widget(GTK_CENTER_BOX(center), icon);
+    gtk_button_set_child(GTK_BUTTON(btn), center);
 
     BottomNavCtx *ctx = g_new(BottomNavCtx, 1);
     ctx->stack = stack;
@@ -636,6 +652,7 @@ void miwear_dashboard_refresh(AppState *state) {
     gtk_label_set_text(GTK_LABEL(dash->date_label), pretty);
     g_free(pretty);
     sync_selected_recorded_day(state, day_key);
+    miwear_refresh_activity_minutes_for_day(state, day_key);
 
     MiwearDayHealthAgg agg;
     miwear_health_aggregate_day(state, day_key, &agg);
@@ -723,28 +740,40 @@ void miwear_dashboard_refresh(AppState *state) {
     } else {
         card_set_metric(dash->card_spo2, "—", "SpO₂", -1.0);
     }
-    if (state->live_stress_text != NULL && state->live_stress_text[0] != '\0') {
-        const int live_p = atoi(state->live_stress_text);
-        gchar *sub = g_strdup_printf("Live · %s", miwear_pressure_level_label(live_p));
-        card_set_metric(dash->card_stress, state->live_stress_text, sub,
-                        metric_ratio(GOAL_SPO2 - live_p, GOAL_SPO2));
-        g_free(sub);
-    } else if (agg.stress_n > 0) {
-        const int avg_p = agg.stress_sum / agg.stress_n;
-        g_snprintf(buf, sizeof(buf), "%d", avg_p);
-        gchar *sub = g_strdup_printf("Daily avg · %s", miwear_pressure_level_label(avg_p));
-        card_set_metric(dash->card_stress, buf, sub, metric_ratio(GOAL_SPO2 - avg_p, GOAL_SPO2));
-        g_free(sub);
-    } else if (state->health_summary_valid &&
-               miwear_stress_value_valid(state->health_summary_cache.stress_avg)) {
-        g_snprintf(buf, sizeof(buf), "%d", state->health_summary_cache.stress_avg);
-        gchar *sub = g_strdup_printf("Daily avg · %s",
-                                     miwear_pressure_level_label(state->health_summary_cache.stress_avg));
-        card_set_metric(dash->card_stress, buf, sub,
-                        metric_ratio(GOAL_SPO2 - state->health_summary_cache.stress_avg, GOAL_SPO2));
-        g_free(sub);
-    } else {
-        card_set_metric(dash->card_stress, "—", "Measure on band, then sync", -1.0);
+    {
+        int stress_val = -1;
+        const char *stress_src = NULL;
+        if (live_tiles) {
+            stress_val = miwear_display_stress_for_day(state, day_key, &stress_src);
+        }
+        if (stress_val >= 0 &&
+            stress_src != NULL &&
+            (g_strcmp0(stress_src, "live-cache") == 0 || g_strcmp0(stress_src, "activity-db") == 0 ||
+             g_strcmp0(stress_src, "timeline-minute") == 0)) {
+            g_snprintf(buf, sizeof(buf), "%d", stress_val);
+            const char *tag = g_strcmp0(stress_src, "timeline-minute") == 0 ? "Latest synced"
+                                                                            : "Live";
+            gchar *sub = g_strdup_printf("%s · %s", tag, miwear_pressure_level_label(stress_val));
+            card_set_metric(dash->card_stress, buf, sub,
+                            metric_ratio(GOAL_SPO2 - stress_val, GOAL_SPO2));
+            g_free(sub);
+        } else if (agg.stress_n > 0) {
+            const int avg_p = agg.stress_sum / agg.stress_n;
+            g_snprintf(buf, sizeof(buf), "%d", avg_p);
+            gchar *sub = g_strdup_printf("Daily avg · %s", miwear_pressure_level_label(avg_p));
+            card_set_metric(dash->card_stress, buf, sub, metric_ratio(GOAL_SPO2 - avg_p, GOAL_SPO2));
+            g_free(sub);
+        } else if (state->health_summary_valid &&
+                   miwear_stress_value_valid(state->health_summary_cache.stress_avg)) {
+            g_snprintf(buf, sizeof(buf), "%d", state->health_summary_cache.stress_avg);
+            gchar *sub = g_strdup_printf("Daily avg · %s",
+                                           miwear_pressure_level_label(state->health_summary_cache.stress_avg));
+            card_set_metric(dash->card_stress, buf, sub,
+                            metric_ratio(GOAL_SPO2 - state->health_summary_cache.stress_avg, GOAL_SPO2));
+            g_free(sub);
+        } else {
+            card_set_metric(dash->card_stress, "—", "Measure on band, then sync", -1.0);
+        }
     }
 
     const int sleep_min = miwear_health_sleep_total_minutes(&agg);
@@ -755,7 +784,7 @@ void miwear_dashboard_refresh(AppState *state) {
             sub = g_strdup_printf("Deep %d · Light %d · REM %d · Awake %d",
                                   agg.sleep_deep, agg.sleep_light, agg.sleep_rem, agg.sleep_awake);
         } else {
-            sub = g_strdup("Time in bed — stage detail not in database yet");
+            sub = g_strdup("Last night");
         }
         card_set_metric(dash->card_sleep, buf, sub, metric_ratio(sleep_min, GOAL_SLEEP_MIN));
         g_free(sub);
@@ -764,7 +793,7 @@ void miwear_dashboard_refresh(AppState *state) {
                        "Deep %d min · Light %d min · REM %d min · Awake %d min",
                        agg.sleep_deep, agg.sleep_light, agg.sleep_rem, agg.sleep_awake);
         } else {
-            g_snprintf(buf, sizeof(buf), "%d min total (bed/wake). Re-sync sleep stage files for breakdown.", sleep_min);
+            g_snprintf(buf, sizeof(buf), "%dh %dm", sleep_min / 60, sleep_min % 60);
         }
         gtk_label_set_text(GTK_LABEL(dash->sleep_stats), buf);
     } else {
@@ -775,19 +804,11 @@ void miwear_dashboard_refresh(AppState *state) {
     {
         const guint activity_goal =
             state->goal_moving > 0 ? state->goal_moving : miwear_activity_goal_default();
-        guint activity_min = 0;
-        gboolean has_activity = FALSE;
-        if (state->has_live_moving && state->live_moving <= 180) {
-            activity_min = state->live_moving;
-            has_activity = TRUE;
-        } else if (state->has_activity_minutes_today && state->activity_minutes_today <= 180) {
-            activity_min = state->activity_minutes_today;
-            has_activity = TRUE;
-        }
-        if (has_activity) {
+        const guint activity_min =
+            miwear_display_activity_minutes(state, day_key, live_tiles);
+        if (activity_min > 0) {
             miwear_format_activity_minutes(activity_min, activity_goal, buf, sizeof(buf));
-            card_set_metric(dash->card_standing, buf, state->has_live_moving ? "Live" : "From synced minutes",
-                            metric_ratio(activity_min, activity_goal));
+            card_set_metric(dash->card_standing, buf, "Live", metric_ratio(activity_min, activity_goal));
         } else {
             card_set_metric(dash->card_standing, "—", "Activity time (Moving goal)", -1.0);
         }
@@ -1062,7 +1083,7 @@ static void draw_sleep_hypnogram(GtkDrawingArea *area, cairo_t *cr, int width, i
         }
     }
 
-    if (first == G_MAXUINT || last <= first) {
+    if (first == G_MAXUINT || last < first) {
         g_mutex_unlock(&state->recorded_lock);
         g_free(day_key);
         cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
@@ -1173,11 +1194,15 @@ void miwear_dashboard_update_live(AppState *state,
         g_snprintf(buf, sizeof(buf), "%u kcal", calories);
         card_set_metric(dash->card_calories, buf, "Live", metric_ratio(calories, GOAL_CALORIES));
     }
-    if (has_moving && moving <= 180) {
+    if (state->has_live_moving) {
         const guint activity_goal =
             state->goal_moving > 0 ? state->goal_moving : miwear_activity_goal_default();
-        miwear_format_activity_minutes(moving, activity_goal, buf, sizeof(buf));
-        card_set_metric(dash->card_standing, buf, "Live", metric_ratio(moving, activity_goal));
+        GDate *vd = current_view_date(state);
+        gchar *day_key = format_day_key(vd);
+        const guint activity_min = miwear_display_activity_minutes(state, day_key, TRUE);
+        g_free(day_key);
+        miwear_format_activity_minutes(activity_min, activity_goal, buf, sizeof(buf));
+        card_set_metric(dash->card_standing, buf, "Live", metric_ratio(activity_min, activity_goal));
     } else if (has_standing) {
         miwear_format_standing_value(standing, buf, sizeof(buf));
         card_set(dash->card_standing, buf, "Standing hours");
@@ -1186,11 +1211,32 @@ void miwear_dashboard_update_live(AppState *state,
         const int spo2_live = atoi(spo2_text);
         card_set_metric(dash->card_spo2, spo2_text, "SpO₂", metric_ratio(spo2_live, GOAL_SPO2));
     }
-    if (stress_text != NULL) {
-        const int live_p = atoi(stress_text);
-        gchar *sub = g_strdup_printf("Live · %s", miwear_pressure_level_label(live_p));
-        card_set_metric(dash->card_stress, stress_text, sub, metric_ratio(GOAL_SPO2 - live_p, GOAL_SPO2));
-        g_free(sub);
+    {
+        int stress_val = -1;
+        const char *stress_src = NULL;
+        if (prefer_live_metric_tiles(state)) {
+            GDate *vd = current_view_date(state);
+            gchar *day_key = format_day_key(vd);
+            stress_val = miwear_display_stress_for_day(state, day_key, &stress_src);
+            g_free(day_key);
+        }
+        if (stress_val < 0 && stress_text != NULL && stress_text[0] != '\0') {
+            stress_val = atoi(stress_text);
+            if (!miwear_stress_value_valid(stress_val)) {
+                stress_val = -1;
+            } else {
+                stress_src = "live-cache";
+            }
+        }
+        if (stress_val >= 0) {
+            g_snprintf(buf, sizeof(buf), "%d", stress_val);
+            const char *tag = stress_src != NULL && g_strcmp0(stress_src, "timeline-minute") == 0
+                                  ? "Latest synced"
+                                  : "Live";
+            gchar *sub = g_strdup_printf("%s · %s", tag, miwear_pressure_level_label(stress_val));
+            card_set_metric(dash->card_stress, buf, sub, metric_ratio(GOAL_SPO2 - stress_val, GOAL_SPO2));
+            g_free(sub);
+        }
     }
 }
 
@@ -1345,7 +1391,7 @@ static GtkWidget *build_health_tab(AppState *state, MiwearDashboardUi *dash) {
     dash->card_calories = make_gauge_card("Calories", "—", "Active calories");
     dash->card_hr = make_gauge_card("Heart rate", "—", "");
     dash->card_spo2 = make_gauge_card("SpO₂", "—", "");
-    dash->card_stress = make_gauge_card("Pressure", "—", "Stress score 1–100");
+    dash->card_stress = make_gauge_card("Stress", "—", "Score 1–100");
     dash->card_sleep = make_gauge_card("Sleep", "—", "Last night");
     dash->card_standing = make_gauge_card("Activity time", "—", "min / goal");
     dash->card_vitality = make_gauge_card("Vitality", "—", "Training load");
@@ -1485,6 +1531,7 @@ GtkWidget *miwear_dashboard_build(AppState *state, MiwearDashboardUi *dash) {
 
     GtkWidget *nav = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
     gtk_widget_add_css_class(nav, "mi-bottom-nav");
+    dash->bottom_nav = nav;
     GtkWidget *health_btn = make_bottom_nav_button(dash, stack, NULL, "health", "Health", "tab-health.svg");
     GtkToggleButton *group = GTK_TOGGLE_BUTTON(health_btn);
     gtk_toggle_button_set_active(group, TRUE);

@@ -115,6 +115,9 @@ typedef struct {
     guint activity_live_poll_round;
     gboolean activity_past_requested;
     gboolean sleep_hint_logged;
+    gboolean manual_stress_probe_done;
+    uint8_t manual_listed_file_id[7];
+    gboolean manual_listed_file_id_valid;
     gboolean populate_devices_busy;
     gboolean verbose_wire_log;
     gboolean verbose_fetch_log;
@@ -155,6 +158,7 @@ typedef struct {
     gboolean has_live_hr;
     gchar *live_spo2_text;
     gchar *live_stress_text;
+    int32_t live_stress_ts_sec;
 
     gchar *weather_location_name;
     double weather_latitude;

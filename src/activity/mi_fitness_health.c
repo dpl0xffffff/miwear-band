@@ -2,6 +2,7 @@
 #include "miwear/activity/mi_fitness_sleep_stages.h"
 #include "miwear/activity/mi_fitness_data.h"
 #include "miwear/activity/mi_fitness_oneden.h"
+#include "miwear/activity/manual.h"
 #include "miwear/app.h"
 #include "miwear/db/db.h"
 #include "miwear/ui/health_data.h"
@@ -61,17 +62,11 @@ static void apply_daily_activity_record_schema(AppState *state, JsonNode *decode
     const guint pressure_points = miwear_apply_pressure_from_activity_record_json(state, decoded, ts);
     const guint moderate_min = miwear_count_moderate_activity_minutes_json(decoded);
     if (moderate_min > 0) {
-        state->activity_minutes_today = moderate_min;
-        state->has_activity_minutes_today = TRUE;
-        schedule_metrics_update(
-            state,
-            FALSE, 0,
-            FALSE, 0,
-            FALSE, 0,
-            FALSE, 0,
-            FALSE, 0,
-            TRUE, moderate_min,
-            NULL, NULL);
+        if (!state->has_activity_minutes_today || moderate_min > state->activity_minutes_today) {
+            state->activity_minutes_today = moderate_min;
+            state->has_activity_minutes_today = TRUE;
+        }
+        miwear_dashboard_schedule_refresh(state);
     }
     gchar *line = g_strdup_printf(
         "Daily activity record (schema): moderate+ minutes=%u pressure points=%u",
@@ -300,6 +295,9 @@ void mi_fitness_apply_schema_health(AppState *state,
                 append_log(state, line);
                 g_free(line);
             }
+            break;
+        case 6:
+            miwear_apply_manual_measurement_json(state, ts, decoded);
             break;
         default:
             break;

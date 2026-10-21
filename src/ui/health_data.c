@@ -73,12 +73,22 @@ void miwear_health_aggregate_day(AppState *state, const gchar *day_key, MiwearDa
     if (state->sleep_duration_by_day != NULL) {
         const MiwearSleepDurationSummary *sd = g_hash_table_lookup(state->sleep_duration_by_day, day_key);
         if (sd != NULL && sd->from_db) {
-            out->sleep_deep = sd->deep;
-            out->sleep_light = sd->light;
-            out->sleep_rem = sd->rem;
-            out->sleep_awake = sd->awake;
-            out->sleep_other = 0;
-            out->has_sleep = TRUE;
+            if (sd->total_asleep > 0) {
+                out->sleep_total_band = sd->total_asleep;
+                out->has_sleep = TRUE;
+            }
+            const int db_stages = sd->deep + sd->light + sd->rem + sd->awake;
+            const gboolean total_only_fallback =
+                sd->total_asleep > 0 && sd->deep == 0 && sd->rem == 0 && sd->awake == 0 &&
+                sd->light == sd->total_asleep;
+            if (db_stages > 0 && !total_only_fallback) {
+                out->sleep_deep = sd->deep;
+                out->sleep_light = sd->light;
+                out->sleep_rem = sd->rem;
+                out->sleep_awake = sd->awake;
+                out->sleep_other = 0;
+                out->has_sleep = TRUE;
+            }
         }
     }
     g_mutex_unlock(&state->recorded_lock);
@@ -87,6 +97,14 @@ void miwear_health_aggregate_day(AppState *state, const gchar *day_key, MiwearDa
 int miwear_health_sleep_total_minutes(const MiwearDayHealthAgg *agg) {
     if (agg == NULL || !agg->has_sleep) {
         return 0;
+    }
+    /* Mi Fitness / band “sleep time” = asleep (deep+light+REM), not awake-in-bed minutes. */
+    if (agg->sleep_total_band > 0) {
+        return agg->sleep_total_band;
+    }
+    const int asleep = agg->sleep_deep + agg->sleep_light + agg->sleep_rem + agg->sleep_other;
+    if (asleep > 0) {
+        return asleep;
     }
     return agg->sleep_deep + agg->sleep_light + agg->sleep_rem + agg->sleep_awake + agg->sleep_other;
 }
@@ -97,6 +115,106 @@ gboolean miwear_spo2_value_valid(int spo2) {
 
 gboolean miwear_stress_value_valid(int stress) {
     return stress > 0 && stress < 255;
+}
+
+int miwear_latest_stress_for_day(AppState *state, const gchar *day_key) {
+    if (state == NULL || day_key == NULL) {
+        return -1;
+    }
+    int latest = -1;
+    guint latest_minute = 0;
+    gboolean have = FALSE;
+    g_mutex_lock(&state->recorded_lock);
+    GArray *arr =
+        (state->recorded_days != NULL) ? g_hash_table_lookup(state->recorded_days, day_key) : NULL;
+    if (arr != NULL) {
+        for (guint i = 0; i < arr->len; i++) {
+            const RecordedSample *s = &g_array_index(arr, RecordedSample, i);
+            if (!miwear_stress_value_valid(s->stress)) {
+                continue;
+            }
+            if (!have || s->minute_of_day >= latest_minute) {
+                latest_minute = s->minute_of_day;
+                latest = s->stress;
+                have = TRUE;
+            }
+        }
+    }
+    g_mutex_unlock(&state->recorded_lock);
+    return have ? latest : -1;
+}
+
+static gboolean day_key_unix_range(const gchar *day_key, int32_t *start_out, int32_t *end_out) {
+    if (day_key == NULL || start_out == NULL || end_out == NULL) {
+        return FALSE;
+    }
+    int y = 0, m = 0, d = 0;
+    if (sscanf(day_key, "%d-%d-%d", &y, &m, &d) != 3 || y < 1970) {
+        return FALSE;
+    }
+    GDateTime *start = g_date_time_new_local(y, m, d, 0, 0, 0.0);
+    GDateTime *end = g_date_time_new_local(y, m, d, 23, 59, 59.0);
+    if (start == NULL || end == NULL) {
+        if (start != NULL) {
+            g_date_time_unref(start);
+        }
+        if (end != NULL) {
+            g_date_time_unref(end);
+        }
+        return FALSE;
+    }
+    *start_out = (int32_t)g_date_time_to_unix(start);
+    *end_out = (int32_t)g_date_time_to_unix(end);
+    g_date_time_unref(start);
+    g_date_time_unref(end);
+    return TRUE;
+}
+
+int miwear_display_stress_for_day(AppState *state, const gchar *day_key, const char **source_out) {
+    if (source_out != NULL) {
+        *source_out = NULL;
+    }
+    int32_t day_start = 0;
+    int32_t day_end = 0;
+    const gboolean have_range = day_key_unix_range(day_key, &day_start, &day_end);
+
+    int best = -1;
+    int32_t best_ts = 0;
+    const char *best_src = NULL;
+
+    if (state != NULL && state->live_stress_text != NULL && state->live_stress_text[0] != '\0') {
+        const int live = atoi(state->live_stress_text);
+        if (miwear_stress_value_valid(live)) {
+            const int32_t ts = state->live_stress_ts_sec;
+            if (ts == 0 || (have_range && ts >= day_start && ts <= day_end)) {
+                best = live;
+                best_ts = ts > 0 ? ts : best_ts;
+                best_src = "live-cache";
+            }
+        }
+    }
+
+    if (have_range) {
+        int db_stress = -1;
+        int32_t db_ts = 0;
+        if (miwear_db_latest_stress_in_range(day_start, day_end, &db_stress, &db_ts) &&
+            miwear_stress_value_valid(db_stress) && db_ts >= best_ts) {
+            best = db_stress;
+            best_ts = db_ts;
+            best_src = "activity-db";
+        }
+    }
+
+    const int timeline = miwear_latest_stress_for_day(state, day_key);
+    if (miwear_stress_value_valid(timeline) && best_ts == 0) {
+        best = timeline;
+        best_src = "timeline-minute";
+    }
+
+    if (source_out != NULL) {
+        *source_out = best_src;
+    }
+    return best;
 }
 
 const char *miwear_pressure_level_label(int pressure) {
@@ -220,20 +338,128 @@ guint miwear_activity_goal_default(void) {
     return 30;
 }
 
+/* Band 9/10 RealTimeStats field 3: cumulative activity-time units (not minutes). */
+#define MIWEAR_RT3_ACTIVITY_UNITS_PER_MIN 92u
+
+static guint rt3_units_to_activity_minutes(guint unknown3) {
+    if (unknown3 == 0) {
+        return 0;
+    }
+    if (unknown3 <= 180) {
+        return unknown3;
+    }
+    return (unknown3 + (MIWEAR_RT3_ACTIVITY_UNITS_PER_MIN / 2u)) / MIWEAR_RT3_ACTIVITY_UNITS_PER_MIN;
+}
+
 guint miwear_activity_time_from_realtime(gboolean has_unknown3, guint unknown3,
                                          gboolean has_unknown5, guint unknown5,
                                          gboolean has_steps, guint steps) {
     /*
-     * Mi Fitness “Moving” / activity-time goal (goalMoving) uses RealTimeStats field 5 (minutes).
-     * Field 3 is not minutes on Band 9/10 (often tracks another counter, e.g. same magnitude as steps).
+     * Matches the band “Stats” screen: same RealTimeStats packet as steps/calories.
+     * Field 5 is a small counter on some firmware; field 3 is today’s activity time on Band 9/10.
      */
-    if (has_unknown5 && unknown5 > 0 && unknown5 <= 180) {
-        return unknown5;
+    guint from3 = 0;
+    if (has_unknown3 && unknown3 > 0 && (!has_steps || unknown3 != steps)) {
+        from3 = rt3_units_to_activity_minutes(unknown3);
     }
-    if (has_unknown3 && unknown3 > 0 && unknown3 <= 180 && (!has_steps || unknown3 != steps)) {
-        return unknown3;
+    guint from5 = 0;
+    if (has_unknown5 && unknown5 > 0 && unknown5 <= 600) {
+        from5 = unknown5;
     }
-    return 0;
+    /*
+     * Field 3 is the cumulative activity-time counter on Band 9/10; field 5 is a smaller
+     * auxiliary value (often higher than true minutes). When both are present and field 3
+     * is the smaller plausible value, trust it (e.g. rt3=276 → 3 min vs rt5=7).
+     * When field 3 looks inflated vs field 5 (stale day rollover), prefer field 5.
+     */
+    if (from3 > 0 && from5 > 0) {
+        if (from3 <= from5) {
+            return from3;
+        }
+        if (from3 > from5 * 2u) {
+            return from5;
+        }
+        return from3;
+    }
+    if (from3 > 0) {
+        return from3;
+    }
+    return from5;
+}
+
+guint miwear_live_activity_minutes(const AppState *state) {
+    if (state == NULL || !state->has_live_moving) {
+        return 0;
+    }
+    return state->live_moving;
+}
+
+guint miwear_display_activity_minutes(const AppState *state, const gchar *day_key, gboolean prefer_live) {
+    const guint live = miwear_live_activity_minutes(state);
+    if (state == NULL || day_key == NULL) {
+        return live;
+    }
+    if (prefer_live && state->has_activity_minutes_today) {
+        const guint synced = state->activity_minutes_today;
+        if (synced > 0 && (live == 0 || synced < live)) {
+            return synced;
+        }
+    }
+    return live;
+}
+
+/* Per-minute steps in daily details; aligns with Mi Fitness moderate ring on band firmware. */
+#define MIWEAR_MODERATE_STEPS_PER_MIN 35
+
+static gboolean minute_counts_as_moderate_activity(const RecordedSample *s, int max_hr) {
+    if (s->steps >= MIWEAR_MODERATE_STEPS_PER_MIN) {
+        return TRUE;
+    }
+    if (s->heart_rate > 0 && s->heart_rate <= 220) {
+        if (miwear_hr_zone_index(s->heart_rate, max_hr) >= 3) {
+            return TRUE;
+        }
+    }
+    if (s->active_calories >= 3) {
+        return TRUE;
+    }
+    return FALSE;
+}
+
+guint miwear_count_activity_minutes_from_timeline(AppState *state, const gchar *day_key) {
+    if (state == NULL || day_key == NULL) {
+        return 0;
+    }
+    const int max_hr = state->profile_max_hr > 0 ? (int)state->profile_max_hr : 180;
+    guint count = 0;
+
+    g_mutex_lock(&state->recorded_lock);
+    GArray *arr =
+        (state->recorded_days != NULL) ? g_hash_table_lookup(state->recorded_days, day_key) : NULL;
+    if (arr != NULL) {
+        for (guint i = 0; i < arr->len; i++) {
+            const RecordedSample *s = &g_array_index(arr, RecordedSample, i);
+            if (minute_counts_as_moderate_activity(s, max_hr)) {
+                count++;
+            }
+        }
+    }
+    g_mutex_unlock(&state->recorded_lock);
+    return count;
+}
+
+void miwear_refresh_activity_minutes_for_day(AppState *state, const gchar *day_key) {
+    if (state == NULL || day_key == NULL) {
+        return;
+    }
+    const guint from_timeline = miwear_count_activity_minutes_from_timeline(state, day_key);
+    if (from_timeline == 0) {
+        return;
+    }
+    if (!state->has_activity_minutes_today || from_timeline > state->activity_minutes_today) {
+        state->activity_minutes_today = from_timeline;
+        state->has_activity_minutes_today = TRUE;
+    }
 }
 
 guint miwear_standing_hours_from_bitmap(int standing_raw) {

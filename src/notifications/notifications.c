@@ -462,8 +462,9 @@ static gboolean become_notification_monitor(GDBusConnection *conn, GError **erro
     g_variant_unref(body);
     if (reply != NULL) {
         g_variant_unref(reply);
+        return TRUE;
     }
-    return error == NULL || *error == NULL;
+    return FALSE;
 }
 
 static void request_screen_on_pref(AppState *state) {

@@ -5,6 +5,7 @@
 #include "miwear/sleep/mi_sleep_external.h"
 #include "miwear/sleep/mi_sleep_stage.h"
 #include "miwear/app.h"
+#include "miwear/ui/dashboard.h"
 
 #include <json-glib/json-glib.h>
 #include <string.h>
@@ -57,8 +58,18 @@ static void persist_stage_timeline(AppState *state,
                                                      awake_min >= 0 ? awake_min : -1);
     }
     if (n > 0) {
-        append_log(state, "Mi Fitness sleep algo: stage timeline stored.");
+        gchar *detail = g_strdup_printf(
+            "Mi Fitness sleep algo: stage timeline stored (%zu markers, bed→wake %lld…%lld ms).",
+            n,
+            (long long)bed_ms,
+            (long long)wake_ms);
+        append_log(state, detail);
+        g_free(detail);
         recorded_rebuild_from_db(state);
+        miwear_dashboard_schedule_refresh(state);
+    } else if (bed_ms > 0 && wake_ms > bed_ms) {
+        recorded_rebuild_from_db(state);
+        miwear_dashboard_schedule_refresh(state);
     }
 }
 
@@ -111,8 +122,15 @@ void mi_fitness_apply_sleep_stages_from_feature(AppState *state,
         rem_min = algo.durations.rem_min;
         awake_min = algo.durations.awake_min;
         total_min = algo.durations.total_min;
-        if (wake_sec > bed_sec && total_min <= 0) {
-            total_min = (int)((wake_sec - bed_sec) / 60u);
+        const int asleep_stages = (deep_min > 0 ? deep_min : 0) + (light_min > 0 ? light_min : 0) +
+                                  (rem_min > 0 ? rem_min : 0);
+        if (total_min <= 0 && asleep_stages > 0) {
+            total_min = asleep_stages;
+        } else if (wake_sec > bed_sec && asleep_stages > 0 && awake_min > 0) {
+            const int bed_span = (int)((wake_sec - bed_sec) / 60u);
+            if (total_min == bed_span || total_min <= 0) {
+                total_min = asleep_stages;
+            }
         }
         for (size_t i = 0; i < algo.stage_count; i++) {
             g_array_append_val(stage_rows, algo.stage_rows[i]);

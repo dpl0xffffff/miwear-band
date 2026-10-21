@@ -423,8 +423,6 @@ void schedule_metrics_update(AppState *state,
     if (has_moving) {
         state->live_moving = moving;
         state->has_live_moving = TRUE;
-        state->activity_minutes_today = moving;
-        state->has_activity_minutes_today = TRUE;
     }
     if (has_hr) {
         state->live_hr = hr;
@@ -793,14 +791,6 @@ void health_apply_daily_summary(AppState *state, const MiwearDailySummaryRow *ro
             spo2_txt = g_strdup_printf("%d%%", row->spo2_avg);
         }
     }
-    if (miwear_stress_value_valid(row->stress_avg)) {
-        if (miwear_stress_value_valid(row->stress_min) && miwear_stress_value_valid(row->stress_max)) {
-            stress_txt = g_strdup_printf("%d avg (%d–%d)", row->stress_avg, row->stress_min, row->stress_max);
-        } else {
-            stress_txt = g_strdup_printf("%d", row->stress_avg);
-        }
-    }
-
     schedule_metrics_update(
         state,
         FALSE, 0,
@@ -809,9 +799,8 @@ void health_apply_daily_summary(AppState *state, const MiwearDailySummaryRow *ro
         FALSE, 0,
         FALSE, 0,
         FALSE, 0,
-        spo2_txt, stress_txt);
+        spo2_txt, NULL);
     g_free(spo2_txt);
-    g_free(stress_txt);
 
     GArray *pts = g_array_new(FALSE, FALSE, sizeof(RecordedSample));
     if (miwear_spo2_value_valid(row->spo2_min)) {
@@ -819,9 +808,6 @@ void health_apply_daily_summary(AppState *state, const MiwearDailySummaryRow *ro
     }
     if (miwear_spo2_value_valid(row->spo2_max)) {
         append_summary_chart_point(pts, (uint32_t)row->spo2_max_ts_sec, row->spo2_max, -1);
-    }
-    if (miwear_stress_value_valid(row->stress_avg)) {
-        append_summary_chart_point(pts, day_ts, -1, row->stress_avg);
     }
     if (pts->len > 0) {
         recorded_store_daily_details(state, day_ts, (const RecordedSample *)pts->data, pts->len);
@@ -892,8 +878,26 @@ static void rebuild_store_sleep_durations(RecordedRebuildCtx *ctx, const MiwearS
         sum_row->light = light;
         sum_row->rem = rem;
         sum_row->awake = awake;
-    } else {
-        sum_row->light = r->total_min;
+        const int asleep = deep + light + rem;
+        if (asleep > 0) {
+            sum_row->total_asleep = asleep;
+        }
+    }
+    if (r->total_min > 0) {
+        if (sum_row->total_asleep <= 0) {
+            sum_row->total_asleep = r->total_min;
+        }
+        if (r->wake_ms > r->bed_ms) {
+            const int span = (int)((r->wake_ms - r->bed_ms + 59999LL) / 60000LL);
+            if (r->total_min == span && sum > 0) {
+                const int asleep = deep + light + rem;
+                if (asleep > 0 && asleep < span) {
+                    sum_row->total_asleep = asleep;
+                }
+            } else if (sum_row->total_asleep <= 0 || r->total_min < sum_row->total_asleep) {
+                sum_row->total_asleep = r->total_min;
+            }
+        }
     }
 }
 
@@ -1157,7 +1161,15 @@ void recorded_rebuild_from_db(AppState *state) {
     }
 
     if (state->recorded_day_dropdown != NULL && state->recorded_days != NULL) {
-        GtkStringList *sl = GTK_STRING_LIST(gtk_drop_down_get_model(GTK_DROP_DOWN(state->recorded_day_dropdown)));
+        GListModel *model = gtk_drop_down_get_model(GTK_DROP_DOWN(state->recorded_day_dropdown));
+        if (model == NULL || !GTK_IS_STRING_LIST(model)) {
+            recorded_refresh_ui(state);
+            if (ctx.has_latest_summary) {
+                health_apply_daily_summary(state, &ctx.latest_summary);
+            }
+            return;
+        }
+        GtkStringList *sl = GTK_STRING_LIST(g_object_ref(model));
         guint n = g_list_model_get_n_items(G_LIST_MODEL(sl));
         if (n > 0) {
             gtk_string_list_splice(sl, 0, n, NULL);
@@ -1171,6 +1183,7 @@ void recorded_rebuild_from_db(AppState *state) {
         if (g_list_model_get_n_items(G_LIST_MODEL(sl)) > 0) {
             gtk_drop_down_set_selected(GTK_DROP_DOWN(state->recorded_day_dropdown), 0);
         }
+        g_object_unref(sl);
     }
 
     recorded_refresh_ui(state);
@@ -1333,6 +1346,7 @@ void miwear_app_shutdown(GApplication *app, gpointer user_data) {
     miwear_notifications_shutdown(state);
     state->live_spo2_text = NULL;
     state->live_stress_text = NULL;
+    state->live_stress_ts_sec = 0;
     state->weather_location_name = NULL;
     state->weather_last_status = NULL;
     g_free(state->selected_recorded_day);
