@@ -1444,6 +1444,7 @@ void miwear_dashboard_refresh(AppState *state) {
     dashboard_update_date_navs(state);
     mi_today_refresh(state);
     mi_sleep_refresh(state);
+    mi_workouts_refresh_training(state);
     miwear_dashboard_update_connection(state);
 }
 

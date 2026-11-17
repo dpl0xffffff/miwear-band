@@ -196,6 +196,7 @@ void mi_today_redraw(AppState *state);
 GtkWidget *mi_sleep_page_new(AppState *state, MiwearDashboardUi *dash);
 void mi_sleep_refresh(AppState *state);
 GtkWidget *mi_workouts_page_new(AppState *state, MiwearDashboardUi *dash);
+void mi_workouts_refresh_training(AppState *state);
 GtkWidget *mi_device_page_new(AppState *state, MiwearDashboardUi *dash);
 void mi_device_refresh(AppState *state);
 

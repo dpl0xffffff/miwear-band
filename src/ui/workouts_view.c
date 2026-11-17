@@ -235,6 +235,285 @@ static void format_duration(int sec, gchar *buf, gsize len) {
 }
 
 /* ======================================================================================== */
+/* Training load and VO2 max                                                                */
+/* ======================================================================================== */
+
+static const char *const load_level_names[5] = {"", "Too light", "Optimal", "High", "Overreaching"};
+static const MiColor load_level_colors[4] = {MI_COLOR_SPO2, MI_COLOR_STEPS, MI_COLOR_STRESS, MI_COLOR_HR};
+static const char *const vo2_level_names[8] = {"", "Novice", "Beginner", "Fair", "Average", "Good", "Excellent",
+                                               "Elite"};
+static const MiColor vo2_level_colors[7] = {MI_COLOR_HR,     MI_COLOR_CALORIES, MI_COLOR_STRESS, MI_COLOR_STEPS,
+                                            MI_COLOR_ACTIVE, MI_COLOR_SPO2,     MI_COLOR_SLEEP};
+static const char *const training_status_names[9] = {"",         "No status", "Overreaching", "Detraining",
+                                                     "Unproductive", "Maintaining", "Recovery", "Productive",
+                                                     "Peaking"};
+
+static int entry_training_load(const MiwearWorkoutSummary *d) {
+    if (d == NULL) {
+        return 0;
+    }
+    return d->training_load > 0 ? d->training_load : d->walk_training_load > 0 ? d->walk_training_load
+                                                                                 : d->swim_training_load;
+}
+
+static int entry_recovery_min(const MiwearWorkoutSummary *d) {
+    if (d == NULL) {
+        return 0;
+    }
+    return d->recovery_min > 0 ? d->recovery_min : MAX(d->walk_recovery_min, d->swim_recovery_min);
+}
+
+/* Segmented level gauge: `count` coloured segments, the active one solid with its name under it. */
+typedef struct {
+    int count;
+    int active; /* 1-based, 0 = none */
+    const MiColor *colors;
+    const char *const *names; /* 1-based */
+} LevelGauge;
+
+static void draw_level_gauge(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
+    (void)height;
+    const LevelGauge *g = user_data;
+    GtkWidget *w = GTK_WIDGET(area);
+    const double gap = 4, bar_h = 10, top = 6;
+    const double seg = (width - gap * (g->count - 1)) / g->count;
+    for (int i = 0; i < g->count; i++) {
+        const double x = i * (seg + gap);
+        mi_cairo_set_color(cr, g->colors[i], i + 1 == g->active ? 1.0 : 0.22);
+        mi_rounded_rect(cr, x, top, seg, bar_h, bar_h / 2);
+        cairo_fill(cr);
+        if (i + 1 == g->active) {
+            const double cx = x + seg / 2;
+            mi_cairo_set_fg(cr, w, 0.85);
+            cairo_move_to(cr, cx - 5, 0);
+            cairo_line_to(cr, cx + 5, 0);
+            cairo_line_to(cr, cx, top - 1);
+            cairo_close_path(cr);
+            cairo_fill(cr);
+        }
+    }
+    /* End labels plus the active level name. */
+    mi_draw_text(cr, w, g->names[1], 0, top + bar_h + 15, 10.5, g->active == 1 ? 0.9 : 0.5, 0.0);
+    mi_draw_text(cr, w, g->names[g->count], width, top + bar_h + 15, 10.5, g->active == g->count ? 0.9 : 0.5, 1.0);
+    if (g->active > 1 && g->active < g->count) {
+        const double cx = (g->active - 1) * (seg + gap) + seg / 2;
+        mi_draw_text(cr, w, g->names[g->active], cx, top + bar_h + 15, 10.5, 0.9, 0.5);
+    }
+}
+
+static GtkWidget *level_gauge_new(int count, int active, const MiColor *colors, const char *const *names) {
+    LevelGauge *g = g_new(LevelGauge, 1);
+    *g = (LevelGauge){count, CLAMP(active, 0, count), colors, names};
+    GtkWidget *area = gtk_drawing_area_new();
+    gtk_widget_set_size_request(area, -1, 36);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), draw_level_gauge, g, g_free);
+    return area;
+}
+
+/* Big value + coloured level text, as a header row of a training card. */
+static GtkWidget *training_value_row(const char *value, const char *unit, const char *level, MiColor color) {
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    GtkWidget *v = mi_label(value, "mi-tile-value numeric", 0.0f);
+    gtk_widget_set_valign(v, GTK_ALIGN_BASELINE_FILL);
+    gtk_box_append(GTK_BOX(row), v);
+    if (unit != NULL) {
+        GtkWidget *u = mi_label(unit, "mi-tile-unit", 0.0f);
+        gtk_widget_set_valign(u, GTK_ALIGN_BASELINE_FILL);
+        gtk_box_append(GTK_BOX(row), u);
+    }
+    if (level != NULL && level[0] != '\0') {
+        GtkWidget *l = mi_label(level, "heading", 1.0f);
+        gtk_widget_add_css_class(l, mi_color_css_class(color));
+        gtk_widget_set_hexpand(l, TRUE);
+        gtk_widget_set_valign(l, GTK_ALIGN_BASELINE_FILL);
+        gtk_box_append(GTK_BOX(row), l);
+    }
+    return row;
+}
+
+/* "Training" card on a workout's detail page; NULL when the band reported none of it. */
+static GtkWidget *workout_training_card(const MiwearWorkoutSummary *d) {
+    const int load = entry_training_load(d);
+    const int recovery = entry_recovery_min(d);
+    const float te_aer = d->has_swim_detail ? d->swim_training_effect : d->walk_te_aerobic;
+    const float te_ana = d->walk_te_anaerobic;
+    if (load <= 0 && d->vo2_max <= 0 && recovery <= 0 && te_aer <= 0.05f && d->training_status <= 0) {
+        return NULL;
+    }
+    GtkWidget *inner = NULL;
+    GtkWidget *card = mi_card_new(&inner, 12);
+    gchar buf[64];
+
+    if (load > 0) {
+        gtk_box_append(GTK_BOX(inner), mi_card_header("Training Load", NULL, NULL));
+        const int lvl = CLAMP(d->training_load_level, 0, 4);
+        g_snprintf(buf, sizeof(buf), "%d", load);
+        gtk_box_append(GTK_BOX(inner), training_value_row(buf, NULL, load_level_names[lvl],
+                                                          lvl > 0 ? load_level_colors[lvl - 1] : MI_COLOR_STEPS));
+        if (lvl > 0) {
+            gtk_box_append(GTK_BOX(inner), level_gauge_new(4, lvl, load_level_colors, load_level_names));
+        }
+    }
+    if (d->vo2_max > 0) {
+        GtkWidget *hdr = mi_card_header("VO₂ Max", NULL, NULL);
+        if (load > 0) {
+            gtk_widget_set_margin_top(hdr, 8);
+        }
+        gtk_box_append(GTK_BOX(inner), hdr);
+        const int lvl = CLAMP(d->vo2_max_level, 0, 7);
+        g_snprintf(buf, sizeof(buf), "%d", d->vo2_max);
+        gtk_box_append(GTK_BOX(inner), training_value_row(buf, "ml/kg/min", vo2_level_names[lvl],
+                                                          lvl > 0 ? vo2_level_colors[lvl - 1] : MI_COLOR_SPO2));
+        if (lvl > 0) {
+            gtk_box_append(GTK_BOX(inner), level_gauge_new(7, lvl, vo2_level_colors, vo2_level_names));
+        }
+    }
+
+    GtkWidget *stats = mi_stat_flow_new();
+    GtkWidget *v;
+    if (d->training_status > 0 && d->training_status <= 8) {
+        mi_stat_flow_append(stats, mi_stat_new("Training status", &v));
+        gtk_label_set_text(GTK_LABEL(v), training_status_names[d->training_status]);
+    }
+    if (te_aer > 0.05f) {
+        mi_stat_flow_append(stats, mi_stat_new("Aerobic effect", &v));
+        g_snprintf(buf, sizeof(buf), "%.1f", (double)te_aer);
+        gtk_label_set_text(GTK_LABEL(v), buf);
+    }
+    if (te_ana > 0.05f) {
+        mi_stat_flow_append(stats, mi_stat_new("Anaerobic effect", &v));
+        g_snprintf(buf, sizeof(buf), "%.1f", (double)te_ana);
+        gtk_label_set_text(GTK_LABEL(v), buf);
+    }
+    if (recovery > 0) {
+        mi_stat_flow_append(stats, mi_stat_new("Recovery time", &v));
+        miwear_format_recovery_duration(recovery, buf, sizeof(buf));
+        gtk_label_set_text(GTK_LABEL(v), buf);
+    }
+    if (gtk_widget_get_first_child(stats) != NULL) {
+        gtk_widget_set_margin_top(stats, 4);
+        gtk_box_append(GTK_BOX(inner), stats);
+    }
+    return card;
+}
+
+/* ---- Workouts page summary cards --------------------------------------------------------- */
+
+static int training_week_day_load[7];
+
+static void draw_week_load(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
+    (void)user_data;
+    GtkWidget *w = GTK_WIDGET(area);
+    int max = 1;
+    for (int i = 0; i < 7; i++) {
+        max = MAX(max, training_week_day_load[i]);
+    }
+    const double bottom = 16, slot = width / 7.0, bw = MIN(slot * 0.5, 22);
+    GDateTime *now = g_date_time_new_now_local();
+    for (int i = 0; i < 7; i++) {
+        const double cx = slot * (i + 0.5);
+        const int v = training_week_day_load[i];
+        const double bh = v > 0 ? MAX(3.0, (height - bottom - 4) * v / max) : 3.0;
+        mi_cairo_set_color(cr, MI_COLOR_STEPS, v > 0 ? (i == 6 ? 1.0 : 0.6) : 0.18);
+        mi_rounded_rect(cr, cx - bw / 2, height - bottom - bh, bw, bh, MIN(4, bw / 2));
+        cairo_fill(cr);
+        GDateTime *d = g_date_time_add_days(now, i - 6);
+        gchar *wd = g_date_time_format(d, "%a");
+        g_date_time_unref(d);
+        mi_draw_text(cr, w, wd, cx, height - 3, 10, i == 6 ? 0.85 : 0.5, 0.5);
+        g_free(wd);
+    }
+    g_date_time_unref(now);
+}
+
+/* Fills the two summary cards from the band's daily summaries and the stored workouts. */
+static void refresh_training_cards(AppState *state) {
+    MiwearDashboardUi *dash = state->dash_ui;
+    GtkWidget *load_box = g_object_get_data(G_OBJECT(dash->sport_list_box), "mi-load-box");
+    GtkWidget *vo2_box = g_object_get_data(G_OBJECT(dash->sport_list_box), "mi-vo2-box");
+    if (load_box == NULL || vo2_box == NULL) {
+        return;
+    }
+    mi_clear_box(load_box);
+    mi_clear_box(vo2_box);
+    gchar buf[96];
+
+    /* Training load: latest daily summary that carries it (today's, when synced). */
+    MiwearDailySummaryRow latest = {0};
+    gboolean have_latest = FALSE;
+    GDateTime *now = g_date_time_new_now_local();
+    g_mutex_lock(&state->recorded_lock);
+    for (int i = 0; i < 7; i++) {
+        GDateTime *d = g_date_time_add_days(now, i - 6);
+        gchar *key = g_date_time_format(d, "%Y-%m-%d");
+        g_date_time_unref(d);
+        const MiwearDailySummaryRow *r =
+            state->daily_summaries != NULL ? g_hash_table_lookup(state->daily_summaries, key) : NULL;
+        g_free(key);
+        training_week_day_load[i] = (r != NULL && r->has_training_vitality) ? r->training_load_day : 0;
+        if (r != NULL && r->has_training_vitality) {
+            latest = *r;
+            have_latest = TRUE;
+        }
+    }
+    g_mutex_unlock(&state->recorded_lock);
+    g_date_time_unref(now);
+
+    gtk_box_append(GTK_BOX(load_box), mi_card_header("Training Load", NULL, NULL));
+    if (have_latest) {
+        const int lvl = CLAMP(latest.training_load_level, 0, 4);
+        g_snprintf(buf, sizeof(buf), "%d", latest.training_load_week);
+        gtk_box_append(GTK_BOX(load_box), training_value_row(buf, "7 days", load_level_names[lvl],
+                                                             lvl > 0 ? load_level_colors[lvl - 1] : MI_COLOR_STEPS));
+        if (lvl > 0) {
+            gtk_box_append(GTK_BOX(load_box), level_gauge_new(4, lvl, load_level_colors, load_level_names));
+        }
+        GtkWidget *bars = gtk_drawing_area_new();
+        gtk_widget_set_size_request(bars, -1, 64);
+        gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(bars), draw_week_load, NULL, NULL);
+        gtk_box_append(GTK_BOX(load_box), bars);
+        g_snprintf(buf, sizeof(buf), "Today %d · from the band's daily summary", latest.training_load_day);
+        gtk_box_append(GTK_BOX(load_box), mi_label(buf, "caption dimmed", 0.0f));
+    } else {
+        GtkWidget *l = mi_label("Comes with the band's daily summary after a sync.", "dimmed", 0.0f);
+        gtk_label_set_wrap(GTK_LABEL(l), TRUE);
+        gtk_box_append(GTK_BOX(load_box), l);
+    }
+
+    /* VO2 max: latest workout that estimated it. */
+    const MiwearSportEntry *best = NULL;
+    for (GList *l = state->sport_entries; l != NULL; l = l->next) {
+        const MiwearSportEntry *e = l->data;
+        if (e->detail != NULL && e->detail->vo2_max > 0 && (best == NULL || entry_start(e) > entry_start(best))) {
+            best = e;
+        }
+    }
+    gtk_box_append(GTK_BOX(vo2_box), mi_card_header("VO₂ Max", NULL, NULL));
+    if (best != NULL) {
+        const MiwearWorkoutSummary *d = best->detail;
+        const int lvl = CLAMP(d->vo2_max_level, 0, 7);
+        g_snprintf(buf, sizeof(buf), "%d", d->vo2_max);
+        gtk_box_append(GTK_BOX(vo2_box), training_value_row(buf, "ml/kg/min", vo2_level_names[lvl],
+                                                            lvl > 0 ? vo2_level_colors[lvl - 1] : MI_COLOR_SPO2));
+        if (lvl > 0) {
+            gtk_box_append(GTK_BOX(vo2_box), level_gauge_new(7, lvl, vo2_level_colors, vo2_level_names));
+        }
+        GDateTime *dt = g_date_time_new_from_unix_local((gint64)entry_start(best));
+        gchar *when = g_date_time_format(dt, "%-d %b");
+        g_date_time_unref(dt);
+        g_snprintf(buf, sizeof(buf), "From %s on %s", best->label != NULL ? best->label : "a workout", when);
+        g_free(when);
+        gtk_box_append(GTK_BOX(vo2_box), mi_label(buf, "caption dimmed", 0.0f));
+    } else {
+        GtkWidget *l = mi_label("The band estimates VO₂ max during outdoor runs and walks with heart rate. "
+                                "It shows up here after the next one is synced.",
+                                "dimmed", 0.0f);
+        gtk_label_set_wrap(GTK_LABEL(l), TRUE);
+        gtk_box_append(GTK_BOX(vo2_box), l);
+    }
+}
+
+/* ======================================================================================== */
 /* Detail page                                                                              */
 /* ======================================================================================== */
 
@@ -572,10 +851,6 @@ static void open_detail(AppState *state, MiwearSportEntry *e) {
             add_stat_tile(flow, "Strokes", d->swim_total_strokes > 0 ? t : NULL);
             g_snprintf(t, sizeof(t), "%d", d->swim_avg_spm);
             add_stat_tile(flow, "Strokes / min", d->swim_avg_spm > 0 ? t : NULL);
-            g_snprintf(t, sizeof(t), "%d", d->swim_training_load);
-            add_stat_tile(flow, "Training load", d->swim_training_load > 0 ? t : NULL);
-            miwear_format_recovery_duration(d->swim_recovery_min, t, sizeof(t));
-            add_stat_tile(flow, "Recovery", d->swim_recovery_min > 0 ? t : NULL);
             g_snprintf(t, sizeof(t), "+%d", d->swim_vitality_points);
             add_stat_tile(flow, "Vitality", d->swim_vitality_points > 0 ? t : NULL);
         } else {
@@ -603,20 +878,18 @@ static void open_detail(AppState *state, MiwearSportEntry *e) {
             add_stat_tile(flow, "Max cadence", d->walk_max_cadence_spm > 0 ? t : NULL);
             g_snprintf(t, sizeof(t), "%d cm", d->walk_step_length_cm);
             add_stat_tile(flow, "Step length", d->walk_step_length_cm > 0 ? t : NULL);
-            g_snprintf(t, sizeof(t), "%.1f", (double)d->walk_te_aerobic);
-            add_stat_tile(flow, "Aerobic effect", d->walk_te_aerobic > 0.05f ? t : NULL);
-            g_snprintf(t, sizeof(t), "%.1f", (double)d->walk_te_anaerobic);
-            add_stat_tile(flow, "Anaerobic effect", d->walk_te_anaerobic > 0.05f ? t : NULL);
-            g_snprintf(t, sizeof(t), "%d", d->walk_training_load);
-            add_stat_tile(flow, "Training load", d->walk_training_load > 0 ? t : NULL);
-            miwear_format_recovery_duration(d->walk_recovery_min, t, sizeof(t));
-            add_stat_tile(flow, "Recovery", d->walk_recovery_min > 0 ? t : NULL);
             g_snprintf(t, sizeof(t), "+%d", d->walk_vitality_points);
             add_stat_tile(flow, "Vitality", d->walk_vitality_points > 0 ? t : NULL);
         }
     }
     if (gtk_widget_get_first_child(flow) != NULL) {
         gtk_box_append(GTK_BOX(box), flow);
+    }
+    if (d != NULL) {
+        GtkWidget *tc = workout_training_card(d);
+        if (tc != NULL) {
+            gtk_box_append(GTK_BOX(box), tc);
+        }
     }
 
     if (d != NULL && d->record_samples != NULL && d->record_samples->len >= 2) {
@@ -779,11 +1052,35 @@ void miwear_sport_rebuild_list(AppState *state) {
     }
     g_free(group_key);
     g_list_free(sorted);
+    refresh_training_cards(state);
+}
+
+void mi_workouts_refresh_training(AppState *state) {
+    if (state != NULL && state->dash_ui != NULL && state->dash_ui->sport_list_box != NULL) {
+        refresh_training_cards(state);
+    }
 }
 
 GtkWidget *mi_workouts_page_new(AppState *state, MiwearDashboardUi *dash) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 18);
     gtk_widget_add_css_class(box, "mi-page");
+
+    /* Training load + VO2 max, side by side when there is room. */
+    GtkWidget *training = gtk_flow_box_new();
+    gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(training), GTK_SELECTION_NONE);
+    gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(training), FALSE);
+    gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(training), 1);
+    gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(training), 2);
+    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(training), 12);
+    gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(training), 12);
+    GtkWidget *load_box = NULL, *vo2_box = NULL;
+    GtkWidget *load_card = mi_card_new(&load_box, 10);
+    GtkWidget *vo2_card = mi_card_new(&vo2_box, 10);
+    gtk_widget_set_size_request(load_card, 280, -1);
+    gtk_widget_set_size_request(vo2_card, 280, -1);
+    mi_stat_flow_append(training, load_card);
+    mi_stat_flow_append(training, vo2_card);
+    gtk_box_append(GTK_BOX(box), training);
 
     GtkWidget *inner = NULL;
     dash->sport_summary = mi_card_new(&inner, 12);
@@ -807,10 +1104,12 @@ GtkWidget *mi_workouts_page_new(AppState *state, MiwearDashboardUi *dash) {
     gtk_box_append(GTK_BOX(box), dash->sport_empty);
 
     dash->sport_list_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 18);
+    g_object_set_data(G_OBJECT(dash->sport_list_box), "mi-load-box", load_box);
+    g_object_set_data(G_OBJECT(dash->sport_list_box), "mi-vo2-box", vo2_box);
     gtk_box_append(GTK_BOX(box), dash->sport_list_box);
 
     GtkWidget *clamp = adw_clamp_new();
-    adw_clamp_set_maximum_size(ADW_CLAMP(clamp), 760);
+    adw_clamp_set_maximum_size(ADW_CLAMP(clamp), 960);
     adw_clamp_set_child(ADW_CLAMP(clamp), box);
     GtkWidget *scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);

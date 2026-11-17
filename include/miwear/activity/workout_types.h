@@ -68,6 +68,17 @@ typedef struct MiwearWorkoutSummary {
     int walk_training_load;
     int walk_recovery_min;
     int walk_vitality_points;
+    /* Training metrics shared by all sports (Mi Fitness report fields). 0 = not reported.
+     * training_load_level: 1 too light, 2 optimal, 3 high, 4 overreaching.
+     * training_status: 1 none, 2 overreaching, 3 detraining, 4 unproductive, 5 maintaining,
+     *                  6 recovery, 7 productive, 8 peaking.
+     * vo2_max in ml/kg/min; vo2_max_level: 1 novice … 7 elite. */
+    int training_load;
+    int training_load_level;
+    int training_status;
+    int vo2_max;
+    int vo2_max_level;
+    int recovery_min;
     GArray *record_samples;
     int record_interval_sec;
     GArray *gps_track;

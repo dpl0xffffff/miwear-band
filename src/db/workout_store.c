@@ -203,6 +203,18 @@ gchar *miwear_workout_summary_to_json(int sport_type, const MiwearWorkoutSummary
     json_builder_add_int_value(b, summary->walk_recovery_min);
     json_builder_set_member_name(b, "walk_vitality_points");
     json_builder_add_int_value(b, summary->walk_vitality_points);
+    const struct {
+        const char *name;
+        int value;
+    } training[] = {
+        {"training_load", summary->training_load},       {"training_load_level", summary->training_load_level},
+        {"training_status", summary->training_status},   {"vo2_max", summary->vo2_max},
+        {"vo2_max_level", summary->vo2_max_level},       {"recovery_min", summary->recovery_min},
+    };
+    for (size_t i = 0; i < G_N_ELEMENTS(training); i++) {
+        json_builder_set_member_name(b, training[i].name);
+        json_builder_add_int_value(b, training[i].value);
+    }
     json_add_hr_zones(b, &summary->hr_zones);
     json_add_series(b, summary);
     json_builder_end_object(b);
@@ -303,6 +315,24 @@ gboolean miwear_workout_summary_from_json(const char *json,
     }
     if (json_object_has_member(o, "walk_vitality_points")) {
         summary_out->walk_vitality_points = (int)json_object_get_int_member(o, "walk_vitality_points");
+    }
+    struct {
+        const char *name;
+        int *dst;
+    } training[] = {
+        {"training_load", &summary_out->training_load},     {"training_load_level", &summary_out->training_load_level},
+        {"training_status", &summary_out->training_status}, {"vo2_max", &summary_out->vo2_max},
+        {"vo2_max_level", &summary_out->vo2_max_level},     {"recovery_min", &summary_out->recovery_min},
+    };
+    for (size_t i = 0; i < G_N_ELEMENTS(training); i++) {
+        if (json_object_has_member(o, training[i].name)) {
+            *training[i].dst = (int)json_object_get_int_member(o, training[i].name);
+        }
+    }
+    /* Older rows kept training load only in the per-sport fields. */
+    if (summary_out->training_load == 0) {
+        summary_out->training_load = summary_out->walk_training_load > 0 ? summary_out->walk_training_load
+                                                                         : summary_out->swim_training_load;
     }
     read_hr_zones(o, &summary_out->hr_zones);
     read_series(o, summary_out);

@@ -489,6 +489,31 @@ static int json_int_or_zero(JsonObject *obj, const char *key) {
     return (int)json_object_get_int_member(obj, key);
 }
 
+/* First of several schema spellings that is present (sports name the same field differently). */
+static int json_int_any(JsonObject *obj, const char *const *keys) {
+    for (; *keys != NULL; keys++) {
+        if (obj != NULL && json_object_has_member(obj, *keys)) {
+            return (int)json_object_get_int_member(obj, *keys);
+        }
+    }
+    return 0;
+}
+
+static void fill_training_from_body(JsonObject *body, MiwearWorkoutSummary *out) {
+    static const char *const load[] = {"trainingLoad", NULL};
+    static const char *const load_level[] = {"trainingLoadLevel", "trainingLoadRating", NULL};
+    static const char *const status[] = {"trainingStatus", NULL};
+    static const char *const vo2[] = {"vo2Max", "vo2max", "maxVO2", NULL};
+    static const char *const vo2_level[] = {"vo2MaxLevel", "vo2maxLevel", "vo2MaxRating", "maxVO2Rating", NULL};
+    static const char *const recovery_h[] = {"expectedRecoveryTime", "estimatedRecoveryTime", "recoveryTime", NULL};
+    out->training_load = json_int_any(body, load);
+    out->training_load_level = json_int_any(body, load_level);
+    out->training_status = json_int_any(body, status);
+    out->vo2_max = json_int_any(body, vo2);
+    out->vo2_max_level = json_int_any(body, vo2_level);
+    out->recovery_min = json_int_any(body, recovery_h) * 60; /* reported in hours */
+}
+
 static void fill_walk_hr_zones(JsonObject *body, MiwearWorkoutSummary *out) {
     out->hr_zones.zone1_sec = json_int_or_zero(body, "hrZone1Duration");
     out->hr_zones.zone2_sec = json_int_or_zero(body, "hrZone2Duration");
@@ -511,11 +536,14 @@ static void fill_walk_from_body(JsonObject *body, MiwearWorkoutSummary *out) {
     }
     out->walk_avg_cadence_spm = json_int_or_zero(body, "avgCadence");
     out->walk_max_cadence_spm = json_int_or_zero(body, "maxCadence");
-    out->walk_training_load = json_int_or_zero(body, "trainingLoad");
-    out->walk_recovery_min = json_int_or_zero(body, "expectedRecoveryTime");
+    out->walk_training_load = out->training_load;
+    out->walk_recovery_min = out->recovery_min;
     out->walk_vitality_points = json_int_or_zero(body, "earnedPoints");
     if (json_object_has_member(body, "trainingEffect")) {
         out->walk_te_aerobic = (float)json_object_get_double_member(body, "trainingEffect");
+    }
+    if (json_object_has_member(body, "anaerobicTrainingEffect")) {
+        out->walk_te_anaerobic = (float)json_object_get_double_member(body, "anaerobicTrainingEffect");
     }
     fill_walk_hr_zones(body, out);
 }
@@ -528,8 +556,8 @@ static void fill_swim_from_body(JsonObject *body, MiwearWorkoutSummary *out) {
     out->swim_avg_swolf = json_int_or_zero(body, "avgSwolf");
     out->swim_total_strokes = json_int_or_zero(body, "totalArmPull");
     out->swim_avg_spm = json_int_or_zero(body, "avgStrokeFrequency");
-    out->swim_training_load = json_int_or_zero(body, "trainingLoad");
-    out->swim_recovery_min = json_int_or_zero(body, "expectedRecoveryTime");
+    out->swim_training_load = out->training_load;
+    out->swim_recovery_min = out->recovery_min;
     out->swim_vitality_points = json_int_or_zero(body, "earnedPoints");
     out->swim_pool_width_m = json_int_or_zero(body, "swimmingPoolWidth");
     if (json_object_has_member(body, "trainingEffect")) {
@@ -566,6 +594,7 @@ static void fill_summary_from_body(JsonObject *body, MiwearWorkoutSummary *out) 
     out->hr_avg = json_int_or_zero(body, "avgHeartRate");
     out->hr_max = json_int_or_zero(body, "maxHeartRate");
     out->hr_min = json_int_or_zero(body, "minHeartRate");
+    fill_training_from_body(body, out);
     if (out->sport_subtype == 9 || out->sport_subtype == 10) {
         fill_swim_from_body(body, out);
     } else if (out->sport_subtype == 22 || out->sport_subtype == 2) {

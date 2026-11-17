@@ -159,6 +159,71 @@ bool mi_fitness_apply_sport_report_values(int sport_type,
     return out->duration_sec > 0 || out->distance_m > 0 || out->calories > 0;
 }
 
+/*
+ * Outdoor step report (walking, subtype 22). Field IDs come from aligning
+ * third_party/mi-fitness-tables/outdoor_step_report.json with the Mi Fitness schema
+ * outdoor_foot_report_v9.json: both list the same 102 fields in the same order with the same byte
+ * sizes, which names every ID.
+ */
+static int64_t fv_int(const MiFitnessFieldValue *v) {
+    return v->is_float ? (int64_t)v->f32 : v->i64;
+}
+
+static float fv_float(const MiFitnessFieldValue *v) {
+    return v->is_float ? v->f32 : (float)v->i64;
+}
+
+static bool apply_outdoor_step_values(const MiFitnessFieldValue *values, size_t n, MiwearWorkoutSummary *out) {
+    const MiFitnessFieldValue *v;
+#define FIELD(id) (v = find_field(values, n, (id))) != NULL
+    if (FIELD(1)) out->start_sec = (uint32_t)fv_int(v);
+    if (FIELD(2)) out->end_sec = (uint32_t)fv_int(v);
+    if (FIELD(3)) out->duration_sec = (int)fv_int(v);            /* totalDuration */
+    else if (FIELD(4)) out->duration_sec = (int)fv_int(v);       /* effectiveDuration */
+    if (FIELD(5)) out->distance_m = (int)fv_int(v);              /* totalDistance */
+    if (FIELD(7)) out->calories = (int)fv_int(v);                /* totalCalories */
+    else if (FIELD(6)) out->calories = (int)fv_int(v);           /* activeCalories */
+    if (FIELD(10)) out->walk_avg_pace_sec_per_km = (int)fv_int(v);
+    if (FIELD(11)) out->walk_avg_speed_kmh = fv_float(v);
+    if (FIELD(13)) out->walk_steps = (int)fv_int(v);
+    if (FIELD(148)) out->walk_step_length_cm = (int)fv_int(v);  /* avgStride */
+    if (FIELD(15)) out->walk_avg_cadence_spm = (int)fv_int(v);
+    if (FIELD(14)) out->walk_max_cadence_spm = (int)fv_int(v);
+    if (FIELD(16)) out->hr_avg = (int)fv_int(v);
+    if (FIELD(17)) out->hr_max = (int)fv_int(v);
+    if (FIELD(18)) out->hr_min = (int)fv_int(v);
+    if (FIELD(25)) out->walk_te_aerobic = fv_float(v);
+    if (FIELD(26)) out->walk_te_anaerobic = fv_float(v);
+    if (FIELD(27)) out->vo2_max = (int)fv_int(v);
+    if (FIELD(109)) out->vo2_max_level = (int)fv_int(v);
+    if (FIELD(29)) out->recovery_min = (int)fv_int(v) * 60;     /* expectedRecoveryTime, hours */
+    if (FIELD(110)) out->training_load = (int)fv_int(v);
+    if (FIELD(111)) out->training_load_level = (int)fv_int(v);
+    if (FIELD(114)) out->training_status = (int)fv_int(v);
+    if (FIELD(117)) out->walk_vitality_points = (int)fv_int(v); /* earnedPoints */
+    /* HR zones are listed zone 5 → zone 1. */
+    if (FIELD(34)) out->hr_zones.zone1_sec = (int)fv_int(v);
+    if (FIELD(33)) out->hr_zones.zone2_sec = (int)fv_int(v);
+    if (FIELD(32)) out->hr_zones.zone3_sec = (int)fv_int(v);
+    if (FIELD(31)) out->hr_zones.zone4_sec = (int)fv_int(v);
+    if (FIELD(30)) out->hr_zones.zone5_sec = (int)fv_int(v);
+    if (FIELD(162)) out->hr_zones.zone1_lower_bpm = (int)fv_int(v);
+    if (FIELD(161)) out->hr_zones.zone2_lower_bpm = (int)fv_int(v);
+    if (FIELD(160)) out->hr_zones.zone3_lower_bpm = (int)fv_int(v);
+    if (FIELD(159)) out->hr_zones.zone4_lower_bpm = (int)fv_int(v);
+    if (FIELD(158)) out->hr_zones.zone5_lower_bpm = (int)fv_int(v);
+#undef FIELD
+    out->walk_training_load = out->training_load;
+    out->walk_recovery_min = out->recovery_min;
+    if (out->walk_avg_pace_sec_per_km <= 0 && out->distance_m > 0 && out->duration_sec > 0) {
+        out->walk_avg_pace_sec_per_km = (int)((uint64_t)out->duration_sec * 1000u / (uint32_t)out->distance_m);
+    }
+    if (out->duration_sec > 0 || out->distance_m > 0 || out->calories > 0 || out->walk_steps > 0) {
+        out->has_walk_detail = TRUE;
+    }
+    return out->duration_sec > 0 || out->distance_m > 0 || out->calories > 0;
+}
+
 bool mi_fitness_parse_outdoor_step_report(const uint8_t *payload,
                                           size_t payload_len,
                                           int version,
@@ -198,5 +263,5 @@ bool mi_fitness_parse_outdoor_step_report(const uint8_t *payload,
     if (out->sport_name == NULL) {
         out->sport_name = g_strdup(miwear_sport_subtype_name(out->sport_subtype));
     }
-    return mi_fitness_apply_sport_report_values(id.sport_type, values, value_count, out);
+    return apply_outdoor_step_values(values, value_count, out);
 }
