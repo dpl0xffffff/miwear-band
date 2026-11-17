@@ -10,7 +10,14 @@ static const char *NOTIF_GROUP = "notifications";
 static const char *PROFILE_GROUP = "profile";
 
 const char *miwear_config_default_path(void) {
-    return g_build_filename(g_get_user_config_dir(), "miwear-band", "config.ini", NULL);
+    /* Computed once: callers treat the result as borrowed (it was leaked on every load/save). */
+    static gsize once;
+    static gchar *path;
+    if (g_once_init_enter(&once)) {
+        path = g_build_filename(g_get_user_config_dir(), "miwear-band", "config.ini", NULL);
+        g_once_init_leave(&once, 1);
+    }
+    return path;
 }
 
 gboolean miwear_config_load(AppState *state, const char *path) {

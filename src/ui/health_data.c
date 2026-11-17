@@ -64,10 +64,17 @@ void miwear_health_aggregate_day(AppState *state, const gchar *day_key, MiwearDa
         }
     }
 
-    if (state->daily_summary_steps != NULL) {
-        guint *sp = g_hash_table_lookup(state->daily_summary_steps, day_key);
-        if (sp != NULL && *sp > 0) {
-            out->steps = (int)*sp;
+    const MiwearDailySummaryRow *summary =
+        state->daily_summaries != NULL ? g_hash_table_lookup(state->daily_summaries, day_key) : NULL;
+    if (summary != NULL) {
+        out->has_summary = TRUE;
+        out->summary = *summary;
+        /* The band's totals include minutes not (yet) present as per-minute samples. */
+        if (summary->steps > 0) {
+            out->steps = summary->steps;
+        }
+        if (summary->calories > 0) {
+            out->calories = summary->calories;
         }
     }
     if (state->sleep_duration_by_day != NULL) {
@@ -482,7 +489,6 @@ guint miwear_count_moderate_activity_minutes_json(JsonNode *decoded) {
         return 0;
     }
     JsonObject *root = json_node_get_object(decoded);
-    JsonObject *body = root;
     if (json_object_has_member(root, "body")) {
         JsonNode *body_node = json_object_get_member(root, "body");
         if (body_node == NULL || !JSON_NODE_HOLDS_ARRAY(body_node)) {

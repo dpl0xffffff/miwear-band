@@ -1,4 +1,5 @@
 #include "miwear/app.h"
+#include "miwear/activity/daily_details.h"
 #include "miwear/ui/dashboard.h"
 #include "miwear/ui/health_data.h"
 #include "miwear/activity/mi_fitness_full_day_sleep.h"
@@ -23,126 +24,6 @@ typedef struct {
 
 static gboolean sleep_header_valid_bit(const uint8_t *header, size_t header_len, int idx);
 
-static gboolean idle_rebuild_recorded_cb(gpointer user_data) {
-    recorded_rebuild_from_db((AppState *)user_data);
-    return G_SOURCE_REMOVE;
-}
-
-static void schedule_recorded_rebuild(AppState *state) {
-    if (state != NULL) {
-        g_idle_add(idle_rebuild_recorded_cb, state);
-    }
-}
-
-static guint count_sleep_magic(const uint8_t *buf, size_t len) {
-    guint n = 0;
-    for (size_t i = 0; i + 4 <= len; i++) {
-        if (buf[i] == 0xff && buf[i + 1] == 0xfc && buf[i + 2] == 0xfa && buf[i + 3] == 0xfb) {
-            n++;
-        }
-    }
-    return n;
-}
-
-static GBytes *sleep_try_inflate(const uint8_t *data, gsize len, GZlibCompressorFormat fmt) {
-    if (data == NULL || len < 2) {
-        return NULL;
-    }
-    GInputStream *in = g_memory_input_stream_new_from_data(data, len, NULL);
-    GZlibDecompressor *dec = g_zlib_decompressor_new(fmt);
-    GInputStream *conv = g_converter_input_stream_new(in, G_CONVERTER(dec));
-    GOutputStream *out_mem = g_memory_output_stream_new(NULL, 0, g_realloc, g_free);
-    GError *err = NULL;
-    if (g_output_stream_splice(out_mem, conv, G_OUTPUT_STREAM_SPLICE_CLOSE_SOURCE, NULL, &err) != 0) {
-        g_clear_error(&err);
-        g_object_unref(out_mem);
-        g_object_unref(conv);
-        return NULL;
-    }
-    GBytes *result = g_memory_output_stream_steal_as_bytes(G_MEMORY_OUTPUT_STREAM(out_mem));
-    g_object_unref(out_mem);
-    g_object_unref(conv);
-    return result;
-}
-
-static void sleep_dump_payload_debug(const uint8_t *payload, size_t payload_len) {
-    gchar *path = g_build_filename(g_get_user_data_dir(), "miwear-band", "last_sleep_payload.bin", NULL);
-    gchar *dir_only = g_path_get_dirname(path);
-    g_mkdir_with_parents(dir_only, 0755);
-    g_free(dir_only);
-    (void)g_file_set_contents(path, (const char *)payload, payload_len, NULL);
-    g_free(path);
-}
-
-static size_t sleep_gb_packet_scan_start(const uint8_t *payload, size_t len, int version) {
-    if (len < 11) {
-        return len;
-    }
-    const int header_size = version >= 5 ? 2 : 1;
-    if (8u + (size_t)header_size > len) {
-        return len;
-    }
-    const uint8_t *header = payload + 8;
-    size_t pos = 8u + (size_t)header_size;
-    if (pos + 9 > len) {
-        return len;
-    }
-    pos += 1; /* isAwake / sleepFull */
-    pos += 8; /* bed + wake */
-    int header_idx = 3;
-    if (version >= 4) {
-        if (sleep_header_valid_bit(header, (size_t)header_size, header_idx) && pos < len) {
-            pos += 1;
-        }
-        header_idx++;
-    }
-    if (version >= 5 && pos + 17 <= len) {
-        pos += 9 + 4 + 4;
-        header_idx += 5;
-    }
-    if (sleep_header_valid_bit(header, (size_t)header_size, header_idx) && pos + 4 <= len) {
-        const uint16_t count = miwear_read_u16_le(payload + pos + 2);
-        pos += 4;
-        if (count > 0 && count < 4096 && version >= 2 && pos + 4 <= len) {
-            pos += 4;
-        }
-        if (pos + count <= len) {
-            pos += count;
-        } else {
-            return len;
-        }
-    }
-    header_idx++;
-    if (sleep_header_valid_bit(header, (size_t)header_size, header_idx) && pos + 4 <= len) {
-        const uint16_t count = miwear_read_u16_le(payload + pos + 2);
-        pos += 4;
-        if (count > 0 && count < 4096 && version >= 2 && pos + 4 <= len) {
-            pos += 4;
-        }
-        if (pos + count <= len) {
-            pos += count;
-        } else {
-            return len;
-        }
-    }
-    header_idx++;
-    if (version >= 3) {
-        if (sleep_header_valid_bit(header, (size_t)header_size, header_idx) && pos + 4 <= len) {
-            const uint16_t count = miwear_read_u16_le(payload + pos + 2);
-            pos += 4;
-            if (count > 0 && count < 4096 && version >= 2 && pos + 4 <= len) {
-                pos += 4;
-            }
-            const size_t skip = (size_t)count * 4u;
-            if (pos + skip <= len) {
-                pos += skip;
-            } else {
-                return len;
-            }
-        }
-    }
-    return pos;
-}
 
 #include "xiaomi.pb-c.h"
 static uint32_t crc32_ieee(const uint8_t *data, size_t len) {
@@ -168,62 +49,6 @@ static guint16 local_minute_of_day(gint64 unix_sec) {
     const guint16 mod = (guint16)(g_date_time_get_hour(dt) * 60 + g_date_time_get_minute(dt));
     g_date_time_unref(dt);
     return mod;
-}
-
-/* Match Gadgetbridge SleepDetailsParser.decodeStage() mapping. */
-static int decode_sleep_stage_like_gb(int raw_stage) {
-    switch (raw_stage) {
-        case 0: return 5; /* AWAKE */
-        case 1: return 3; /* LIGHT */
-        case 2: return 2; /* DEEP */
-        case 3: return 4; /* REM */
-        case 4: return 0; /* NOT_SLEEP */
-        default: return 1; /* N/A */
-    }
-}
-
-int miwear_normalize_sleep_stage(int raw_stage) {
-    if (raw_stage >= 2 && raw_stage <= 5) {
-        return raw_stage;
-    }
-    return decode_sleep_stage_like_gb(raw_stage);
-}
-
-static void append_sleep_sample_for_unix(GHashTable *by_day, gint64 unix_sec, int stage) {
-    GDateTime *dt = g_date_time_new_from_unix_local(unix_sec);
-    if (dt == NULL) {
-        return;
-    }
-    gchar *day_key = g_date_time_format(dt, "%Y-%m-%d");
-    g_date_time_unref(dt);
-
-    GArray *bucket = g_hash_table_lookup(by_day, day_key);
-    if (bucket == NULL) {
-        bucket = g_array_new(FALSE, FALSE, sizeof(RecordedSample));
-        g_hash_table_insert(by_day, day_key, bucket);
-    } else {
-        g_free(day_key);
-    }
-
-    RecordedSample s = {0};
-    s.minute_of_day = local_minute_of_day(unix_sec);
-    s.steps = s.active_calories = s.distance_cm = s.heart_rate = s.energy = s.spo2 = s.stress = -1;
-    s.sleep_stage = miwear_normalize_sleep_stage(stage);
-    s.sleep_source = 1;
-    g_array_append_val(bucket, s);
-}
-
-static void flush_sleep_day_buckets(AppState *state, GHashTable *by_day) {
-    GHashTableIter it;
-    gpointer k, v;
-    g_hash_table_iter_init(&it, by_day);
-    while (g_hash_table_iter_next(&it, &k, &v)) {
-        GArray *bucket = v;
-        if (bucket != NULL && bucket->len > 0) {
-            recorded_store_samples_for_day_key(state, (const gchar *)k,
-                                               (const RecordedSample *)bucket->data, bucket->len);
-        }
-    }
 }
 
 static gchar *fmt_unix_ts(uint32_t ts) {
@@ -273,249 +98,19 @@ static void log_sleep_samples_summary(AppState *state, const char *tag, const GA
     g_free(line);
 }
 
-static void xiaomi_complex_parser_init(XiaomiComplexParser *p, const uint8_t *header, size_t header_len) {
-    memset(p, 0, sizeof(*p));
-    p->header = header;
-    p->header_len = header_len;
-}
-
-static void xiaomi_complex_parser_reset(XiaomiComplexParser *p) {
-    p->group = 0;
-    p->current_group_bits = 0;
-    p->current_val = 0;
-    p->current_exists = FALSE;
-}
-
-static uint8_t xiaomi_header_nibble(const XiaomiComplexParser *p, size_t group) {
-    const size_t header_byte = group / 2;
-    if (header_byte >= p->header_len) return 0;
-    if ((group % 2) == 0) {
-        return (p->header[header_byte] >> 4) & 0x0F;
-    }
-    return p->header[header_byte] & 0x0F;
-}
-
-static gboolean xiaomi_complex_next_group(XiaomiComplexParser *p, int nbits, const uint8_t *payload, size_t payload_len, size_t *cursor) {
-    const uint8_t nibble = xiaomi_header_nibble(p, p->group);
-    p->group++;
-    p->current_group_bits = nbits;
-    p->current_val = 0;
-    p->current_exists = (nibble & 0x8) != 0;
-    if (!p->current_exists) {
-        return FALSE;
-    }
-
-    if (nbits == 8) {
-        if (*cursor + 1 > payload_len) return FALSE;
-        p->current_val = payload[*cursor];
-        *cursor += 1;
-        return TRUE;
-    } else if (nbits == 16) {
-        if (*cursor + 2 > payload_len) return FALSE;
-        p->current_val = miwear_read_u16_le(payload + *cursor);
-        *cursor += 2;
-        return TRUE;
-    } else if (nbits == 32) {
-        if (*cursor + 4 > payload_len) return FALSE;
-        p->current_val = miwear_read_u32_le(payload + *cursor);
-        *cursor += 4;
-        return TRUE;
-    }
-    return FALSE;
-}
-
-static gboolean xiaomi_complex_has(const XiaomiComplexParser *p, int idx) {
-    if (idx < 0 || idx > 2) return FALSE;
-    const uint8_t nibble = xiaomi_header_nibble(p, p->group - 1);
-    return (nibble & (1u << (2 - idx))) != 0;
-}
-
-static uint32_t xiaomi_complex_get(const XiaomiComplexParser *p, int idx, int nbits) {
-    const int shift = p->current_group_bits - idx - nbits;
-    if (shift < 0 || nbits <= 0 || nbits >= 31) return 0;
-    return (p->current_val >> shift) & ((1u << nbits) - 1u);
-}
-
-typedef struct {
-    gboolean valid;
-    uint32_t minutes;
-    uint32_t step_points;
-    uint32_t distance_points;
-    uint32_t hr_points;
-    size_t final_cursor;
-    uint32_t score;
-} DailyDetailsProbe;
-
-static int expected_daily_details_header_size(int version) {
-    if (version == 1 || version == 2) return 4;
-    if (version == 3) return 5;
-    if (version == 4) return 6;
-    return 0;
-}
-
-static DailyDetailsProbe probe_daily_details_header(const uint8_t *payload,
-                                                    size_t payload_len,
-                                                    int version,
-                                                    int header_size) {
-    DailyDetailsProbe out = {0};
-    if (header_size <= 0) return out;
-    if (payload_len < (size_t)(8 + header_size + 4)) return out;
-
-    const uint8_t *header = payload + 8;
-    const size_t payload_end = payload_len - 4;
-    size_t cursor = (size_t)(8 + header_size);
-
-    XiaomiComplexParser p;
-    xiaomi_complex_parser_init(&p, header, (size_t)header_size);
-
-    while (cursor < payload_end) {
-        const size_t before = cursor;
-        xiaomi_complex_parser_reset(&p);
-
-        int include_extra_entry = 0;
-        if (xiaomi_complex_next_group(&p, 16, payload, payload_end, &cursor)) {
-            if (xiaomi_complex_has(&p, 1)) {
-                include_extra_entry = (int)xiaomi_complex_get(&p, 1, 1);
-            }
-            if (xiaomi_complex_has(&p, 2)) {
-                const int steps = (int)xiaomi_complex_get(&p, 2, 14);
-                if (steps > 0) out.step_points++;
-            }
-        }
-
-        if (xiaomi_complex_next_group(&p, 8, payload, payload_end, &cursor) && xiaomi_complex_has(&p, 2)) {
-            (void)xiaomi_complex_get(&p, 2, 6);
-        }
-        (void)xiaomi_complex_next_group(&p, 8, payload, payload_end, &cursor);
-        if (xiaomi_complex_next_group(&p, 16, payload, payload_end, &cursor) && xiaomi_complex_has(&p, 0)) {
-            const uint32_t raw_d = xiaomi_complex_get(&p, 0, 16);
-            if (raw_d > 0u) out.distance_points++;
-        }
-
-        if (xiaomi_complex_next_group(&p, 8, payload, payload_end, &cursor) && xiaomi_complex_has(&p, 0)) {
-            const uint32_t hr = xiaomi_complex_get(&p, 0, 8);
-            if (hr > 0u && hr < 240u) out.hr_points++;
-        }
-        (void)xiaomi_complex_next_group(&p, 8, payload, payload_end, &cursor);
-        (void)xiaomi_complex_next_group(&p, 16, payload, payload_end, &cursor);
-
-        if (version >= 3) {
-            (void)xiaomi_complex_next_group(&p, 8, payload, payload_end, &cursor);
-            (void)xiaomi_complex_next_group(&p, 8, payload, payload_end, &cursor);
-        }
-        if (include_extra_entry == 1) {
-            if (cursor >= payload_end) {
-                return out;
-            }
-            cursor += 1;
-        }
-        if (version >= 4) {
-            (void)xiaomi_complex_next_group(&p, 16, payload, payload_end, &cursor);
-            (void)xiaomi_complex_next_group(&p, 16, payload, payload_end, &cursor);
-        }
-
-        if (cursor <= before) {
-            return out;
-        }
-        out.minutes++;
-        if (out.minutes > 2880u) {
-            return out;
-        }
-    }
-
-    out.final_cursor = cursor;
-    out.valid = (cursor == payload_end && out.minutes > 0);
-    if (out.valid) {
-        out.score = out.step_points * 16u + out.distance_points * 8u + out.hr_points * 2u + out.minutes;
-    }
-    return out;
-}
-
-static int resolve_daily_details_header_size(AppState *state,
-                                             int version,
-                                             const uint8_t *payload,
-                                             size_t payload_len,
-                                             DailyDetailsProbe *chosen_probe) {
-    const int expected = expected_daily_details_header_size(version);
-    DailyDetailsProbe best = {0};
-    int best_header = 0;
-
-    if (expected > 0) {
-        best = probe_daily_details_header(payload, payload_len, version, expected);
-        if (best.valid) {
-            best_header = expected;
-        }
-    }
-
-    const gboolean should_search =
-        (expected <= 0) ||
-        !best.valid ||
-        (best.step_points == 0u && best.distance_points == 0u);
-
-    if (should_search) {
-        for (int hs = 4; hs <= 12; hs++) {
-            const DailyDetailsProbe cand = probe_daily_details_header(payload, payload_len, version, hs);
-            if (!cand.valid) continue;
-
-            if (!best.valid ||
-                cand.score > best.score ||
-                (cand.score == best.score && (best_header == 0 || hs < best_header))) {
-                best = cand;
-                best_header = hs;
-            }
-        }
-    }
-
-    if (!best.valid || best_header <= 0) {
-        return 0;
-    }
-
-    if (chosen_probe != NULL) {
-        *chosen_probe = best;
-    }
-
-    if (expected <= 0) {
-        gchar *line = g_strdup_printf(
-            "Daily details auto-detected header size=%d for version=%d (rows=%u steps=%u dist=%u hr=%u).",
-            best_header, version, best.minutes, best.step_points, best.distance_points, best.hr_points
-        );
-        append_log(state, line);
-        g_free(line);
-    } else if (best_header != expected) {
-        gchar *line = g_strdup_printf(
-            "Daily details switched header size %d -> %d for version=%d (rows=%u steps=%u dist=%u hr=%u).",
-            expected, best_header, version, best.minutes, best.step_points, best.distance_points, best.hr_points
-        );
-        append_log(state, line);
-        g_free(line);
-    }
-
-    return best_header;
-}
-
 static void parse_daily_details_for_log(AppState *state,
                                         uint32_t ts,
                                         int version,
                                         const uint8_t *payload,
                                         size_t payload_len) {
-    DailyDetailsProbe probe = {0};
-    const int header_size = resolve_daily_details_header_size(state, version, payload, payload_len, &probe);
-    if (header_size <= 0) {
-        append_log(state, "Daily details parser: unsupported/unknown header layout for this payload.");
+    const char *error = NULL;
+    GArray *minutes_arr = miwear_daily_details_decode(version, payload, payload_len, &error);
+    if (minutes_arr == NULL) {
+        gchar *msg = g_strdup_printf("Daily details parser (v%d): %s.", version, error != NULL ? error : "failed");
+        append_log(state, msg);
+        g_free(msg);
         return;
     }
-
-    if (payload_len < (size_t)(8 + header_size + 4)) {
-        append_log(state, "Daily details parser: payload too short.");
-        return;
-    }
-
-    const uint8_t *header = payload + 8;
-    size_t cursor = (size_t)(8 + header_size);
-    const size_t payload_end = payload_len - 4; /* strip CRC32 */
-
-    XiaomiComplexParser p;
-    xiaomi_complex_parser_init(&p, header, (size_t)header_size);
 
     uint32_t minutes = 0;
     uint32_t hr_count = 0;
@@ -524,125 +119,40 @@ static void parse_daily_details_for_log(AppState *state,
     uint32_t hr_max = 0;
     uint32_t step_points = 0;
     uint32_t distance_points = 0;
-
     GString *hr_track = g_string_new("");
     GArray *samples = g_array_new(FALSE, FALSE, sizeof(RecordedSample));
-    while (cursor < payload_end) {
-        const size_t before = cursor;
-        xiaomi_complex_parser_reset(&p);
+    for (guint i = 0; i < minutes_arr->len; i++) {
+        const MiwearDailyDetailsMinute *m = &g_array_index(minutes_arr, MiwearDailyDetailsMinute, i);
         minutes++;
         RecordedSample sample = {0};
-        sample.steps = -1;
-        sample.active_calories = -1;
-        sample.distance_cm = -1;
+        sample.steps = m->steps;
+        sample.active_calories = m->active_calories;
+        sample.distance_cm = m->distance_cm;
         sample.heart_rate = -1;
-        sample.energy = -1;
-        sample.spo2 = -1;
-        sample.stress = -1;
+        sample.energy = m->energy;
+        sample.spo2 = m->spo2;
+        sample.stress = m->stress;
         sample.sleep_stage = -1;
-        sample.sleep_source = 0;
-
-        int include_extra_entry = 0;
-        if (xiaomi_complex_next_group(&p, 16, payload, payload_end, &cursor)) {
-            if (xiaomi_complex_has(&p, 1)) {
-                include_extra_entry = (int)xiaomi_complex_get(&p, 1, 1);
+        if (sample.steps > 0) {
+            step_points++;
+        }
+        if (sample.distance_cm > 0) {
+            distance_points++;
+        }
+        if (m->heart_rate > 0 && m->heart_rate <= 220) {
+            const uint32_t hr = (uint32_t)m->heart_rate;
+            sample.heart_rate = m->heart_rate;
+            hr_count++;
+            hr_sum += hr;
+            hr_min = MIN(hr_min, hr);
+            hr_max = MAX(hr_max, hr);
+            if (hr_track->len < 350) {
+                g_string_append_printf(hr_track, "%s%u", hr_track->len ? "," : "", hr);
             }
-            if (xiaomi_complex_has(&p, 2)) {
-                sample.steps = (int)xiaomi_complex_get(&p, 2, 14);
-                if (sample.steps > 0) {
-                    step_points++;
-                }
-            }
-        }
-
-        if (xiaomi_complex_next_group(&p, 8, payload, payload_end, &cursor) && xiaomi_complex_has(&p, 2)) {
-            sample.active_calories = (int)xiaomi_complex_get(&p, 2, 6);
-        }
-        (void)xiaomi_complex_next_group(&p, 8, payload, payload_end, &cursor);
-        if (xiaomi_complex_next_group(&p, 16, payload, payload_end, &cursor) && xiaomi_complex_has(&p, 0)) {
-            /* DailyDetailsParser: sample.setDistanceCm(complexParser.get(0, 16) * 100) */
-            const uint32_t raw_d = xiaomi_complex_get(&p, 0, 16);
-            sample.distance_cm = (int)(raw_d * 100u);
-            if (sample.distance_cm > 0) {
-                distance_points++;
-            }
-        }
-
-        if (xiaomi_complex_next_group(&p, 8, payload, payload_end, &cursor) && xiaomi_complex_has(&p, 0)) {
-            const uint32_t hr = xiaomi_complex_get(&p, 0, 8);
-            /* v4 detail chunks often mis-decode non-HR bytes (e.g. 228) when layout drifts. */
-            if (hr > 0u && hr <= 220u) {
-                sample.heart_rate = (int)hr;
-                hr_count++;
-                hr_sum += hr;
-                if (hr < hr_min) hr_min = hr;
-                if (hr > hr_max) hr_max = hr;
-                if (hr_track->len < 350) {
-                    if (hr_track->len > 0) g_string_append(hr_track, ",");
-                    g_string_append_printf(hr_track, "%u", hr);
-                }
-            }
-        }
-
-        if (xiaomi_complex_next_group(&p, 8, payload, payload_end, &cursor) && xiaomi_complex_has(&p, 0)) {
-            sample.energy = (int)xiaomi_complex_get(&p, 0, 8);
-        }
-        (void)xiaomi_complex_next_group(&p, 16, payload, payload_end, &cursor);
-
-        if (version >= 3) {
-            if (xiaomi_complex_next_group(&p, 8, payload, payload_end, &cursor) && xiaomi_complex_has(&p, 0)) {
-                sample.spo2 = (int)xiaomi_complex_get(&p, 0, 8);
-            }
-            if (xiaomi_complex_next_group(&p, 8, payload, payload_end, &cursor) && xiaomi_complex_has(&p, 0)) {
-                const int st = (int)xiaomi_complex_get(&p, 0, 8);
-                /* DailyDetailsParser: if (stress != 255) sample.setStress(stress); */
-                sample.stress = (st != 255) ? st : -1;
-                if (miwear_stress_value_valid(sample.stress)) {
-                    gchar *stline = g_strdup_printf(
-                        "Daily detail stress: file_ts=%u row=%u value=%d",
-                        ts,
-                        (unsigned)minutes,
-                        sample.stress);
-                    append_log(state, stline);
-                    g_free(stline);
-                }
-            }
-        }
-        if (include_extra_entry == 1) {
-            if (cursor < payload_end) {
-                cursor += 1;
-            } else {
-                break;
-            }
-        }
-        if (version >= 4) {
-            (void)xiaomi_complex_next_group(&p, 16, payload, payload_end, &cursor);
-            (void)xiaomi_complex_next_group(&p, 16, payload, payload_end, &cursor);
-        }
-        if (cursor <= before) {
-            append_log(state, "Daily details parser stalled (no cursor progress); aborting this payload.");
-            break;
         }
         g_array_append_val(samples, sample);
     }
-
-    if (probe.valid && probe.minutes > 0 && minutes != probe.minutes) {
-        gchar *line_probe = g_strdup_printf(
-            "Daily details note: probe rows=%u but parsed rows=%u (payload likely partially decoded).",
-            probe.minutes, minutes
-        );
-        append_log(state, line_probe);
-        g_free(line_probe);
-    }
-
-    if (cursor != payload_end) {
-        gchar *line_tail = g_strdup_printf(
-            "Daily details parser did not consume full payload (%zu/%zu bytes).",
-            cursor, payload_end
-        );
-        append_log(state, line_tail);
-        g_free(line_tail);
-    }
+    g_array_unref(minutes_arr);
 
     gchar *ts_txt = fmt_unix_ts(ts);
     gchar *line = g_strdup_printf("Daily detail %s: minutes=%u, HR samples=%u, HR min/avg/max=%u/%u/%u",
@@ -679,10 +189,18 @@ static void parse_daily_details_for_log(AppState *state,
             g_date_time_unref(wall);
             if (start_min != NULL) {
                 GArray *act_rows = g_array_sized_new(FALSE, FALSE, sizeof(MiwearXiaomiActivityRow), samples->len);
+                const gint64 now_sec = g_get_real_time() / G_USEC_PER_SEC;
+                guint future_rows = 0;
                 for (guint i = 0; i < samples->len; i++) {
                     GDateTime *row_ts = g_date_time_add_minutes(start_min, (gint)i);
                     gint64 unix_sec = g_date_time_to_unix(row_ts);
                     g_date_time_unref(row_ts);
+                    if (unix_sec > now_sec + 60) {
+                        /* A file can't describe minutes that haven't happened: a mis-decoded file
+                         * shows up as rows past "now". Never store those. */
+                        future_rows = samples->len - i;
+                        break;
+                    }
                     const RecordedSample *src = &g_array_index(samples, RecordedSample, i);
                     /* Mirror DailyDetailsParser + XiaomiActivitySample defaults (ActivitySample.NOT_MEASURED = -1). */
                     MiwearXiaomiActivityRow r = {0};
@@ -697,6 +215,12 @@ static void parse_daily_details_for_log(AppState *state,
                     r.energy = src->energy >= 0 ? src->energy : -1;
                     r.steps = src->steps >= 0 ? src->steps : -1;
                     g_array_append_val(act_rows, r);
+                }
+                if (future_rows > 0) {
+                    gchar *w = g_strdup_printf("Daily details: dropped %u row(s) dated in the future "
+                                               "(file decoded with the wrong layout?).", future_rows);
+                    append_log(state, w);
+                    g_free(w);
                 }
                 recorded_merge_xiaomi_activity_rows(state,
                                                     (const MiwearXiaomiActivityRow *)act_rows->data,
@@ -892,7 +416,8 @@ static void parse_sleep_stages_v2_for_log(AppState *state,
     off += 1;
 
     GArray *raw_phases = g_array_new(FALSE, FALSE, sizeof(GbRawSleepPhaseChange));
-    GHashTable *by_day = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_array_unref);
+    RecordedBatch *sleep_batch = recorded_batch_new();
+    /* v2 phase values are already in stored-stage form (2 deep … 5 awake), as in Gadgetbridge. */
     uint32_t prev_t = 0;
     int prev_stage = -1;
     while (off + 5 <= payload_len - 4) {
@@ -903,7 +428,7 @@ static void parse_sleep_stages_v2_for_log(AppState *state,
         g_array_append_val(raw_phases, ph);
         if (prev_t != 0 && prev_stage >= 0 && t > prev_t) {
             for (uint32_t sec = prev_t; sec < t; sec += 60) {
-                append_sleep_sample_for_unix(by_day, (gint64)sec, prev_stage);
+                recorded_batch_add_sleep_minute(sleep_batch, (gint64)sec, miwear_normalize_sleep_stage(prev_stage));
             }
         }
         prev_t = t;
@@ -911,7 +436,7 @@ static void parse_sleep_stages_v2_for_log(AppState *state,
     }
     if (prev_t != 0 && prev_stage >= 0 && wake_time > prev_t) {
         for (uint32_t sec = prev_t; sec < wake_time; sec += 60) {
-            append_sleep_sample_for_unix(by_day, (gint64)sec, prev_stage);
+            recorded_batch_add_sleep_minute(sleep_batch, (gint64)sec, miwear_normalize_sleep_stage(prev_stage));
         }
     }
 
@@ -928,8 +453,7 @@ static void parse_sleep_stages_v2_for_log(AppState *state,
     }
     g_array_unref(raw_phases);
 
-    flush_sleep_day_buckets(state, by_day);
-    g_hash_table_unref(by_day);
+    recorded_batch_commit(state, sleep_batch);
     append_log(state, "Sleep stages v2 parsed and merged into Sleep chart.");
 
     gchar *bed_txt = fmt_unix_ts(bed_time);
@@ -996,7 +520,7 @@ static size_t parse_sleep_spo2_series(GArray *samples,
         }
         const uint32_t sec = first_sec + (uint32_t)unit_sec * (uint32_t)i;
         RecordedSample s = {0};
-        s.minute_of_day = (uint16_t)((sec / 60u) % 1440u);
+        s.minute_of_day = local_minute_of_day((gint64)sec);
         s.steps = s.active_calories = s.distance_cm = s.energy = s.heart_rate = s.stress = s.sleep_stage = -1;
         s.spo2 = (int)spo2;
         s.sleep_source = 1;
@@ -1014,8 +538,6 @@ typedef struct {
     long long last_hb_ms;
     uint32_t bed_sec;
     uint32_t wake_sec;
-    int64_t stage_stream_ms;
-    gboolean stage_stream_valid;
 } ParseSleepFeatureCtx;
 
 static gboolean parse_sleep_feature_packet(const MiwearSleepPacketView *pkt, void *user_data) {
@@ -1050,7 +572,7 @@ static gboolean parse_sleep_feature_packet(const MiwearSleepPacketView *pkt, voi
             if (hr > 0 && hr < 240) {
                 const uint32_t sec = (uint32_t)(ctx->last_hb_ms / 1000LL);
                 RecordedSample s = {0};
-                s.minute_of_day = (uint16_t)((sec / 60u) % 1440u);
+                s.minute_of_day = local_minute_of_day((gint64)sec);
                 s.steps = s.active_calories = s.distance_cm = s.energy = s.spo2 = s.stress = s.sleep_stage = -1;
                 s.heart_rate = hr;
                 s.sleep_source = 1;
@@ -1061,17 +583,14 @@ static gboolean parse_sleep_feature_packet(const MiwearSleepPacketView *pkt, voi
         ctx->stage_packets++;
         int64_t current_ms = miwear_sleep_packet_timestamp_ms(pkt->ts_raw);
         if (!miwear_sleep_timestamp_plausible(current_ms)) {
-            if (ctx->stage_stream_valid) {
-                current_ms = ctx->stage_stream_ms;
-            } else if (ctx->bed_sec > 0) {
-                current_ms = (int64_t)ctx->bed_sec * 1000LL;
-            } else {
-                current_ms = 0;
-            }
+            /* Gadgetbridge anchors each stage packet at its own timestamp. Chaining an unreadable
+             * one onto the end of the previous packet duplicated stage runs past wake-up. */
+            return TRUE;
         }
         for (uint16_t i = 0; i + 1 < data_len; i += 2) {
             const uint16_t val = ((uint16_t)d[i] << 8) | d[i + 1];
-            const int stage = miwear_normalize_sleep_stage((val >> 12) & 0x0F);
+            const int stage = miwear_sleep_decode_raw_stage((val >> 12) & 0x0F);
+            const int paint = miwear_normalize_sleep_stage(stage); /* -1 for "not asleep" */
             int offset_min = (int)(val & 0x0FFF);
             if (offset_min < 0 || offset_min > 720) {
                 continue;
@@ -1079,30 +598,26 @@ static gboolean parse_sleep_feature_packet(const MiwearSleepPacketView *pkt, voi
             if (offset_min == 0) {
                 offset_min = 1;
             }
-            if (current_ms <= 0 && ctx->bed_sec > 0) {
-                current_ms = (int64_t)ctx->bed_sec * 1000LL;
-            }
             MiwearSleepStageRow gr = {current_ms, stage};
             g_array_append_val(ctx->stage_rows, gr);
-            for (int m = 0; m < offset_min; m++) {
+            for (int m = 0; paint >= 0 && m < offset_min; m++) {
                 RecordedSample s = {0};
                 s.minute_of_day = local_minute_of_day(current_ms / 1000LL + (gint64)m * 60LL);
                 s.steps = s.active_calories = s.distance_cm = s.energy = s.heart_rate = s.spo2 = s.stress = -1;
-                s.sleep_stage = stage;
+                s.sleep_stage = paint;
                 s.sleep_source = 1;
                 g_array_append_val(ctx->samples, s);
             }
             current_ms += (int64_t)offset_min * 60000LL;
-            ctx->stage_stream_ms = current_ms;
-            ctx->stage_stream_valid = TRUE;
         }
     } else if (type == 16 && data_len >= 11 && ctx->summary_out != NULL) {
         ctx->stage_packets++;
-        const uint16_t sleep_duration = miwear_read_u16_le(d + 1);
-        const uint16_t wake_duration = miwear_read_u16_le(d + 3);
-        const uint16_t light_duration = miwear_read_u16_le(d + 5);
-        const uint16_t rem_duration = miwear_read_u16_le(d + 7);
-        const uint16_t deep_duration = miwear_read_u16_le(d + 9);
+        /* Big-endian, like the rest of the packet body (Gadgetbridge SleepDetailsParser). */
+        const uint16_t sleep_duration = miwear_read_u16_be(d + 1);
+        const uint16_t wake_duration = miwear_read_u16_be(d + 3);
+        const uint16_t light_duration = miwear_read_u16_be(d + 5);
+        const uint16_t rem_duration = miwear_read_u16_be(d + 7);
+        const uint16_t deep_duration = miwear_read_u16_be(d + 9);
         ctx->summary_out->total_min = (int)sleep_duration;
         ctx->summary_out->awake_min = (int)wake_duration;
         ctx->summary_out->light_min = (int)light_duration;
@@ -1134,101 +649,9 @@ static guint parse_sleep_feature_data(const uint8_t *payload,
         .last_hb_ms = 0,
         .bed_sec = bed_sec,
         .wake_sec = wake_sec,
-        .stage_stream_ms = 0,
-        .stage_stream_valid = FALSE,
     };
     (void)miwear_sleep_foreach_packet(payload + pos, end - pos, parse_sleep_feature_packet, &ctx);
     return ctx.stage_packets;
-}
-
-static gboolean try_parse_sleep_stages_v2_at(AppState *state,
-                                             uint32_t ts,
-                                             const uint8_t *payload,
-                                             size_t len,
-                                             size_t start,
-                                             uint32_t expect_bed,
-                                             GArray *samples,
-                                             GArray *stage_rows) {
-    if (start + 40 > len || payload[start] != 0xff || payload[start + 1] != 0xff) {
-        return FALSE;
-    }
-    size_t off = start + 7;
-    if (off + 20 > len) {
-        return FALSE;
-    }
-    const uint16_t sleep_duration = miwear_read_u16_le(payload + off);
-    off += 2;
-    const uint32_t bed_time = miwear_read_u32_le(payload + off);
-    off += 4;
-    const uint32_t wake_time = miwear_read_u32_le(payload + off);
-    off += 4;
-    if (bed_time == 0 || wake_time == 0 || sleep_duration == 0 || wake_time <= bed_time) {
-        return FALSE;
-    }
-    if (expect_bed != 0 && bed_time != expect_bed && (bed_time > expect_bed ? bed_time - expect_bed : expect_bed - bed_time) > 7200u) {
-        return FALSE;
-    }
-    off += 3;
-    if (off + 8 > len) {
-        return FALSE;
-    }
-    const uint16_t deep = miwear_read_u16_le(payload + off);
-    off += 2;
-    const uint16_t light = miwear_read_u16_le(payload + off);
-    off += 2;
-    const uint16_t rem = miwear_read_u16_le(payload + off);
-    off += 2;
-    const uint16_t awake = miwear_read_u16_le(payload + off);
-    off += 2;
-    off += 1;
-    while (off + 5 <= len) {
-        const uint32_t phase_ts = miwear_read_u32_le(payload + off);
-        off += 4;
-        const uint8_t raw_stage = payload[off++];
-        if (phase_ts == 0) {
-            continue;
-        }
-        const int stage = miwear_normalize_sleep_stage((int)raw_stage);
-        MiwearSleepStageRow gr = {(int64_t)phase_ts * 1000LL, stage};
-        g_array_append_val(stage_rows, gr);
-        RecordedSample s = {0};
-        s.minute_of_day = local_minute_of_day((gint64)phase_ts);
-        s.steps = s.active_calories = s.distance_cm = s.heart_rate = s.energy = s.spo2 = s.stress = -1;
-        s.sleep_stage = stage;
-        s.sleep_source = 1;
-        g_array_append_val(samples, s);
-    }
-    if (stage_rows->len == 0) {
-        return FALSE;
-    }
-    (void)miwear_db_replace_sleep_stages_v2(bed_time,
-                                           wake_time,
-                                           sleep_duration,
-                                           deep,
-                                           light,
-                                           rem,
-                                           awake,
-                                           NULL,
-                                           0);
-    (void)miwear_db_replace_sleep_stage_samples((const MiwearSleepStageRow *)stage_rows->data, stage_rows->len);
-    append_log(state, "Sleep stages v2 block found inside sleep payload.");
-    (void)ts;
-    return TRUE;
-}
-
-static gboolean scan_sleep_stages_v2_embedded(AppState *state,
-                                              uint32_t ts,
-                                              const uint8_t *payload,
-                                              size_t len,
-                                              uint32_t expect_bed,
-                                              GArray *samples,
-                                              GArray *stage_rows) {
-    for (size_t i = 8; i + 40 < len; i++) {
-        if (try_parse_sleep_stages_v2_at(state, ts, payload, len, i, expect_bed, samples, stage_rows)) {
-            return TRUE;
-        }
-    }
-    return FALSE;
 }
 
 static void finalize_sleep_parse(AppState *state,
@@ -1298,7 +721,7 @@ static void finalize_sleep_parse(AppState *state,
     }
     if (stage_rows->len > 0 || (summary != NULL && summary->valid) ||
         (bed_time != 0 && wake_time != 0 && wake_time > bed_time)) {
-        schedule_recorded_rebuild(state);
+        recorded_schedule_rebuild(state);
     }
     g_free(bed_txt);
     g_free(wake_txt);
@@ -1486,7 +909,7 @@ static void parse_sleep_details_for_log(AppState *state,
             if (hr > 0 && hr < 240) {
                 uint32_t sec = first_record + (uint32_t)unit * (uint32_t)i;
                 RecordedSample s = {0};
-                s.minute_of_day = (uint16_t)((sec / 60u) % 1440u);
+                s.minute_of_day = local_minute_of_day((gint64)sec);
                 s.steps = s.active_calories = s.distance_cm = s.energy = s.spo2 = s.stress = s.sleep_stage = -1;
                 s.heart_rate = hr;
                 s.sleep_source = 1;
@@ -1509,7 +932,7 @@ static void parse_sleep_details_for_log(AppState *state,
             if (spo2 > 0 && spo2 <= 100) {
                 uint32_t sec = first_record + (uint32_t)unit * (uint32_t)i;
                 RecordedSample s = {0};
-                s.minute_of_day = (uint16_t)((sec / 60u) % 1440u);
+                s.minute_of_day = local_minute_of_day((gint64)sec);
                 s.steps = s.active_calories = s.distance_cm = s.energy = s.heart_rate = s.stress = s.sleep_stage = -1;
                 s.spo2 = spo2;
                 s.sleep_source = 1;
@@ -1521,7 +944,7 @@ static void parse_sleep_details_for_log(AppState *state,
 
     if (version >= 3) {
         if (sleep_header_valid_bit(header, (size_t)header_size, header_idx) && off + 4 <= payload_len - 4) {
-            uint16_t unit = miwear_read_u16_le(payload + off); off += 2;
+            off += 2; /* unit */
             uint16_t count = miwear_read_u16_le(payload + off); off += 2;
             if (count > 0 && version >= 2 && off + 4 <= payload_len - 4) {
                 off += 4;

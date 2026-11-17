@@ -33,9 +33,21 @@ void miwear_sport_add_entry(AppState *state,
                             int type,
                             int subtype,
                             const MiwearWorkoutSummary *summary);
-void miwear_dashboard_notify_summary(AppState *state, const MiwearDailySummaryRow *row);
+void miwear_sport_load_from_db(AppState *state);
+/* Frees all sport entries (and closes a workout detail view that points into them). */
+void miwear_sport_entries_clear(AppState *state);
+void miwear_sport_merge_attachment(AppState *state,
+                                   uint32_t ts,
+                                   int subtype,
+                                   MiwearWorkoutSummary *patch);
+void miwear_sport_rebuild_list(AppState *state);
 
-void miwear_dashboard_apply_viewport(AppState *state, int width, int height);
-double miwear_dashboard_ui_scale(MiwearDashboardUi *dash);
+/* Shell integration (ui.c) */
+void miwear_dashboard_add_breakpoints(GtkWidget *window, MiwearDashboardUi *dash);
+void miwear_dashboard_set_toast_overlay(MiwearDashboardUi *dash, GtkWidget *overlay);
+void miwear_dashboard_toast(AppState *state, const char *text);
+void miwear_dashboard_set_busy(AppState *state, gboolean busy);
+void miwear_dashboard_set_status(AppState *state, const char *text);
+void miwear_dashboard_update_connection(AppState *state);
 
 #endif

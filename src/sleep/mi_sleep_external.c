@@ -121,15 +121,19 @@ gboolean miwear_sleep_run_external_algo_cmd(AppState *state,
         return FALSE;
     }
 
+    /* Pass bed/wake to the helper via its own environment: g_setenv() on our process is not
+     * thread-safe (GDBus/GIO worker threads read the environment) and leaked stale values into
+     * later invocations. */
+    gchar **envp = g_get_environ();
     if (bed_sec > 0) {
         gchar bed_env[32];
         (void)g_snprintf(bed_env, sizeof(bed_env), "%u", bed_sec);
-        g_setenv("MIWEAR_SLEEP_BED_SEC", bed_env, TRUE);
+        envp = g_environ_setenv(envp, "MIWEAR_SLEEP_BED_SEC", bed_env, TRUE);
     }
     if (wake_sec > 0) {
         gchar wake_env[32];
         (void)g_snprintf(wake_env, sizeof(wake_env), "%u", wake_sec);
-        g_setenv("MIWEAR_SLEEP_WAKE_SEC", wake_env, TRUE);
+        envp = g_environ_setenv(envp, "MIWEAR_SLEEP_WAKE_SEC", wake_env, TRUE);
     }
 
     gchar *cmd = g_strdup_printf(cmd_template, path);
@@ -137,7 +141,13 @@ gboolean miwear_sleep_run_external_algo_cmd(AppState *state,
     gchar *stdout_buf = NULL;
     gchar *stderr_buf = NULL;
     gint exit_status = 0;
-    const gboolean ok = g_spawn_command_line_sync(cmd, &stdout_buf, &stderr_buf, &exit_status, &err);
+    gchar **argv = NULL;
+    /* Same argv parsing and PATH lookup as g_spawn_command_line_sync(), plus envp. */
+    const gboolean ok = g_shell_parse_argv(cmd, NULL, &argv, &err) &&
+                        g_spawn_sync(NULL, argv, envp, G_SPAWN_SEARCH_PATH, NULL, NULL,
+                                     &stdout_buf, &stderr_buf, &exit_status, &err);
+    g_strfreev(argv);
+    g_strfreev(envp);
     g_free(cmd);
     g_remove(path);
     g_free(path);

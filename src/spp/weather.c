@@ -355,51 +355,16 @@ static void meteo_snapshot_clear(MeteoSnapshot *s) {
     memset(s, 0, sizeof(*s));
 }
 
-static gchar *http_get_via_curl(const char *url, GError **err) {
-    gchar *stdout_buf = NULL;
-    gchar *stderr_buf = NULL;
-    gint exit_status = 0;
-    const gchar *argv[] = {"curl", "-sS", "-f", "--max-time", "20", url, NULL};
-    if (!g_spawn_sync(NULL, (gchar **)argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, &stdout_buf, &stderr_buf, &exit_status, err)) {
-        return NULL;
-    }
-    if (exit_status != 0) {
-        if (err != NULL) {
-            *err = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED, "%s", stderr_buf ? stderr_buf : "curl failed");
-        }
-        g_free(stdout_buf);
-        g_free(stderr_buf);
-        return NULL;
-    }
-    g_free(stderr_buf);
-    return stdout_buf;
+static void weather_push_ctx_free(WeatherPushCtx *ctx) {
+    g_free(ctx->location_name);
+    g_free(ctx->location_code);
+    g_free(ctx);
 }
 
-static gboolean weather_push_idle(gpointer user_data) {
-    WeatherPushCtx *ctx = user_data;
-    AppState *state = ctx->state;
-
-    if (state == NULL || !state->weather_coords_valid) {
-        weather_set_status(state, "Weather coordinates not configured");
-        g_free(ctx->location_name);
-        g_free(ctx->location_code);
-        g_free(ctx);
-        return G_SOURCE_REMOVE;
-    }
-
-    GError *err = NULL;
-    gchar *url = g_strdup_printf(
-        "https://api.open-meteo.com/v1/forecast?latitude=%.5f&longitude=%.5f"
-        "&current=temperature_2m,relative_humidity_2m,weather_code,pressure_msl,wind_speed_10m,wind_direction_10m"
-        "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset"
-        "&timezone=auto&forecast_days=7",
-        state->weather_latitude,
-        state->weather_longitude);
-
-    gchar *body = http_get_via_curl(url, &err);
-    g_free(url);
-
+/* Main thread: parse the Open-Meteo response (or report the fetch error) and push to the band. */
+static void weather_apply_fetch(AppState *state, WeatherPushCtx *ctx, const gchar *body, GError *err) {
     WeatherFetchResult *result = NULL;
+    GError *parse_err = NULL;
     if (body != NULL) {
         result = g_new0(WeatherFetchResult, 1);
         result->location_name = g_strdup(ctx->location_name);
@@ -407,9 +372,9 @@ static gboolean weather_push_idle(gpointer user_data) {
         if (!parse_open_meteo(body, &result->snap)) {
             weather_fetch_result_free(result);
             result = NULL;
-            g_set_error(&err, G_IO_ERROR, G_IO_ERROR_INVALID_DATA, "Open-Meteo JSON parse failed");
+            g_set_error(&parse_err, G_IO_ERROR, G_IO_ERROR_INVALID_DATA, "Open-Meteo JSON parse failed");
+            err = parse_err;
         }
-        g_free(body);
     }
 
     if (result != NULL && state->auth_initialized && state->sock_fd >= 0) {
@@ -433,23 +398,98 @@ static gboolean weather_push_idle(gpointer user_data) {
     }
 
     weather_fetch_result_free(result);
-    g_clear_error(&err);
-    g_free(ctx->location_name);
-    g_free(ctx->location_code);
-    g_free(ctx);
-    return G_SOURCE_REMOVE;
+    g_clear_error(&parse_err);
 }
 
+static void on_weather_curl_done(GObject *source, GAsyncResult *res, gpointer user_data) {
+    WeatherPushCtx *ctx = user_data;
+    GSubprocess *proc = G_SUBPROCESS(source);
+    gchar *stdout_buf = NULL;
+    gchar *stderr_buf = NULL;
+    GError *err = NULL;
+    const gboolean ok = g_subprocess_communicate_utf8_finish(proc, res, &stdout_buf, &stderr_buf, &err);
+    if (g_error_matches(err, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+        /* App shutdown: AppState may already be torn down. */
+        g_subprocess_force_exit(proc);
+        g_error_free(err);
+        g_free(stdout_buf);
+        g_free(stderr_buf);
+        weather_push_ctx_free(ctx);
+        return;
+    }
+
+    AppState *state = ctx->state;
+    state->weather_fetch_inflight = FALSE;
+    if (ok && !g_subprocess_get_successful(proc)) {
+        err = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED, "%s",
+                          stderr_buf != NULL && stderr_buf[0] != '\0' ? stderr_buf : "curl failed");
+    }
+    weather_apply_fetch(state, ctx, err == NULL ? stdout_buf : NULL, err);
+
+    g_clear_error(&err);
+    g_free(stdout_buf);
+    g_free(stderr_buf);
+    weather_push_ctx_free(ctx);
+}
+
+/*
+ * Fetches Open-Meteo with curl asynchronously. This used to run curl synchronously on the GTK
+ * main loop (up to its 20 s timeout), freezing the UI whenever the band asked for weather.
+ */
 static void schedule_weather_push(AppState *state) {
     if (state == NULL || !state->auth_initialized || state->sock_fd < 0) {
         return;
     }
+    if (!state->weather_coords_valid) {
+        weather_set_status(state, "Weather coordinates not configured");
+        return;
+    }
+    if (state->weather_fetch_inflight) {
+        append_log(state, "Weather fetch already in progress.");
+        return;
+    }
+
+    gchar *url = g_strdup_printf(
+        "https://api.open-meteo.com/v1/forecast?latitude=%.5f&longitude=%.5f"
+        "&current=temperature_2m,relative_humidity_2m,weather_code,pressure_msl,wind_speed_10m,wind_direction_10m"
+        "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset"
+        "&timezone=auto&forecast_days=7",
+        state->weather_latitude,
+        state->weather_longitude);
+    GError *err = NULL;
+    GSubprocess *proc = g_subprocess_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE,
+                                         &err,
+                                         "curl", "-sS", "-f", "--max-time", "20", url, NULL);
+    g_free(url);
+    if (proc == NULL) {
+        gchar *line = g_strdup_printf("Weather fetch failed: %s", err != NULL ? err->message : "cannot run curl");
+        weather_set_status(state, line);
+        append_log(state, line);
+        g_free(line);
+        g_clear_error(&err);
+        return;
+    }
+
     const char *name = state->weather_location_name != NULL ? state->weather_location_name : "Home";
     WeatherPushCtx *ctx = g_new0(WeatherPushCtx, 1);
     ctx->state = state;
     ctx->location_name = g_strdup(name);
     ctx->location_code = location_key_from_name(name);
-    g_idle_add(weather_push_idle, ctx);
+    if (state->weather_cancellable == NULL) {
+        state->weather_cancellable = g_cancellable_new();
+    }
+    state->weather_fetch_inflight = TRUE;
+    g_subprocess_communicate_utf8_async(proc, NULL, state->weather_cancellable, on_weather_curl_done, ctx);
+    g_object_unref(proc); /* the pending operation keeps its own reference */
+}
+
+void miwear_weather_shutdown(AppState *state) {
+    if (state == NULL || state->weather_cancellable == NULL) {
+        return;
+    }
+    g_cancellable_cancel(state->weather_cancellable);
+    g_clear_object(&state->weather_cancellable);
+    state->weather_fetch_inflight = FALSE;
 }
 
 void miwear_weather_initialize(AppState *state) {

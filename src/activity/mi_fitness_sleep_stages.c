@@ -96,7 +96,7 @@ void mi_fitness_apply_sleep_stages_from_feature(AppState *state,
     int deep_min = -1, light_min = -1, rem_min = -1, awake_min = -1, total_min = -1;
 
     gchar *line = g_strdup_printf(
-        "Mi Fitness sleep pipeline: feature=%zu bytes, sleepSrc=%zu (native Linux algo)",
+        "Mi Fitness sleep pipeline: feature=%zu bytes, sleepSrc=%zu",
         feature_len,
         sleep_src_len);
     append_log(state, line);
@@ -142,8 +142,8 @@ void mi_fitness_apply_sleep_stages_from_feature(AppState *state,
     }
     if (!ok) {
         append_log(state,
-                   "Mi Fitness sleep stages: native pipeline failed (build with -DMIWEAR_ENABLE_SLEEP_ML=ON or "
-                   "set MIWEAR_MI_SLEEP_ALGO_CMD).");
+                   "Mi Fitness sleep stages: no embedded stage packets (set MIWEAR_MI_SLEEP_ALGO_CMD "
+                   "for an external helper).");
         g_array_unref(stage_rows);
         (void)version;
         return;

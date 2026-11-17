@@ -6,6 +6,7 @@
 #include "miwear/spp/fitness_sync.h"
 #include "miwear/notifications/notifications.h"
 #include "miwear/spp/weather.h"
+#include "miwear/spp/wire.h"
 #include "miwear/spp/wire_internal.h"
 
 #include <bluetooth/bluetooth.h>
@@ -13,6 +14,7 @@
 #include <bluetooth/sdp.h>
 #include <bluetooth/sdp_lib.h>
 #include <errno.h>
+#include <glib-unix.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -1136,7 +1138,6 @@ static void probe_manual_file_ids_if_needed(AppState *state,
     }
 
     uint32_t day_ts = 0;
-    int8_t tz = 8;
     for (size_t off = 0; off + 7 <= listed_len; off += 7) {
         const uint8_t flags = listed_ids[off + 6];
         const int type = (flags >> 7) & 1;
@@ -1144,7 +1145,6 @@ static void probe_manual_file_ids_if_needed(AppState *state,
         const int detail = flags & 3;
         if (type == 0 && subtype == 0 && detail == 1) {
             day_ts = miwear_read_u32_le(listed_ids + off);
-            tz = (int8_t)listed_ids[off + 4];
             break;
         }
     }
@@ -2084,7 +2084,8 @@ static void process_rx_buffer(AppState *state) {
     }
 }
 
-static gboolean try_connect_rfcomm_with_security(AppState *state, const bdaddr_t *bdaddr, int channel, int sec_level) {
+/* Worker-thread safe: touches no AppState fields. Returns a connected fd or -1 (errno set). */
+static int try_connect_rfcomm_with_security(const bdaddr_t *bdaddr, int channel, int sec_level) {
     struct sockaddr_rc addr = {0};
     addr.rc_family = AF_BLUETOOTH;
     addr.rc_channel = (uint8_t)channel;
@@ -2092,7 +2093,7 @@ static gboolean try_connect_rfcomm_with_security(AppState *state, const bdaddr_t
 
     const int fd = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
     if (fd < 0) {
-        return FALSE;
+        return -1;
     }
 
     if (sec_level >= 0) {
@@ -2100,21 +2101,22 @@ static gboolean try_connect_rfcomm_with_security(AppState *state, const bdaddr_t
     }
 
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        const int saved = errno;
         close(fd);
-        return FALSE;
+        errno = saved;
+        return -1;
     }
-
-    state->sock_fd = fd;
-    return TRUE;
+    return fd;
 }
 
-static gboolean try_connect_rfcomm(AppState *state, const bdaddr_t *bdaddr, int channel) {
+static int try_connect_rfcomm(const bdaddr_t *bdaddr, int channel) {
     for (int level = 2; level >= 0; level--) {
-        if (try_connect_rfcomm_with_security(state, bdaddr, channel, level)) {
-            return TRUE;
+        const int fd = try_connect_rfcomm_with_security(bdaddr, channel, level);
+        if (fd >= 0) {
+            return fd;
         }
     }
-    return FALSE;
+    return -1;
 }
 
 static gboolean send_xiaomi_version_request(AppState *state) {
@@ -2141,18 +2143,30 @@ static gboolean send_xiaomi_version_request(AppState *state) {
     return TRUE;
 }
 
-static gpointer reader_thread_main(gpointer user_data) {
-    AppState *state = user_data;
-    uint8_t buffer[1024];
+static void on_connection_lost(AppState *state) {
+    disconnect_socket(state);
+    set_status(state, "Disconnected");
+    switch_to_pairing(state);
+    set_connect_busy(state, FALSE);
+}
 
-    while (state->reader_running) {
-        ssize_t n = read(state->sock_fd, buffer, sizeof(buffer));
+/*
+ * Main-loop fd watch for the RFCOMM socket. Packet processing (decrypt, parse, DB writes, fetch
+ * queue, UI updates) therefore runs on the GTK thread, serialized with the fetch-timeout / live-poll
+ * timers and button handlers that touch the same state and write to the same socket.
+ */
+static gboolean on_socket_io(gint fd, GIOCondition condition, gpointer user_data) {
+    AppState *state = user_data;
+    if (condition & G_IO_IN) {
+        uint8_t buffer[4096];
+        const ssize_t n = read(fd, buffer, sizeof(buffer));
         if (n > 0) {
             if (state->verbose_wire_log) {
                 gchar *hex = format_hex(buffer, (size_t)n);
                 gchar *line = g_strdup_printf("RX %s", hex);
                 append_log(state, line);
                 g_free(line);
+                g_free(hex);
 
                 if (looks_printable(buffer, (size_t)n)) {
                     gchar *txt = g_strndup((const gchar *)buffer, (gsize)n);
@@ -2161,7 +2175,6 @@ static gpointer reader_thread_main(gpointer user_data) {
                     g_free(txt_line);
                     g_free(txt);
                 }
-                g_free(hex);
             }
 
             if (state->rx_accumulator == NULL) {
@@ -2169,23 +2182,25 @@ static gpointer reader_thread_main(gpointer user_data) {
             }
             g_byte_array_append(state->rx_accumulator, buffer, (guint)n);
             process_rx_buffer(state);
-        } else if (n == 0) {
+            return G_SOURCE_CONTINUE;
+        }
+        if (n < 0 && (errno == EINTR || errno == EAGAIN)) {
+            return G_SOURCE_CONTINUE;
+        }
+        if (n == 0) {
             append_log(state, "Socket closed by remote.");
-            break;
-        } else if (errno == EINTR) {
-            continue;
         } else {
             gchar *line = g_strdup_printf("Read error: %s", g_strerror(errno));
             append_log(state, line);
             g_free(line);
-            break;
         }
+    } else {
+        append_log(state, "Socket hang-up / error.");
     }
 
-    set_status(state, "Disconnected");
-    schedule_switch_to_pairing(state);
-    set_connect_busy(state, FALSE);
-    return NULL;
+    state->rx_watch_id = 0; /* this source is being removed by returning G_SOURCE_REMOVE */
+    on_connection_lost(state);
+    return G_SOURCE_REMOVE;
 }
 
 gboolean parse_mac(const gchar *input, bdaddr_t *out_bdaddr, gchar **normalized) {
@@ -2211,17 +2226,16 @@ gboolean parse_mac(const gchar *input, bdaddr_t *out_bdaddr, gchar **normalized)
 }
 
 void disconnect_socket(AppState *state) {
-    state->reader_running = FALSE;
+    /* Invalidates any connect attempt still running on the worker thread. */
+    state->connect_generation++;
     stop_activity_live_poll(state);
 
+    if (state->rx_watch_id != 0) {
+        g_source_remove(state->rx_watch_id);
+        state->rx_watch_id = 0;
+    }
     if (state->sock_fd >= 0) {
         shutdown(state->sock_fd, SHUT_RDWR);
-    }
-    if (state->reader_thread != NULL) {
-        g_thread_join(state->reader_thread);
-        state->reader_thread = NULL;
-    }
-    if (state->sock_fd >= 0) {
         close(state->sock_fd);
         state->sock_fd = -1;
     }
@@ -2244,11 +2258,71 @@ void disconnect_socket(AppState *state) {
     miwear_notifications_on_disconnect(state);
 }
 
+typedef struct {
+    AppState *state;
+    guint generation;
+    int fd;
+} ConnectResult;
+
+/* Main thread: adopt the socket connected by the worker (unless the attempt went stale). */
+static gboolean on_connect_finished(gpointer user_data) {
+    ConnectResult *res = user_data;
+    AppState *state = res->state;
+
+    if (res->generation != state->connect_generation) {
+        if (res->fd >= 0) {
+            close(res->fd);
+            append_log(state, "Discarded a superseded connection attempt.");
+        }
+        g_free(res);
+        return G_SOURCE_REMOVE;
+    }
+    if (res->fd < 0) {
+        set_status(state, "Connect failed.");
+        set_connect_busy(state, FALSE);
+        g_free(res);
+        return G_SOURCE_REMOVE;
+    }
+
+    state->sock_fd = res->fd;
+    g_free(res);
+
+    set_status(state, "Connected. Sending version request...");
+    memset(state->phone_nonce, 0, sizeof(state->phone_nonce));
+    memset(state->watch_nonce, 0, sizeof(state->watch_nonce));
+    memset(state->decryption_key, 0, sizeof(state->decryption_key));
+    memset(state->encryption_key, 0, sizeof(state->encryption_key));
+    memset(state->decryption_nonce, 0, sizeof(state->decryption_nonce));
+    memset(state->encryption_nonce, 0, sizeof(state->encryption_nonce));
+    state->auth_initialized = FALSE;
+    state->protocol_version = 0;
+    state->spp_v2_seq = 0;
+    state->sleep_hint_logged = FALSE;
+    state->manual_stress_probe_done = FALSE;
+    state->manual_listed_file_id_valid = FALSE;
+    memset(state->manual_listed_file_id, 0, sizeof(state->manual_listed_file_id));
+    reset_activity_fetch_state(state);
+    if (state->activity_chunk_accumulator != NULL) {
+        g_byte_array_set_size(state->activity_chunk_accumulator, 0);
+    }
+    if (!send_xiaomi_version_request(state)) {
+        set_status(state, "Connected, but first write failed.");
+    } else {
+        set_status(state, "Connected. Listening for SPP packets...");
+    }
+
+    state->rx_watch_id = g_unix_fd_add(state->sock_fd, G_IO_IN | G_IO_HUP | G_IO_ERR, on_socket_io, state);
+    return G_SOURCE_REMOVE;
+}
+
+/* Worker thread: blocking BlueZ pairing, SDP lookup and RFCOMM connect. Only thread-safe helpers
+ * (append_log / set_status) are used; the result is handed to on_connect_finished(). */
 gpointer connect_worker_main(gpointer user_data) {
     ConnectTask *task = user_data;
     AppState *state = task->state;
     gchar *normalized = task->normalized;
     const bdaddr_t *bdaddr = &task->bdaddr;
+    int fd = -1;
 
     set_status(state, "Pairing/connecting through BlueZ...");
     if (!bluez_pair_trust_connect(state, normalized)) {
@@ -2263,7 +2337,8 @@ gpointer connect_worker_main(gpointer user_data) {
         append_log(state, log_line);
         g_free(log_line);
 
-        if (!try_connect_rfcomm(state, bdaddr, channel)) {
+        fd = try_connect_rfcomm(bdaddr, channel);
+        if (fd < 0) {
             gchar *err = g_strdup_printf("RFCOMM connect failed on channel %d: %s", channel, g_strerror(errno));
             append_log(state, err);
             g_free(err);
@@ -2272,7 +2347,7 @@ gpointer connect_worker_main(gpointer user_data) {
         append_log(state, "SPP SDP lookup failed; trying RFCOMM channels 1..30.");
     }
 
-    if (state->sock_fd < 0) {
+    if (fd < 0) {
         int order[32];
         int n_order = 0;
         const int preferred[] = {1, 5};
@@ -2299,56 +2374,26 @@ gpointer connect_worker_main(gpointer user_data) {
             }
         }
 
-        for (int i = 0; i < n_order && state->sock_fd < 0; i++) {
+        for (int i = 0; i < n_order && fd < 0; i++) {
             const int ch = order[i];
             gchar *log_line = g_strdup_printf("Connecting RFCOMM channel %d...", ch);
             append_log(state, log_line);
             g_free(log_line);
-
-            if (try_connect_rfcomm(state, bdaddr, ch)) {
-                channel = ch;
-                break;
-            }
+            fd = try_connect_rfcomm(bdaddr, ch);
         }
     }
 
-    if (state->sock_fd < 0) {
+    if (fd < 0) {
         gchar *err = g_strdup_printf("All RFCOMM channel attempts failed (last errno: %s).", g_strerror(errno));
         append_log(state, err);
         g_free(err);
-        set_status(state, "Connect failed.");
-        set_connect_busy(state, FALSE);
-        g_free(task->normalized);
-        g_free(task);
-        return NULL;
     }
 
-    set_status(state, "Connected. Sending version request...");
-    memset(state->phone_nonce, 0, sizeof(state->phone_nonce));
-    memset(state->watch_nonce, 0, sizeof(state->watch_nonce));
-    memset(state->decryption_key, 0, sizeof(state->decryption_key));
-    memset(state->encryption_key, 0, sizeof(state->encryption_key));
-    memset(state->decryption_nonce, 0, sizeof(state->decryption_nonce));
-    memset(state->encryption_nonce, 0, sizeof(state->encryption_nonce));
-    state->auth_initialized = FALSE;
-    state->protocol_version = 0;
-    state->spp_v2_seq = 0;
-    state->sleep_hint_logged = FALSE;
-    state->manual_stress_probe_done = FALSE;
-    state->manual_listed_file_id_valid = FALSE;
-    memset(state->manual_listed_file_id, 0, sizeof(state->manual_listed_file_id));
-    reset_activity_fetch_state(state);
-    if (state->activity_chunk_accumulator != NULL) {
-        g_byte_array_set_size(state->activity_chunk_accumulator, 0);
-    }
-    if (!send_xiaomi_version_request(state)) {
-        set_status(state, "Connected, but first write failed.");
-    } else {
-        set_status(state, "Connected. Listening for SPP packets...");
-    }
-
-    state->reader_running = TRUE;
-    state->reader_thread = g_thread_new("spp-reader", reader_thread_main, state);
+    ConnectResult *res = g_new0(ConnectResult, 1);
+    res->state = state;
+    res->generation = task->generation;
+    res->fd = fd;
+    g_idle_add(on_connect_finished, res);
 
     g_free(normalized);
     g_free(task);

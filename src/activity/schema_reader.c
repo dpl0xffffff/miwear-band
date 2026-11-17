@@ -489,6 +489,64 @@ static int json_int_or_zero(JsonObject *obj, const char *key) {
     return (int)json_object_get_int_member(obj, key);
 }
 
+static void fill_walk_hr_zones(JsonObject *body, MiwearWorkoutSummary *out) {
+    out->hr_zones.zone1_sec = json_int_or_zero(body, "hrZone1Duration");
+    out->hr_zones.zone2_sec = json_int_or_zero(body, "hrZone2Duration");
+    out->hr_zones.zone3_sec = json_int_or_zero(body, "hrZone3Duration");
+    out->hr_zones.zone4_sec = json_int_or_zero(body, "hrZone4Duration");
+    out->hr_zones.zone5_sec = json_int_or_zero(body, "hrZone5Duration");
+    out->hr_zones.zone1_lower_bpm = json_int_or_zero(body, "hrZone1LowerLimit");
+    out->hr_zones.zone2_lower_bpm = json_int_or_zero(body, "hrZone2LowerLimit");
+    out->hr_zones.zone3_lower_bpm = json_int_or_zero(body, "hrZone3LowerLimit");
+    out->hr_zones.zone4_lower_bpm = json_int_or_zero(body, "hrZone4LowerLimit");
+    out->hr_zones.zone5_lower_bpm = json_int_or_zero(body, "hrZone5LowerLimit");
+}
+
+static void fill_walk_from_body(JsonObject *body, MiwearWorkoutSummary *out) {
+    out->has_walk_detail = TRUE;
+    out->walk_steps = json_int_or_zero(body, "totalSteps");
+    out->walk_avg_pace_sec_per_km = json_int_or_zero(body, "avgPace");
+    if (json_object_has_member(body, "avgSpeed")) {
+        out->walk_avg_speed_kmh = (float)json_object_get_double_member(body, "avgSpeed");
+    }
+    out->walk_avg_cadence_spm = json_int_or_zero(body, "avgCadence");
+    out->walk_max_cadence_spm = json_int_or_zero(body, "maxCadence");
+    out->walk_training_load = json_int_or_zero(body, "trainingLoad");
+    out->walk_recovery_min = json_int_or_zero(body, "expectedRecoveryTime");
+    out->walk_vitality_points = json_int_or_zero(body, "earnedPoints");
+    if (json_object_has_member(body, "trainingEffect")) {
+        out->walk_te_aerobic = (float)json_object_get_double_member(body, "trainingEffect");
+    }
+    fill_walk_hr_zones(body, out);
+}
+
+static void fill_swim_from_body(JsonObject *body, MiwearWorkoutSummary *out) {
+    out->has_swim_detail = TRUE;
+    out->swim_lengths = json_int_or_zero(body, "turnCount");
+    out->swim_main_stroke = json_int_or_zero(body, "mainStroke");
+    out->swim_avg_pace_sec_per_100m = json_int_or_zero(body, "avgPace");
+    out->swim_avg_swolf = json_int_or_zero(body, "avgSwolf");
+    out->swim_total_strokes = json_int_or_zero(body, "totalArmPull");
+    out->swim_avg_spm = json_int_or_zero(body, "avgStrokeFrequency");
+    out->swim_training_load = json_int_or_zero(body, "trainingLoad");
+    out->swim_recovery_min = json_int_or_zero(body, "expectedRecoveryTime");
+    out->swim_vitality_points = json_int_or_zero(body, "earnedPoints");
+    out->swim_pool_width_m = json_int_or_zero(body, "swimmingPoolWidth");
+    if (json_object_has_member(body, "trainingEffect")) {
+        out->swim_training_effect = (float)json_object_get_double_member(body, "trainingEffect");
+    }
+    out->hr_zones.zone1_sec = json_int_or_zero(body, "hrZone1Duration");
+    out->hr_zones.zone2_sec = json_int_or_zero(body, "hrZone2Duration");
+    out->hr_zones.zone3_sec = json_int_or_zero(body, "hrZone3Duration");
+    out->hr_zones.zone4_sec = json_int_or_zero(body, "hrZone4Duration");
+    out->hr_zones.zone5_sec = json_int_or_zero(body, "hrZone5Duration");
+    out->hr_zones.zone1_lower_bpm = json_int_or_zero(body, "hrZone1LowerLimit");
+    out->hr_zones.zone2_lower_bpm = json_int_or_zero(body, "hrZone2LowerLimit");
+    out->hr_zones.zone3_lower_bpm = json_int_or_zero(body, "hrZone3LowerLimit");
+    out->hr_zones.zone4_lower_bpm = json_int_or_zero(body, "hrZone4LowerLimit");
+    out->hr_zones.zone5_lower_bpm = json_int_or_zero(body, "hrZone5LowerLimit");
+}
+
 static void fill_summary_from_body(JsonObject *body, MiwearWorkoutSummary *out) {
     out->start_sec = (uint32_t)json_int_or_zero(body, "startTime");
     out->end_sec = (uint32_t)json_int_or_zero(body, "endTime");
@@ -498,14 +556,21 @@ static void fill_summary_from_body(JsonObject *body, MiwearWorkoutSummary *out) 
     }
     out->duration_sec = dur;
     out->distance_m = json_int_or_zero(body, "totalDistance");
-    int kcal = json_int_or_zero(body, "totalCalories");
-    if (kcal <= 0) {
-        kcal = json_int_or_zero(body, "activeCalories");
+    const int active_kcal = json_int_or_zero(body, "activeCalories");
+    const int total_kcal = json_int_or_zero(body, "totalCalories");
+    if (out->sport_subtype == 9 || out->sport_subtype == 10) {
+        out->calories = active_kcal > 0 ? active_kcal : total_kcal;
+    } else {
+        out->calories = total_kcal > 0 ? total_kcal : active_kcal;
     }
-    out->calories = kcal;
     out->hr_avg = json_int_or_zero(body, "avgHeartRate");
     out->hr_max = json_int_or_zero(body, "maxHeartRate");
     out->hr_min = json_int_or_zero(body, "minHeartRate");
+    if (out->sport_subtype == 9 || out->sport_subtype == 10) {
+        fill_swim_from_body(body, out);
+    } else if (out->sport_subtype == 22 || out->sport_subtype == 2) {
+        fill_walk_from_body(body, out);
+    }
 }
 
 static gboolean summary_sane(const MiwearWorkoutSummary *s) {
@@ -528,6 +593,7 @@ gboolean miwear_schema_parse_sport_report(const char *schema_json_path,
     if (schema_json_path == NULL || payload == NULL || out == NULL) {
         return FALSE;
     }
+    const int saved_subtype = out->sport_subtype;
     GBytes *wire = miwear_schema_sport_wire_buffer(payload, payload_len);
     if (wire == NULL) {
         return FALSE;
@@ -562,8 +628,17 @@ gboolean miwear_schema_parse_sport_report(const char *schema_json_path,
         json_node_unref(decoded);
         return FALSE;
     }
+    if (out->sport_subtype <= 0) {
+        out->sport_subtype = saved_subtype > 0 ? saved_subtype : 0;
+    }
+    if (out->sport_subtype <= 0 && json_object_has_member(body, "mainStroke")) {
+        out->sport_subtype = 9;
+    }
     fill_summary_from_body(body, out);
     json_node_unref(decoded);
+    if (out->sport_subtype == 9 || out->sport_subtype == 10) {
+        return out->duration_sec > 0 || out->distance_m > 0 || out->calories > 0;
+    }
     return summary_sane(out);
 }
 

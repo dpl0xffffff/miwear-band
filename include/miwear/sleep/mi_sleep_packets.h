@@ -17,6 +17,14 @@ typedef struct MiwearSleepPacketView {
 
 typedef gboolean (*MiwearSleepPacketFn)(const MiwearSleepPacketView *pkt, void *user_data);
 
+/* Stored sleep-stage values (Gadgetbridge): 0 not asleep, 1 asleep/unknown, 2 deep, 3 light,
+ * 4 REM, 5 awake. */
+#define MIWEAR_SLEEP_STAGE_ASLEEP_UNKNOWN 1
+/* Raw stage nibble of a type-17 packet → stored value. */
+int miwear_sleep_decode_raw_stage(int raw_stage);
+/* Stored value → timeline stage to paint, or -1 when the minute is not sleep. */
+int miwear_normalize_sleep_stage(int stage);
+
 /* Band sleep packets carry epoch time as ms (HR) or sometimes sec; never multiply ms again. */
 int64_t miwear_sleep_packet_timestamp_ms(uint64_t ts_raw);
 gboolean miwear_sleep_timestamp_plausible(int64_t ts_ms);
@@ -25,13 +33,6 @@ gboolean miwear_sleep_foreach_packet(const uint8_t *payload,
                                    size_t len,
                                    MiwearSleepPacketFn fn,
                                    void *user_data);
-
-size_t mi_sleep_build_hr_epoch_features(const uint8_t *sleep_src,
-                                        size_t sleep_src_len,
-                                        uint32_t bed_sec,
-                                        uint32_t wake_sec,
-                                        float *features_out,
-                                        size_t max_epochs);
 
 gboolean mi_sleep_try_embedded_stage_packets(const uint8_t *sleep_src,
                                              size_t sleep_src_len,

@@ -7,6 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "miwear/activity/workout_types.h"
+
 typedef struct {
     int32_t timestamp_sec;
     int raw_intensity;
@@ -123,5 +125,20 @@ gboolean miwear_db_latest_stress_in_range(int32_t start_sec,
 gboolean miwear_db_foreach_sleep_stage(MiwearDbSleepStageRowFn fn, gpointer user_data);
 gboolean miwear_db_foreach_sleep_time(MiwearDbSleepTimeRowFn fn, gpointer user_data);
 gboolean miwear_db_foreach_daily_summary(MiwearDbDailySummaryRowFn fn, gpointer user_data);
+
+typedef struct {
+    uint32_t file_ts;
+    int sport_type;
+    int sport_subtype;
+    gchar *detail_json;
+} MiwearDbSportWorkoutRow;
+
+typedef gboolean (*MiwearDbSportWorkoutRowFn)(const MiwearDbSportWorkoutRow *row, gpointer user_data);
+
+gboolean miwear_db_replace_sport_workout(int sport_type,
+                                         uint32_t file_ts,
+                                         int sport_subtype,
+                                         const MiwearWorkoutSummary *summary);
+gboolean miwear_db_foreach_sport_workout(MiwearDbSportWorkoutRowFn fn, gpointer user_data);
 
 #endif

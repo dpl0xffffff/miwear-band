@@ -117,7 +117,7 @@ void miwear_weight_log_load(AppState *state) {
         return;
     }
 
-    const gchar *log_str = g_key_file_get_string(kf, WEIGHT_GROUP, "log", NULL);
+    gchar *log_str = g_key_file_get_string(kf, WEIGHT_GROUP, "log", NULL);
     if (log_str != NULL && log_str[0] != '\0') {
         gchar **tokens = g_strsplit(log_str, ",", -1);
         for (gchar **p = tokens; p != NULL && *p != NULL; p++) {
@@ -128,6 +128,7 @@ void miwear_weight_log_load(AppState *state) {
         }
         g_strfreev(tokens);
     }
+    g_free(log_str);
     if (state->weight_log->len > 1) {
         g_array_sort(state->weight_log, weight_entry_newest_first);
     }

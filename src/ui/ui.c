@@ -4,12 +4,16 @@
 #include "miwear/spp/fitness_sync.h"
 #include "miwear/spp/wire.h"
 #include "miwear/ui/ui.h"
+#include "miwear/activity/workout_types.h"
 #include "miwear/notifications/notifications.h"
 #include "miwear/find_phone.h"
 #include "miwear/ui/dashboard.h"
+#include "ui_private.h"
 #include "miwear/ui/health_data.h"
 #include "miwear/sleep/mi_sleep_duration.h"
 #include "miwear/db/db.h"
+#include "miwear/local_time.h"
+#include "miwear/spp/weather.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -60,212 +64,270 @@ typedef struct {
     gboolean busy;
 } UiBusyState;
 
-static void on_device_row_selected(GtkListBox *box, GtkListBoxRow *row, gpointer user_data) {
-    (void)box;
-    AppState *state = user_data;
-
-    if (state->selected_address != NULL) {
-        g_free(state->selected_address);
-        state->selected_address = NULL;
-    }
-
-    if (row == NULL) {
-        return;
-    }
-
-    const gchar *address = g_object_get_data(G_OBJECT(row), "address");
-    if (address != NULL) {
-        state->selected_address = g_strdup(address);
-        gchar *line = g_strdup_printf("Selected: %s", address);
-        append_log(state, line);
-        g_free(line);
-    }
-}
-
-static void on_device_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer user_data) {
-    (void)box;
-    AppState *state = user_data;
-    if (row == NULL) return;
-    const gchar *address = g_object_get_data(G_OBJECT(row), "address");
-    if (address == NULL) return;
-    start_connect_for_address(state, address);
-}
-
-/* GTK 4: avoid "Broken accounting of active state" when clearing focus/sensitivity while a widget is still "active" from a click. */
 static void ui_set_sensitive_if_widget(GtkWidget *widget, gboolean sensitive) {
     if (widget != NULL && GTK_IS_WIDGET(widget)) {
         gtk_widget_set_sensitive(widget, sensitive);
     }
 }
 
-static void ui_defocus_if_in_subtree(GtkWidget *subtree) {
-    if (subtree == NULL || !gtk_widget_get_mapped(subtree)) {
+gboolean miwear_ui_has_saved_device(AppState *state) {
+    uint8_t key[16];
+    return state != NULL && state->selected_address != NULL && state->selected_address[0] != '\0' &&
+           hex_to_bytes16(state->auth_key_hex, key);
+}
+
+static void setup_update_connect_sensitivity(AppState *state) {
+    if (state->setup_connect_button == NULL || state->entry_authkey == NULL) {
         return;
     }
-    GtkRoot *root = gtk_widget_get_root(subtree);
-    if (root == NULL) {
+    const gchar *key = gtk_editable_get_text(GTK_EDITABLE(state->entry_authkey));
+    uint8_t bytes[16];
+    const gboolean key_ok = key != NULL && hex_to_bytes16(key, bytes);
+    if (key != NULL && key[0] != '\0' && !key_ok) {
+        gtk_widget_add_css_class(state->entry_authkey, "error");
+    } else {
+        gtk_widget_remove_css_class(state->entry_authkey, "error");
+    }
+    const gboolean busy = state->dash_ui != NULL && state->dash_ui->busy;
+    gtk_widget_set_sensitive(state->setup_connect_button,
+                             !busy && key_ok && state->pairing_selected_address != NULL);
+}
+
+static void on_device_check_toggled(GtkCheckButton *check, gpointer user_data) {
+    AppState *state = user_data;
+    if (!gtk_check_button_get_active(check)) {
         return;
     }
-    GtkWidget *focus = gtk_root_get_focus(root);
-    if (focus != NULL && gtk_widget_is_ancestor(focus, subtree)) {
-        gtk_root_set_focus(root, NULL);
+    g_free(state->pairing_selected_address);
+    state->pairing_selected_address = g_strdup(g_object_get_data(G_OBJECT(check), "address"));
+    setup_update_connect_sensitivity(state);
+}
+
+static void on_authkey_changed(GtkEditable *e, gpointer user_data) {
+    (void)e;
+    setup_update_connect_sensitivity(user_data);
+}
+
+static void on_setup_connect(GtkButton *b, gpointer user_data) {
+    (void)b;
+    AppState *state = user_data;
+    if (state->pairing_selected_address != NULL) {
+        gchar *addr = g_strdup(state->pairing_selected_address);
+        start_connect_for_address(state, addr);
+        g_free(addr);
     }
 }
 
+static void populate_device_list(AppState *state);
+
+static void on_setup_refresh(GtkButton *b, gpointer user_data) {
+    (void)b;
+    populate_device_list(user_data);
+}
+
 static void populate_device_list(AppState *state) {
-    if (state->listbox_devices == NULL) {
-        return;
-    }
-    if (state->populate_devices_busy) {
+    if (state->listbox_devices == NULL || state->populate_devices_busy) {
         return;
     }
     state->populate_devices_busy = TRUE;
-
-    ui_defocus_if_in_subtree(state->listbox_devices);
-    gtk_list_box_select_row(GTK_LIST_BOX(state->listbox_devices), NULL);
     gtk_list_box_remove_all(GTK_LIST_BOX(state->listbox_devices));
-    ui_set_sensitive_if_widget(state->listbox_devices, FALSE);
-
-    const gchar *keep_selected = state->selected_address;
+    g_free(state->pairing_selected_address);
+    state->pairing_selected_address = NULL;
 
     GError *error = NULL;
     GDBusConnection *bus = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, &error);
-    if (bus == NULL) {
-        set_status(state, "Failed to open system bus.");
-        if (error != NULL) {
-            g_error_free(error);
-        }
-        ui_set_sensitive_if_widget(state->listbox_devices, TRUE);
-        state->populate_devices_busy = FALSE;
-        return;
+    GVariant *reply = NULL;
+    if (bus != NULL) {
+        reply = g_dbus_connection_call_sync(bus, "org.bluez", "/", "org.freedesktop.DBus.ObjectManager",
+                                            "GetManagedObjects", NULL, G_VARIANT_TYPE("(a{oa{sa{sv}}})"),
+                                            G_DBUS_CALL_FLAGS_NONE, -1, NULL, &error);
     }
-
-    GVariant *reply = g_dbus_connection_call_sync(
-        bus,
-        "org.bluez",
-        "/",
-        "org.freedesktop.DBus.ObjectManager",
-        "GetManagedObjects",
-        NULL,
-        G_VARIANT_TYPE("(a{oa{sa{sv}}})"),
-        G_DBUS_CALL_FLAGS_NONE,
-        -1,
-        NULL,
-        &error
-    );
-
     if (reply == NULL) {
-        set_status(state, error != NULL && error->message != NULL ? error->message : "Failed to list devices.");
-        if (error != NULL) {
-            g_error_free(error);
-        }
-        g_object_unref(bus);
-        ui_set_sensitive_if_widget(state->listbox_devices, TRUE);
+        set_status(state, error != NULL && error->message != NULL ? error->message : "Couldn't list Bluetooth devices.");
+        g_clear_error(&error);
+        g_clear_object(&bus);
         state->populate_devices_busy = FALSE;
+        setup_update_connect_sensitivity(state);
         return;
     }
 
     GVariant *objects = g_variant_get_child_value(reply, 0);
     GVariantIter iter;
     g_variant_iter_init(&iter, objects);
-
-    GtkListBoxRow *first_row = NULL;
-    GtkListBoxRow *match_row = NULL;
-
-    while (TRUE) {
-        GVariant *entry = g_variant_iter_next_value(&iter);
-        if (entry == NULL) {
-            break;
-        }
-
+    GtkCheckButton *group = NULL;
+    GtkCheckButton *match = NULL;
+    guint count = 0;
+    GVariant *entry;
+    while ((entry = g_variant_iter_next_value(&iter)) != NULL) {
         gchar *path = NULL;
         GVariant *ifaces = NULL;
         g_variant_get(entry, "{o@a{sa{sv}}}", &path, &ifaces);
-
-        GVariant *device_props = g_variant_lookup_value(ifaces, "org.bluez.Device1", G_VARIANT_TYPE("a{sv}"));
-        if (device_props != NULL) {
-            GVariantDict *dict = g_variant_dict_new(device_props);
-
-            const gchar *address = NULL;
-            gboolean have_address = g_variant_dict_lookup(dict, "Address", "&s", &address);
-
-            gboolean paired = FALSE;
-            (void)g_variant_dict_lookup(dict, "Paired", "b", &paired);
-
-            gboolean trusted = FALSE;
-            (void)g_variant_dict_lookup(dict, "Trusted", "b", &trusted);
-            gboolean connected = FALSE;
-            (void)g_variant_dict_lookup(dict, "Connected", "b", &connected);
-
-            const gchar *name = NULL;
-            (void)g_variant_dict_lookup(dict, "Name", "&s", &name);
-
-            const gchar *alias = NULL;
-            (void)g_variant_dict_lookup(dict, "Alias", "&s", &alias);
-
-            if (have_address && address != NULL) {
-                if (name == NULL || name[0] == '\0') {
-                    name = alias;
+        GVariant *props = g_variant_lookup_value(ifaces, "org.bluez.Device1", G_VARIANT_TYPE("a{sv}"));
+        if (props != NULL) {
+            GVariantDict dict;
+            g_variant_dict_init(&dict, props);
+            const gchar *address = NULL, *name = NULL, *alias = NULL;
+            gboolean paired = FALSE, connected = FALSE;
+            (void)g_variant_dict_lookup(&dict, "Address", "&s", &address);
+            (void)g_variant_dict_lookup(&dict, "Name", "&s", &name);
+            (void)g_variant_dict_lookup(&dict, "Alias", "&s", &alias);
+            (void)g_variant_dict_lookup(&dict, "Paired", "b", &paired);
+            (void)g_variant_dict_lookup(&dict, "Connected", "b", &connected);
+            if (address != NULL) {
+                const gchar *title = (name != NULL && name[0]) ? name : (alias != NULL && alias[0]) ? alias : address;
+                GString *sub = g_string_new(address);
+                if (paired) {
+                    g_string_append(sub, " · Paired");
                 }
-                if (name == NULL || name[0] == '\0') {
-                    name = "(unknown)";
+                if (connected) {
+                    g_string_append(sub, " · Connected");
                 }
-
-                gchar *label = g_strdup_printf("%s\n%s  [paired:%s trusted:%s connected:%s]",
-                                               name,
-                                               address,
-                                               paired ? "yes" : "no",
-                                               trusted ? "yes" : "no",
-                                               connected ? "yes" : "no");
-                GtkWidget *row = gtk_list_box_row_new();
-                GtkWidget *row_child = gtk_label_new(label);
-                gtk_widget_set_margin_start(row_child, 6);
-                gtk_widget_set_margin_end(row_child, 6);
-                gtk_label_set_xalign(GTK_LABEL(row_child), 0.0f);
-                gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), row_child);
-                g_object_set_data_full(G_OBJECT(row), "address", g_strdup(address), g_free);
+                GtkWidget *row = adw_action_row_new();
+                adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), title);
+                adw_preferences_row_set_use_markup(ADW_PREFERENCES_ROW(row), FALSE);
+                adw_action_row_set_subtitle(ADW_ACTION_ROW(row), sub->str);
+                g_string_free(sub, TRUE);
+                GtkWidget *check = gtk_check_button_new();
+                if (group != NULL) {
+                    gtk_check_button_set_group(GTK_CHECK_BUTTON(check), group);
+                } else {
+                    group = GTK_CHECK_BUTTON(check);
+                }
+                g_object_set_data_full(G_OBJECT(check), "address", g_strdup(address), g_free);
+                g_signal_connect(check, "toggled", G_CALLBACK(on_device_check_toggled), state);
+                adw_action_row_add_prefix(ADW_ACTION_ROW(row), check);
+                adw_action_row_set_activatable_widget(ADW_ACTION_ROW(row), check);
                 gtk_list_box_append(GTK_LIST_BOX(state->listbox_devices), row);
-                g_free(label);
-
-                if (first_row == NULL) {
-                    first_row = GTK_LIST_BOX_ROW(row);
+                if (g_strcmp0(address, state->selected_address) == 0) {
+                    match = GTK_CHECK_BUTTON(check);
                 }
-                if (keep_selected != NULL && g_strcmp0(keep_selected, address) == 0) {
-                    match_row = GTK_LIST_BOX_ROW(row);
-                }
+                count++;
             }
-
-            g_variant_dict_unref(dict);
-            g_variant_unref(device_props);
+            g_variant_dict_clear(&dict);
+            g_variant_unref(props);
         }
-
         g_variant_unref(ifaces);
         g_free(path);
         g_variant_unref(entry);
     }
-
-    if (match_row != NULL) {
-        gtk_list_box_select_row(GTK_LIST_BOX(state->listbox_devices), match_row);
-    } else if (first_row != NULL) {
-        gtk_list_box_select_row(GTK_LIST_BOX(state->listbox_devices), first_row);
-    }
-
     g_variant_unref(objects);
     g_variant_unref(reply);
     g_object_unref(bus);
 
-    ui_set_sensitive_if_widget(state->listbox_devices, TRUE);
-    set_status(state, "Select a device to pair/connect.");
+    /* Preselect only the configured band, or the only one there is. Never connects by itself. */
+    if (match != NULL) {
+        gtk_check_button_set_active(match, TRUE);
+    } else if (count == 1 && group != NULL) {
+        gtk_check_button_set_active(group, TRUE);
+    }
     state->populate_devices_busy = FALSE;
+    setup_update_connect_sensitivity(state);
 }
 
-static void on_refresh_clicked(GtkButton *button, gpointer user_data) {
-    (void)button;
+static void on_setup_cancel(GtkButton *b, gpointer user_data) {
+    (void)b;
     AppState *state = user_data;
-    if (state->auth_initialized && state->sock_fd >= 0) {
-        miwear_fitness_sync_on_auth(state);
+    gtk_editable_set_text(GTK_EDITABLE(state->entry_authkey), state->auth_key_hex);
+    gtk_stack_set_visible_child_name(GTK_STACK(state->stack), "main");
+}
+
+static GtkWidget *build_setup_page(AppState *state) {
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 24);
+    gtk_widget_add_css_class(box, "mi-page");
+    gtk_widget_set_margin_top(box, 12);
+
+    GtkWidget *head = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    GtkWidget *icon = gtk_image_new_from_icon_name("miwear-watch-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(icon), 56);
+    gtk_widget_add_css_class(icon, "mi-band-icon");
+    gtk_widget_set_halign(icon, GTK_ALIGN_CENTER);
+    GtkWidget *title = gtk_label_new("Connect Your Band");
+    gtk_widget_add_css_class(title, "title-1");
+    GtkWidget *desc = gtk_label_new("Choose your Xiaomi Smart Band from the Bluetooth devices this computer knows, "
+                                    "then enter the auth key from Mi Fitness.");
+    gtk_widget_add_css_class(desc, "dimmed");
+    gtk_label_set_wrap(GTK_LABEL(desc), TRUE);
+    gtk_label_set_justify(GTK_LABEL(desc), GTK_JUSTIFY_CENTER);
+    gtk_box_append(GTK_BOX(head), icon);
+    gtk_box_append(GTK_BOX(head), title);
+    gtk_box_append(GTK_BOX(head), desc);
+    gtk_box_append(GTK_BOX(box), head);
+
+    GtkWidget *devices = adw_preferences_group_new();
+    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(devices), "Bluetooth Devices");
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(devices),
+                                          "Pair the band in your system's Bluetooth settings if it's missing.");
+    state->btn_refresh = gtk_button_new_from_icon_name("view-refresh-symbolic");
+    gtk_widget_add_css_class(state->btn_refresh, "flat");
+    gtk_widget_set_tooltip_text(state->btn_refresh, "Refresh device list");
+    g_signal_connect(state->btn_refresh, "clicked", G_CALLBACK(on_setup_refresh), state);
+    adw_preferences_group_set_header_suffix(ADW_PREFERENCES_GROUP(devices), state->btn_refresh);
+    state->listbox_devices = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(state->listbox_devices), GTK_SELECTION_NONE);
+    gtk_widget_add_css_class(state->listbox_devices, "boxed-list");
+    GtkWidget *placeholder = gtk_label_new("No Bluetooth devices found");
+    gtk_widget_add_css_class(placeholder, "dimmed");
+    gtk_widget_set_margin_top(placeholder, 18);
+    gtk_widget_set_margin_bottom(placeholder, 18);
+    gtk_list_box_set_placeholder(GTK_LIST_BOX(state->listbox_devices), placeholder);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(devices), state->listbox_devices);
+    gtk_box_append(GTK_BOX(box), devices);
+
+    GtkWidget *auth = adw_preferences_group_new();
+    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(auth), "Authentication");
+    adw_preferences_group_set_description(
+        ADW_PREFERENCES_GROUP(auth), "32 hexadecimal characters. The README explains how to get it from Mi Fitness.");
+    state->entry_authkey = adw_password_entry_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(state->entry_authkey), "Auth Key");
+    gtk_editable_set_text(GTK_EDITABLE(state->entry_authkey), state->auth_key_hex);
+    g_signal_connect(state->entry_authkey, "changed", G_CALLBACK(on_authkey_changed), state);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(auth), state->entry_authkey);
+    gtk_box_append(GTK_BOX(box), auth);
+
+    GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    GtkWidget *btn_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_set_halign(btn_row, GTK_ALIGN_CENTER);
+    state->setup_connect_button = gtk_button_new_with_label("Connect");
+    gtk_widget_add_css_class(state->setup_connect_button, "pill");
+    gtk_widget_add_css_class(state->setup_connect_button, "suggested-action");
+    g_signal_connect(state->setup_connect_button, "clicked", G_CALLBACK(on_setup_connect), state);
+    state->setup_spinner = adw_spinner_new();
+    gtk_widget_set_visible(state->setup_spinner, FALSE);
+    gtk_box_append(GTK_BOX(btn_row), state->setup_connect_button);
+    gtk_box_append(GTK_BOX(btn_row), state->setup_spinner);
+    state->label_status = gtk_label_new("");
+    gtk_widget_add_css_class(state->label_status, "dimmed");
+    gtk_label_set_wrap(GTK_LABEL(state->label_status), TRUE);
+    gtk_label_set_justify(GTK_LABEL(state->label_status), GTK_JUSTIFY_CENTER);
+    gtk_box_append(GTK_BOX(actions), btn_row);
+    gtk_box_append(GTK_BOX(actions), state->label_status);
+    gtk_box_append(GTK_BOX(box), actions);
+
+    GtkWidget *clamp = adw_clamp_new();
+    adw_clamp_set_maximum_size(ADW_CLAMP(clamp), 560);
+    adw_clamp_set_child(ADW_CLAMP(clamp), box);
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), clamp);
+
+    GtkWidget *header = adw_header_bar_new();
+    adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), adw_window_title_new("Set Up", NULL));
+    state->setup_cancel_button = gtk_button_new_with_label("Cancel");
+    g_signal_connect(state->setup_cancel_button, "clicked", G_CALLBACK(on_setup_cancel), state);
+    adw_header_bar_pack_start(ADW_HEADER_BAR(header), state->setup_cancel_button);
+    GtkWidget *tb = adw_toolbar_view_new();
+    adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(tb), header);
+    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(tb), scroll);
+    return tb;
+}
+
+void miwear_ui_show_setup(AppState *state) {
+    if (state == NULL || state->stack == NULL) {
         return;
     }
+    gtk_widget_set_visible(state->setup_cancel_button, miwear_ui_has_saved_device(state));
+    gtk_editable_set_text(GTK_EDITABLE(state->entry_authkey), state->auth_key_hex);
+    gtk_stack_set_visible_child_name(GTK_STACK(state->stack), "setup");
     populate_device_list(state);
 }
 
@@ -326,7 +388,10 @@ void append_log(AppState *state, const gchar *line) {
 
 static gboolean ui_set_status_cb(gpointer user_data) {
     UiStatusLine *ctx = user_data;
-    gtk_label_set_text(GTK_LABEL(ctx->state->label_status), ctx->status);
+    if (ctx->state->label_status != NULL) {
+        gtk_label_set_text(GTK_LABEL(ctx->state->label_status), ctx->status);
+    }
+    miwear_dashboard_set_status(ctx->state, ctx->status);
     g_free(ctx->status);
     g_free(ctx);
     return G_SOURCE_REMOVE;
@@ -334,21 +399,15 @@ static gboolean ui_set_status_cb(gpointer user_data) {
 
 static gboolean ui_set_busy_cb(gpointer user_data) {
     UiBusyState *ctx = user_data;
-    if (ctx->busy && ctx->state->window != NULL) {
-        GtkRoot *root = gtk_widget_get_root(ctx->state->window);
-        GtkWidget *f = gtk_root_get_focus(root);
-        if (f != NULL) {
-            if (ctx->state->btn_refresh != NULL && f == ctx->state->btn_refresh) {
-                gtk_root_set_focus(root, NULL);
-            }
-        }
+    AppState *state = ctx->state;
+    ui_set_sensitive_if_widget(state->btn_refresh, !ctx->busy);
+    ui_set_sensitive_if_widget(state->listbox_devices, !ctx->busy);
+    ui_set_sensitive_if_widget(state->entry_authkey, !ctx->busy);
+    if (state->setup_spinner != NULL) {
+        gtk_widget_set_visible(state->setup_spinner, ctx->busy);
     }
-    if (ctx->busy && ctx->state->listbox_devices != NULL && GTK_IS_WIDGET(ctx->state->listbox_devices)) {
-        ui_defocus_if_in_subtree(ctx->state->listbox_devices);
-    }
-    ui_set_sensitive_if_widget(ctx->state->btn_refresh, !ctx->busy);
-    ui_set_sensitive_if_widget(ctx->state->listbox_devices, !ctx->busy);
-    ui_set_sensitive_if_widget(ctx->state->entry_authkey, !ctx->busy);
+    miwear_dashboard_set_busy(state, ctx->busy);
+    setup_update_connect_sensitivity(state);
     g_free(ctx);
     return G_SOURCE_REMOVE;
 }
@@ -365,16 +424,6 @@ void set_status(AppState *state, const gchar *status) {
     ctx->state = state;
     ctx->status = g_strdup(status);
     g_idle_add(ui_set_status_cb, ctx);
-}
-
-static void metrics_set_bar(GtkWidget *bar, guint value, guint max) {
-    if (bar == NULL || max == 0) {
-        return;
-    }
-    double fraction = (double)value / (double)max;
-    if (fraction < 0.0) fraction = 0.0;
-    if (fraction > 1.0) fraction = 1.0;
-    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(bar), fraction);
 }
 
 static gboolean ui_update_metrics_cb(gpointer user_data) {
@@ -473,32 +522,6 @@ void schedule_state_update(AppState *state, const gchar *charging, const gchar *
 }
 
 
-static const gchar *recorded_stat_name(gint stat) {
-    switch (stat) {
-        case REC_STAT_HEART_RATE: return "Heart rate";
-        case REC_STAT_STEPS: return "Steps + Distance";
-        case REC_STAT_CALORIES: return "Active calories";
-        case REC_STAT_SPO2: return "SpO2";
-        case REC_STAT_STRESS: return "Stress";
-        case REC_STAT_ENERGY: return "Energy";
-        case REC_STAT_SLEEP: return "Sleep";
-        default: return "Unknown";
-    }
-}
-
-static int recorded_sample_value(const RecordedSample *s, gint stat) {
-    switch (stat) {
-        case REC_STAT_HEART_RATE: return s->heart_rate;
-        case REC_STAT_STEPS: return s->steps;
-        case REC_STAT_CALORIES: return s->active_calories;
-        case REC_STAT_SPO2: return s->spo2;
-        case REC_STAT_STRESS: return s->stress;
-        case REC_STAT_ENERGY: return s->energy;
-        case REC_STAT_SLEEP: return s->sleep_stage;
-        default: return -1;
-    }
-}
-
 static void recorded_day_value_free(gpointer value) {
     if (value != NULL) {
         g_array_unref((GArray *)value);
@@ -524,40 +547,6 @@ static GArray *recorded_create_day_array(void) {
     return arr;
 }
 
-static gboolean apply_chart_label_idle(gpointer user_data) {
-    AppState *state = user_data;
-    state->chart_label_idle_id = 0;
-    if (state->recorded_chart_label == NULL || state->pending_chart_label == NULL) {
-        return G_SOURCE_REMOVE;
-    }
-    const char *shown = gtk_label_get_label(GTK_LABEL(state->recorded_chart_label));
-    if (g_strcmp0(shown, state->pending_chart_label) == 0) {
-        return G_SOURCE_REMOVE;
-    }
-    gtk_label_set_text(GTK_LABEL(state->recorded_chart_label), state->pending_chart_label);
-    return G_SOURCE_REMOVE;
-}
-
-/* Defer label updates to idle; skip if text unchanged to avoid layout thrash / flicker on chart hover. */
-static void chart_submit_caption(AppState *state, gchar *owned) {
-    if (owned == NULL) {
-        return;
-    }
-    if (state->pending_chart_label != NULL && g_strcmp0(state->pending_chart_label, owned) == 0) {
-        g_free(owned);
-        return;
-    }
-    g_free(state->pending_chart_label);
-    state->pending_chart_label = owned;
-    if (state->chart_label_idle_id == 0) {
-        state->chart_label_idle_id = g_idle_add(apply_chart_label_idle, state);
-    }
-}
-
-static void chart_submit_caption_literal(AppState *state, const gchar *text) {
-    chart_submit_caption(state, g_strdup(text ? text : ""));
-}
-
 static void recorded_refresh_ui(AppState *state) {
     miwear_dashboard_redraw_charts(state);
 }
@@ -567,12 +556,6 @@ typedef struct {
     gchar *day_key;
     GArray *samples;
 } RecordedStoreCtx;
-
-typedef struct {
-    AppState *state;
-    gchar *day_key;
-    guint steps;
-} DailySummaryStoreCtx;
 
 static gboolean ui_recorded_store_cb(gpointer user_data) {
     RecordedStoreCtx *ctx = user_data;
@@ -602,67 +585,10 @@ static gboolean ui_recorded_store_cb(gpointer user_data) {
         if (src->sleep_stage >= 0) dst->sleep_stage = src->sleep_stage;
         if (src->sleep_source > 0) dst->sleep_source = 1;
     }
-    if (state->recorded_day_dropdown != NULL) {
-        gboolean found = FALSE;
-        guint idx = 0;
-        GtkStringList *sl = GTK_STRING_LIST(gtk_drop_down_get_model(GTK_DROP_DOWN(state->recorded_day_dropdown)));
-        guint n = g_list_model_get_n_items(G_LIST_MODEL(sl));
-        if (n > 0) {
-            gtk_string_list_splice(sl, 0, n, NULL);
-        }
-        ui_defocus_if_in_subtree(state->recorded_day_dropdown);
-        GList *keys = g_hash_table_get_keys(state->recorded_days);
-        keys = g_list_sort(keys, (GCompareFunc)g_strcmp0);
-        for (GList *l = keys; l != NULL; l = l->next) {
-            const gchar *k = l->data;
-            gtk_string_list_append(sl, k);
-            if (g_strcmp0(k, ctx->day_key) == 0) {
-                found = TRUE;
-                gtk_drop_down_set_selected(GTK_DROP_DOWN(state->recorded_day_dropdown), idx);
-            }
-            idx++;
-        }
-        g_list_free(keys);
-        if (!found && idx > 0) {
-            gtk_drop_down_set_selected(GTK_DROP_DOWN(state->recorded_day_dropdown), 0);
-        }
-    }
     g_mutex_unlock(&state->recorded_lock);
-
-    g_free(state->selected_recorded_day);
-    if (state->recorded_day_dropdown != NULL) {
-        GObject *item = gtk_drop_down_get_selected_item(GTK_DROP_DOWN(state->recorded_day_dropdown));
-        if (item != NULL && GTK_IS_STRING_OBJECT(item)) {
-            const char *s = gtk_string_object_get_string(GTK_STRING_OBJECT(item));
-            state->selected_recorded_day = (s != NULL && s[0] != '\0') ? g_strdup(s) : g_strdup(ctx->day_key);
-        } else {
-            state->selected_recorded_day = g_strdup(ctx->day_key);
-        }
-    } else {
-        state->selected_recorded_day = g_strdup(ctx->day_key);
-    }
 
     recorded_refresh_ui(state);
     g_array_unref(ctx->samples);
-    g_free(ctx->day_key);
-    g_free(ctx);
-    return G_SOURCE_REMOVE;
-}
-
-static gboolean ui_daily_summary_store_cb(gpointer user_data) {
-    DailySummaryStoreCtx *ctx = user_data;
-    AppState *state = ctx->state;
-
-    g_mutex_lock(&state->recorded_lock);
-    if (state->daily_summary_steps == NULL) {
-        state->daily_summary_steps = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
-    }
-    guint *steps_ptr = g_new(guint, 1);
-    *steps_ptr = ctx->steps;
-    g_hash_table_replace(state->daily_summary_steps, g_strdup(ctx->day_key), steps_ptr);
-    g_mutex_unlock(&state->recorded_lock);
-
-    recorded_refresh_ui(state);
     g_free(ctx->day_key);
     g_free(ctx);
     return G_SOURCE_REMOVE;
@@ -681,25 +607,10 @@ void recorded_store_samples_for_day_key(AppState *state, const gchar *day_key, c
 
 void recorded_store_daily_details(AppState *state, uint32_t ts, const RecordedSample *samples, size_t count) {
     if (samples == NULL || count == 0) return;
-    GDateTime *dt = g_date_time_new_from_unix_local((gint64)ts);
-    if (dt == NULL) return;
-    gchar *day_key = g_date_time_format(dt, "%Y-%m-%d");
-    g_date_time_unref(dt);
+    gchar *day_key = miwear_local_day_key((gint64)ts);
+    if (day_key == NULL) return;
     recorded_store_samples_for_day_key(state, day_key, samples, count);
     g_free(day_key);
-}
-
-void recorded_store_daily_summary_steps(AppState *state, uint32_t ts, guint steps) {
-    GDateTime *dt = g_date_time_new_from_unix_local((gint64)ts);
-    if (dt == NULL) return;
-    gchar *day_key = g_date_time_format(dt, "%Y-%m-%d");
-    g_date_time_unref(dt);
-
-    DailySummaryStoreCtx *ctx = g_new0(DailySummaryStoreCtx, 1);
-    ctx->state = state;
-    ctx->day_key = day_key;
-    ctx->steps = steps;
-    g_idle_add(ui_daily_summary_store_cb, ctx);
 }
 
 static void flush_recorded_day_buckets(AppState *state, GHashTable *by_day) {
@@ -715,27 +626,66 @@ static void flush_recorded_day_buckets(AppState *state, GHashTable *by_day) {
     }
 }
 
+struct RecordedBatch {
+    GHashTable *by_day; /* day key → GArray<RecordedSample> */
+    MiwearLocalDayCursor cursor;
+};
+
+RecordedBatch *recorded_batch_new(void) {
+    RecordedBatch *b = g_new0(RecordedBatch, 1);
+    b->by_day = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_array_unref);
+    miwear_local_day_cursor_init(&b->cursor);
+    return b;
+}
+
+void recorded_batch_add_sleep_minute(RecordedBatch *b, gint64 unix_sec, int stage) {
+    const gchar *day_key = NULL;
+    guint16 mod = 0;
+    if (b == NULL || !miwear_local_day_cursor_resolve(&b->cursor, unix_sec, &day_key, &mod)) {
+        return;
+    }
+    GArray *bucket = g_hash_table_lookup(b->by_day, day_key);
+    if (bucket == NULL) {
+        bucket = g_array_new(FALSE, FALSE, sizeof(RecordedSample));
+        g_hash_table_insert(b->by_day, g_strdup(day_key), bucket);
+    }
+    RecordedSample s = {0};
+    s.minute_of_day = mod;
+    s.steps = s.active_calories = s.distance_cm = s.heart_rate = s.energy = s.spo2 = s.stress = -1;
+    s.sleep_stage = stage;
+    s.sleep_source = 1;
+    g_array_append_val(bucket, s);
+}
+
+void recorded_batch_commit(AppState *state, RecordedBatch *b) {
+    if (b == NULL) {
+        return;
+    }
+    flush_recorded_day_buckets(state, b->by_day);
+    g_hash_table_unref(b->by_day);
+    miwear_local_day_cursor_clear(&b->cursor);
+    g_free(b);
+}
+
 void recorded_merge_xiaomi_activity_rows(AppState *state, const MiwearXiaomiActivityRow *rows, size_t count) {
     if (state == NULL || rows == NULL || count == 0) {
         return;
     }
     GHashTable *by_day = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_array_unref);
+    MiwearLocalDayCursor cursor;
+    miwear_local_day_cursor_init(&cursor);
     for (size_t i = 0; i < count; i++) {
         const MiwearXiaomiActivityRow *r = &rows[i];
-        GDateTime *dt = g_date_time_new_from_unix_local((gint64)r->timestamp_sec);
-        if (dt == NULL) {
+        const gchar *day_key = NULL;
+        guint16 mod = 0;
+        if (!miwear_local_day_cursor_resolve(&cursor, (gint64)r->timestamp_sec, &day_key, &mod)) {
             continue;
         }
-        gchar *day_key = g_date_time_format(dt, "%Y-%m-%d");
-        guint16 mod = (guint16)(g_date_time_get_hour(dt) * 60 + g_date_time_get_minute(dt));
-        g_date_time_unref(dt);
 
         GArray *bucket = g_hash_table_lookup(by_day, day_key);
         if (bucket == NULL) {
             bucket = g_array_new(FALSE, FALSE, sizeof(RecordedSample));
-            g_hash_table_insert(by_day, day_key, bucket);
-        } else {
-            g_free(day_key);
+            g_hash_table_insert(by_day, g_strdup(day_key), bucket);
         }
 
         RecordedSample rs = {0};
@@ -751,93 +701,54 @@ void recorded_merge_xiaomi_activity_rows(AppState *state, const MiwearXiaomiActi
         rs.sleep_source = 0;
         g_array_append_val(bucket, rs);
     }
+    miwear_local_day_cursor_clear(&cursor);
     flush_recorded_day_buckets(state, by_day);
     g_hash_table_unref(by_day);
 }
 
-static void append_summary_chart_point(GArray *pts, uint32_t ts_sec, int spo2, int stress) {
-    if (ts_sec == 0) {
-        return;
-    }
-    GDateTime *dt = g_date_time_new_from_unix_local((gint64)ts_sec);
-    if (dt == NULL) {
-        return;
-    }
-    RecordedSample rs = {0};
-    rs.minute_of_day = (guint16)(g_date_time_get_hour(dt) * 60 + g_date_time_get_minute(dt));
-    g_date_time_unref(dt);
-    rs.steps = rs.active_calories = rs.distance_cm = rs.heart_rate = rs.energy = rs.sleep_stage = -1;
-    rs.sleep_source = 0;
-    rs.spo2 = spo2 >= 0 ? spo2 : -1;
-    rs.stress = stress >= 0 ? stress : -1;
-    if (rs.spo2 >= 0 || rs.stress >= 0) {
-        g_array_append_val(pts, rs);
-    }
+static GHashTable *daily_summary_table_new(void) {
+    return g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 }
 
+/* Stores the band's summary for its local day. Main thread only (the dashboard reads it there). */
 void health_apply_daily_summary(AppState *state, const MiwearDailySummaryRow *row) {
-    if (state == NULL || row == NULL) {
+    if (state == NULL || row == NULL || row->timestamp_ms <= 0) {
         return;
     }
-    const uint32_t day_ts = (uint32_t)(row->timestamp_ms / 1000LL);
-    recorded_store_daily_summary_steps(state, day_ts, (guint)row->steps);
-
-    gchar *spo2_txt = NULL;
-    gchar *stress_txt = NULL;
-    if (miwear_spo2_value_valid(row->spo2_avg)) {
-        if (miwear_spo2_value_valid(row->spo2_min) && miwear_spo2_value_valid(row->spo2_max)) {
-            spo2_txt = g_strdup_printf("%d%% avg (%d–%d)", row->spo2_avg, row->spo2_min, row->spo2_max);
-        } else {
-            spo2_txt = g_strdup_printf("%d%%", row->spo2_avg);
-        }
+    gchar *day_key = miwear_local_day_key(row->timestamp_ms / 1000LL);
+    if (day_key == NULL) {
+        return;
     }
-    schedule_metrics_update(
-        state,
-        FALSE, 0,
-        FALSE, 0,
-        FALSE, 0,
-        FALSE, 0,
-        FALSE, 0,
-        FALSE, 0,
-        spo2_txt, NULL);
-    g_free(spo2_txt);
-
-    GArray *pts = g_array_new(FALSE, FALSE, sizeof(RecordedSample));
-    if (miwear_spo2_value_valid(row->spo2_min)) {
-        append_summary_chart_point(pts, (uint32_t)row->spo2_min_ts_sec, row->spo2_min, -1);
+    g_mutex_lock(&state->recorded_lock);
+    if (state->daily_summaries == NULL) {
+        state->daily_summaries = daily_summary_table_new();
     }
-    if (miwear_spo2_value_valid(row->spo2_max)) {
-        append_summary_chart_point(pts, (uint32_t)row->spo2_max_ts_sec, row->spo2_max, -1);
-    }
-    if (pts->len > 0) {
-        recorded_store_daily_details(state, day_ts, (const RecordedSample *)pts->data, pts->len);
-    }
-    g_array_unref(pts);
-    miwear_dashboard_notify_summary(state, row);
+    g_hash_table_replace(state->daily_summaries, day_key, g_memdup2(row, sizeof(*row)));
+    g_mutex_unlock(&state->recorded_lock);
+    miwear_dashboard_schedule_refresh(state);
 }
+
+typedef struct {
+    gint64 bed_sec;
+    gint64 wake_sec;
+} RebuildSleepSession;
 
 typedef struct {
     AppState *state;
     GHashTable *days;
-    GHashTable *summary_steps;
-    MiwearDailySummaryRow latest_summary;
-    gboolean has_latest_summary;
+    GHashTable *summaries;
     GArray *sleep_stage_markers;
+    GArray *sleep_sessions; /* RebuildSleepSession, ordered by bed time */
     GHashTable *sleep_summaries;
+    MiwearLocalDayCursor cursor;
 } RecordedRebuildCtx;
+
+/* A stage marker outside any recorded bed→wake session lasts until the next marker, but no
+ * longer than this (largest in-session gap observed on Band 9/10 data is ~2.5 h). */
+#define REBUILD_ORPHAN_MARKER_MAX_SEC (3 * 3600)
 
 static void sleep_duration_value_free(gpointer data) {
     g_free(data);
-}
-
-static gchar *day_key_from_unix_local(gint64 unix_sec) {
-    GDateTime *dt = g_date_time_new_from_unix_local(unix_sec);
-    if (dt == NULL) {
-        return NULL;
-    }
-    gchar *key = g_date_time_format(dt, "%Y-%m-%d");
-    g_date_time_unref(dt);
-    return key;
 }
 
 static void rebuild_store_sleep_durations(RecordedRebuildCtx *ctx, const MiwearSleepTimeRow *r) {
@@ -861,7 +772,7 @@ static void rebuild_store_sleep_durations(RecordedRebuildCtx *ctx, const MiwearS
         return;
     }
 
-    gchar *wake_day = day_key_from_unix_local(r->wake_ms / 1000LL);
+    gchar *wake_day = miwear_local_day_key(r->wake_ms / 1000LL);
     if (wake_day == NULL) {
         return;
     }
@@ -873,6 +784,11 @@ static void rebuild_store_sleep_durations(RecordedRebuildCtx *ctx, const MiwearS
         g_free(wake_day);
     }
     sum_row->from_db = TRUE;
+    if (r->wake_ms > r->bed_ms && r->bed_ms > 0) {
+        const gint64 bed = r->bed_ms / 1000LL, wake = r->wake_ms / 1000LL;
+        sum_row->bed_sec = sum_row->bed_sec == 0 ? bed : MIN(sum_row->bed_sec, bed);
+        sum_row->wake_sec = MAX(sum_row->wake_sec, wake);
+    }
     if (sum > 0) {
         sum_row->deep = deep;
         sum_row->light = light;
@@ -901,29 +817,32 @@ static void rebuild_store_sleep_durations(RecordedRebuildCtx *ctx, const MiwearS
     }
 }
 
+/* Minute slot for a local timestamp, creating the day array on first use. */
+static RecordedSample *rebuild_minute_slot(RecordedRebuildCtx *ctx, gint64 unix_sec) {
+    const gchar *day_key = NULL;
+    guint16 mod = 0;
+    if (!miwear_local_day_cursor_resolve(&ctx->cursor, unix_sec, &day_key, &mod)) {
+        return NULL;
+    }
+    GArray *day = g_hash_table_lookup(ctx->days, day_key);
+    if (day == NULL) {
+        day = recorded_create_day_array();
+        g_hash_table_insert(ctx->days, g_strdup(day_key), day);
+    }
+    if (mod >= day->len) {
+        return NULL;
+    }
+    return &g_array_index(day, RecordedSample, mod);
+}
+
 static void rebuild_set_sleep_minute(RecordedRebuildCtx *ctx, gint64 unix_sec, int stage) {
     if (ctx == NULL || stage < 0) {
         return;
     }
-    GDateTime *dt = g_date_time_new_from_unix_local(unix_sec);
-    if (dt == NULL) {
+    RecordedSample *dst = rebuild_minute_slot(ctx, unix_sec);
+    if (dst == NULL) {
         return;
     }
-    gchar *day_key = g_date_time_format(dt, "%Y-%m-%d");
-    guint16 mod = (guint16)(g_date_time_get_hour(dt) * 60 + g_date_time_get_minute(dt));
-    g_date_time_unref(dt);
-
-    GArray *day = g_hash_table_lookup(ctx->days, day_key);
-    if (day == NULL) {
-        day = recorded_create_day_array();
-        g_hash_table_insert(ctx->days, day_key, day);
-    } else {
-        g_free(day_key);
-    }
-    if (mod >= day->len) {
-        return;
-    }
-    RecordedSample *dst = &g_array_index(day, RecordedSample, mod);
     dst->sleep_stage = stage;
     dst->sleep_source = 1;
 }
@@ -996,6 +915,19 @@ static void rebuild_sleep_span_from_durations(RecordedRebuildCtx *ctx,
     g_array_unref(stages);
 }
 
+static const RebuildSleepSession *rebuild_find_sleep_session(const RecordedRebuildCtx *ctx, gint64 unix_sec) {
+    if (ctx->sleep_sessions == NULL) {
+        return NULL;
+    }
+    for (guint i = 0; i < ctx->sleep_sessions->len; i++) {
+        const RebuildSleepSession *s = &g_array_index(ctx->sleep_sessions, RebuildSleepSession, i);
+        if (unix_sec >= s->bed_sec && unix_sec < s->wake_sec) {
+            return s;
+        }
+    }
+    return NULL;
+}
+
 static void rebuild_expand_sleep_stage_markers(RecordedRebuildCtx *ctx) {
     if (ctx == NULL || ctx->sleep_stage_markers == NULL || ctx->sleep_stage_markers->len == 0) {
         return;
@@ -1010,6 +942,14 @@ static void rebuild_expand_sleep_stage_markers(RecordedRebuildCtx *ctx) {
         } else {
             end_sec = start_sec + 60;
         }
+        /* A stage lasts until the next marker, but never past the end of its own night:
+         * without this the last marker of a night was painted until the next night's first one. */
+        const RebuildSleepSession *session = rebuild_find_sleep_session(ctx, start_sec);
+        if (session != NULL) {
+            end_sec = MIN(end_sec, session->wake_sec);
+        } else {
+            end_sec = MIN(end_sec, start_sec + REBUILD_ORPHAN_MARKER_MAX_SEC);
+        }
         if (end_sec <= start_sec) {
             end_sec = start_sec + 60;
         }
@@ -1022,25 +962,10 @@ static void rebuild_expand_sleep_stage_markers(RecordedRebuildCtx *ctx) {
 
 static gboolean rebuild_activity_cb(const MiwearXiaomiActivityRow *r, gpointer user_data) {
     RecordedRebuildCtx *ctx = user_data;
-    GDateTime *dt = g_date_time_new_from_unix_local((gint64)r->timestamp_sec);
-    if (dt == NULL) {
+    RecordedSample *dst = rebuild_minute_slot(ctx, (gint64)r->timestamp_sec);
+    if (dst == NULL) {
         return TRUE;
     }
-    gchar *day_key = g_date_time_format(dt, "%Y-%m-%d");
-    guint16 mod = (guint16)(g_date_time_get_hour(dt) * 60 + g_date_time_get_minute(dt));
-    g_date_time_unref(dt);
-
-    GArray *day = g_hash_table_lookup(ctx->days, day_key);
-    if (day == NULL) {
-        day = recorded_create_day_array();
-        g_hash_table_insert(ctx->days, day_key, day);
-    } else {
-        g_free(day_key);
-    }
-    if (mod >= day->len) {
-        return TRUE;
-    }
-    RecordedSample *dst = &g_array_index(day, RecordedSample, mod);
     if (r->steps >= 0) {
         dst->steps = r->steps;
     }
@@ -1065,6 +990,17 @@ static gboolean rebuild_activity_cb(const MiwearXiaomiActivityRow *r, gpointer u
     return TRUE;
 }
 
+static gboolean rebuild_daily_summary_cb(const MiwearDailySummaryRow *r, gpointer user_data) {
+    RecordedRebuildCtx *ctx = user_data;
+    const gchar *day_key = NULL;
+    guint16 mod = 0;
+    if (r->timestamp_ms > 0 &&
+        miwear_local_day_cursor_resolve(&ctx->cursor, r->timestamp_ms / 1000LL, &day_key, &mod)) {
+        g_hash_table_replace(ctx->summaries, g_strdup(day_key), g_memdup2(r, sizeof(*r)));
+    }
+    return TRUE;
+}
+
 static gboolean rebuild_sleep_stage_cb(const MiwearSleepStageRow *r, gpointer user_data) {
     RecordedRebuildCtx *ctx = user_data;
     if (ctx->sleep_stage_markers == NULL) {
@@ -1080,6 +1016,10 @@ static gboolean rebuild_sleep_time_cb(const MiwearSleepTimeRow *r, gpointer user
     rebuild_store_sleep_durations(ctx, r);
     const gint64 bed_sec = r->bed_ms / 1000LL;
     const gint64 wake_sec = r->wake_ms / 1000LL;
+    if (wake_sec > bed_sec) {
+        const RebuildSleepSession session = {.bed_sec = bed_sec, .wake_sec = wake_sec};
+        g_array_append_val(ctx->sleep_sessions, session);
+    }
     rebuild_sleep_span_from_durations(ctx,
                                       bed_sec,
                                       wake_sec,
@@ -1090,23 +1030,7 @@ static gboolean rebuild_sleep_time_cb(const MiwearSleepTimeRow *r, gpointer user
     return TRUE;
 }
 
-static gboolean rebuild_daily_summary_cb(const MiwearDailySummaryRow *r, gpointer user_data) {
-    RecordedRebuildCtx *ctx = user_data;
-    GDateTime *dt = g_date_time_new_from_unix_local((gint64)(r->timestamp_ms / 1000LL));
-    if (dt == NULL) {
-        return TRUE;
-    }
-    gchar *day_key = g_date_time_format(dt, "%Y-%m-%d");
-    g_date_time_unref(dt);
-    guint *steps_ptr = g_new(guint, 1);
-    *steps_ptr = (guint)r->steps;
-    g_hash_table_insert(ctx->summary_steps, day_key, steps_ptr);
-
-    ctx->latest_summary = *r;
-    ctx->has_latest_summary = TRUE;
-    return TRUE;
-}
-
+/* Rebuilds the per-minute day timelines from SQLite. Main thread only. */
 void recorded_rebuild_from_db(AppState *state) {
     if (state == NULL || state->selected_address == NULL || state->selected_address[0] == '\0') {
         return;
@@ -1118,88 +1042,74 @@ void recorded_rebuild_from_db(AppState *state) {
     RecordedRebuildCtx ctx = {0};
     ctx.state = state;
     ctx.days = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, recorded_day_value_free);
-    ctx.summary_steps = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+    ctx.summaries = daily_summary_table_new();
     ctx.sleep_summaries = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, sleep_duration_value_free);
+    ctx.sleep_sessions = g_array_new(FALSE, FALSE, sizeof(RebuildSleepSession));
+    miwear_local_day_cursor_init(&ctx.cursor);
 
     (void)miwear_db_foreach_xiaomi_activity(rebuild_activity_cb, &ctx);
     (void)miwear_db_foreach_sleep_time(rebuild_sleep_time_cb, &ctx);
+    (void)miwear_db_foreach_daily_summary(rebuild_daily_summary_cb, &ctx);
     (void)miwear_db_foreach_sleep_stage(rebuild_sleep_stage_cb, &ctx);
     rebuild_expand_sleep_stage_markers(&ctx);
     if (ctx.sleep_stage_markers != NULL) {
         g_array_unref(ctx.sleep_stage_markers);
-        ctx.sleep_stage_markers = NULL;
     }
+    g_array_unref(ctx.sleep_sessions);
+    miwear_local_day_cursor_clear(&ctx.cursor);
 
     g_mutex_lock(&state->recorded_lock);
     if (state->recorded_days != NULL) {
         g_hash_table_unref(state->recorded_days);
     }
     state->recorded_days = ctx.days;
-    ctx.days = NULL;
 
-    if (state->daily_summary_steps != NULL) {
-        g_hash_table_unref(state->daily_summary_steps);
+    if (state->daily_summaries != NULL) {
+        g_hash_table_unref(state->daily_summaries);
     }
-    state->daily_summary_steps = ctx.summary_steps;
-    ctx.summary_steps = NULL;
+    state->daily_summaries = ctx.summaries;
 
     if (state->sleep_duration_by_day != NULL) {
         g_hash_table_unref(state->sleep_duration_by_day);
     }
     state->sleep_duration_by_day = ctx.sleep_summaries;
-    ctx.sleep_summaries = NULL;
     g_mutex_unlock(&state->recorded_lock);
 
-    if (ctx.days != NULL) {
-        g_hash_table_unref(ctx.days);
-    }
-    if (ctx.summary_steps != NULL) {
-        g_hash_table_unref(ctx.summary_steps);
-    }
-    if (ctx.sleep_summaries != NULL) {
-        g_hash_table_unref(ctx.sleep_summaries);
-    }
-
-    if (state->recorded_day_dropdown != NULL && state->recorded_days != NULL) {
-        GListModel *model = gtk_drop_down_get_model(GTK_DROP_DOWN(state->recorded_day_dropdown));
-        if (model == NULL || !GTK_IS_STRING_LIST(model)) {
-            recorded_refresh_ui(state);
-            if (ctx.has_latest_summary) {
-                health_apply_daily_summary(state, &ctx.latest_summary);
-            }
-            return;
-        }
-        GtkStringList *sl = GTK_STRING_LIST(g_object_ref(model));
-        guint n = g_list_model_get_n_items(G_LIST_MODEL(sl));
-        if (n > 0) {
-            gtk_string_list_splice(sl, 0, n, NULL);
-        }
-        GList *keys = g_hash_table_get_keys(state->recorded_days);
-        keys = g_list_sort(keys, (GCompareFunc)g_ascii_strcasecmp);
-        for (GList *l = keys; l != NULL; l = l->next) {
-            gtk_string_list_append(sl, (const char *)l->data);
-        }
-        g_list_free(keys);
-        if (g_list_model_get_n_items(G_LIST_MODEL(sl)) > 0) {
-            gtk_drop_down_set_selected(GTK_DROP_DOWN(state->recorded_day_dropdown), 0);
-        }
-        g_object_unref(sl);
-    }
-
     recorded_refresh_ui(state);
-
-    if (ctx.has_latest_summary) {
-        health_apply_daily_summary(state, &ctx.latest_summary);
-    }
 }
 
-void switch_to_dashboard(AppState *state) {
+static gboolean recorded_rebuild_idle_cb(gpointer user_data) {
+    AppState *state = user_data;
+    state->recorded_rebuild_source_id = 0;
     recorded_rebuild_from_db(state);
-    if (state->stack != NULL && GTK_IS_STACK(state->stack) && state->page_dashboard != NULL) {
-        gtk_stack_set_visible_child(GTK_STACK(state->stack), state->page_dashboard);
+    miwear_dashboard_schedule_refresh(state);
+    return G_SOURCE_REMOVE;
+}
+
+void recorded_schedule_rebuild(AppState *state) {
+    if (state == NULL || state->recorded_rebuild_source_id != 0) {
+        return; /* a pending rebuild will read everything written to the DB before it runs */
+    }
+    state->recorded_rebuild_source_id = g_idle_add(recorded_rebuild_idle_cb, state);
+}
+
+static void show_main(AppState *state) {
+    recorded_rebuild_from_db(state);
+    miwear_sport_load_from_db(state);
+    if (state->stack != NULL) {
+        gtk_stack_set_visible_child_name(GTK_STACK(state->stack), "main");
     }
     miwear_dashboard_update_device_state(state, NULL, NULL, NULL);
     miwear_dashboard_schedule_refresh(state);
+}
+
+/* Auth succeeded: the band is connected. */
+void switch_to_dashboard(AppState *state) {
+    show_main(state);
+    gchar *msg = g_strdup_printf("Connected to %s",
+                                 state->device_display_name != NULL ? state->device_display_name : "the band");
+    miwear_dashboard_toast(state, msg);
+    g_free(msg);
 }
 
 static gboolean idle_switch_to_dashboard(gpointer user_data) {
@@ -1214,9 +1124,13 @@ void schedule_switch_to_dashboard(AppState *state) {
     g_idle_add(idle_switch_to_dashboard, state);
 }
 
+/* Connection lost: saved data stays browsable; only fall back to setup without a saved band. */
 void switch_to_pairing(AppState *state) {
-    if (state->stack != NULL && GTK_IS_STACK(state->stack) && state->page_pairing != NULL) {
-        gtk_stack_set_visible_child(GTK_STACK(state->stack), state->page_pairing);
+    if (miwear_ui_has_saved_device(state)) {
+        miwear_dashboard_toast(state, "Connection to the band was lost");
+        miwear_dashboard_schedule_refresh(state);
+    } else {
+        miwear_ui_show_setup(state);
     }
 }
 
@@ -1276,7 +1190,8 @@ void start_connect_for_address(AppState *state, const gchar *raw_address) {
     task->state = state;
     task->bdaddr = bdaddr;
     task->normalized = normalized;
-    g_thread_new("connect-worker", connect_worker_main, task);
+    task->generation = state->connect_generation; /* bumped by disconnect_socket() above */
+    g_thread_unref(g_thread_new("connect-worker", connect_worker_main, task));
 }
 
 void miwear_app_shutdown(GApplication *app, gpointer user_data) {
@@ -1291,6 +1206,7 @@ void miwear_app_shutdown(GApplication *app, gpointer user_data) {
         state->activity_live_poll_source_id = 0;
     }
     miwear_find_phone_shutdown(state);
+    miwear_weather_shutdown(state);
     if (state->find_band_stop_source != 0) {
         g_source_remove(state->find_band_stop_source);
         state->find_band_stop_source = 0;
@@ -1318,20 +1234,18 @@ void miwear_app_shutdown(GApplication *app, gpointer user_data) {
         state->log_queue = NULL;
     }
     g_mutex_unlock(&state->log_lock);
-    if (state->chart_label_idle_id != 0) {
-        g_source_remove(state->chart_label_idle_id);
-        state->chart_label_idle_id = 0;
+    if (state->recorded_rebuild_source_id != 0) {
+        g_source_remove(state->recorded_rebuild_source_id);
+        state->recorded_rebuild_source_id = 0;
     }
-    g_free(state->pending_chart_label);
-    state->pending_chart_label = NULL;
     g_mutex_lock(&state->recorded_lock);
     if (state->recorded_days != NULL) {
         g_hash_table_unref(state->recorded_days);
         state->recorded_days = NULL;
     }
-    if (state->daily_summary_steps != NULL) {
-        g_hash_table_unref(state->daily_summary_steps);
-        state->daily_summary_steps = NULL;
+    if (state->daily_summaries != NULL) {
+        g_hash_table_unref(state->daily_summaries);
+        state->daily_summaries = NULL;
     }
     if (state->sleep_duration_by_day != NULL) {
         g_hash_table_unref(state->sleep_duration_by_day);
@@ -1349,741 +1263,36 @@ void miwear_app_shutdown(GApplication *app, gpointer user_data) {
     state->live_stress_ts_sec = 0;
     state->weather_location_name = NULL;
     state->weather_last_status = NULL;
-    g_free(state->selected_recorded_day);
-    state->selected_recorded_day = NULL;
     if (state->health_view_date != NULL) {
         g_date_free(state->health_view_date);
         state->health_view_date = NULL;
     }
-    for (GList *l = state->sport_entries; l != NULL; l = l->next) {
-        MiwearSportEntry *e = l->data;
-        g_free(e->label);
-        g_free(e);
-    }
-    g_list_free(state->sport_entries);
-    state->sport_entries = NULL;
+    miwear_sport_entries_clear(state);
     if (state->dash_ui != NULL) {
         miwear_dashboard_ui_free(state->dash_ui);
         state->dash_ui = NULL;
     }
+    g_clear_pointer(&state->pairing_selected_address, g_free);
     miwear_db_close();
-}
-
-static void on_recorded_day_selected(GObject *object, GParamSpec *pspec, gpointer user_data) {
-    (void)pspec;
-    GtkDropDown *dd = GTK_DROP_DOWN(object);
-    AppState *state = user_data;
-    GObject *item = gtk_drop_down_get_selected_item(dd);
-    g_free(state->selected_recorded_day);
-    if (item != NULL && GTK_IS_STRING_OBJECT(item)) {
-        const char *s = gtk_string_object_get_string(GTK_STRING_OBJECT(item));
-        state->selected_recorded_day = (s != NULL && s[0] != '\0') ? g_strdup(s) : NULL;
-    } else {
-        state->selected_recorded_day = NULL;
-    }
-    state->chart_hover_active = FALSE;
-    recorded_refresh_ui(state);
-}
-
-static void on_recorded_stat_selected(GObject *object, GParamSpec *pspec, gpointer user_data) {
-    (void)pspec;
-    GtkDropDown *dd = GTK_DROP_DOWN(object);
-    AppState *state = user_data;
-    guint pos = gtk_drop_down_get_selected(dd);
-    if (pos != GTK_INVALID_LIST_POSITION) {
-        state->selected_recorded_stat = (gint)pos;
-    } else {
-        state->selected_recorded_stat = REC_STAT_HEART_RATE;
-    }
-    state->chart_hover_active = FALSE;
-    recorded_refresh_ui(state);
-}
-
-static guint16 chart_x_to_minute(double x, double left, double w) {
-    double t = (x - left) / w;
-    if (t < 0.0) t = 0.0;
-    if (t > 1.0) t = 1.0;
-    return (guint16)(t * 1439.0);
-}
-
-static gboolean compute_sleep_window_from_array(const GArray *arr, guint16 *out_first, guint16 *out_last) {
-    if (arr == NULL || arr->len == 0 || out_first == NULL || out_last == NULL) return FALSE;
-
-    /* Data-driven sleep axis: prefer samples from sleep payloads. */
-    guint first_stage = 1440, last_stage = 0;
-    for (guint i = 0; i < arr->len; i++) {
-        const RecordedSample *s = &g_array_index(arr, RecordedSample, i);
-        if (s->sleep_source > 0) {
-            if (i < first_stage) first_stage = i;
-            if (i > last_stage) last_stage = i;
-        }
-    }
-    if (first_stage < 1440 && last_stage > first_stage) {
-        *out_first = (guint16)first_stage;
-        *out_last = (guint16)last_stage;
-        return TRUE;
-    }
-
-    /* Secondary: explicit sleep stage points, even if source flag wasn't preserved. */
-    first_stage = 1440; last_stage = 0;
-    for (guint i = 0; i < arr->len; i++) {
-        const RecordedSample *s = &g_array_index(arr, RecordedSample, i);
-        if (s->sleep_stage >= 0) {
-            if (i < first_stage) first_stage = i;
-            if (i > last_stage) last_stage = i;
-        }
-    }
-    if (first_stage < 1440 && last_stage > first_stage) {
-        *out_first = (guint16)first_stage;
-        *out_last = (guint16)last_stage;
-        return TRUE;
-    }
-
-    return FALSE;
-}
-
-static gboolean sleep_window_for_selected_day(AppState *state, guint16 *out_first, guint16 *out_last) {
-    if (state->selected_recorded_day == NULL || state->recorded_days == NULL) return FALSE;
-    gboolean ok = FALSE;
-    g_mutex_lock(&state->recorded_lock);
-    GArray *arr = g_hash_table_lookup(state->recorded_days, state->selected_recorded_day);
-    ok = compute_sleep_window_from_array(arr, out_first, out_last);
-    g_mutex_unlock(&state->recorded_lock);
-    return ok;
-}
-
-static guint16 chart_x_to_minute_for_current_stat(AppState *state, double x, double left, double w) {
-    guint16 m = chart_x_to_minute(x, left, w);
-    if (state->selected_recorded_stat == REC_STAT_SLEEP) {
-        guint16 first_m = 0, last_m = 0;
-        if (sleep_window_for_selected_day(state, &first_m, &last_m)) {
-            double t = (x - left) / w;
-            if (t < 0.0) t = 0.0;
-            if (t > 1.0) t = 1.0;
-            guint span = (guint)(last_m - first_m);
-            m = (guint16)(first_m + (guint)(t * (double)span + 0.5));
-        }
-    }
-    return m;
-}
-
-typedef struct {
-    double left, top, right, bottom, w, h;
-} ChartPlotGeom;
-
-static gboolean chart_plot_geometry(int width, int height, ChartPlotGeom *g) {
-    if (width <= 1 || height <= 1 || g == NULL) {
-        return FALSE;
-    }
-    g->left = fmax(34.0, fmin(54.0, width * 0.105));
-    g->right = fmax(38.0, fmin(60.0, width * 0.095));
-    g->top = fmax(7.0, fmin(16.0, height * 0.065));
-    g->bottom = fmax(20.0, fmin(36.0, height * 0.155));
-    g->w = (double)width - g->left - g->right;
-    g->h = (double)height - g->top - g->bottom;
-    return g->w > 1.0 && g->h > 1.0;
-}
-
-static void chart_pointer_set_hover_x(AppState *state, double x, gboolean from_motion_controller) {
-    if (state->recorded_chart == NULL) {
-        return;
-    }
-    if (from_motion_controller && state->chart_touch_dragging) {
-        return;
-    }
-    int width = gtk_widget_get_width(state->recorded_chart);
-    int height = gtk_widget_get_height(state->recorded_chart);
-    ChartPlotGeom geo;
-    if (!chart_plot_geometry(width, height, &geo)) {
-        return;
-    }
-    guint16 nm = chart_x_to_minute_for_current_stat(state, x, geo.left, geo.w);
-    state->chart_hover_active = TRUE;
-    state->chart_hover_minute = nm;
-    gtk_widget_queue_draw(state->recorded_chart);
-}
-
-static void update_responsive_layout(AppState *state) {
-    if (state->window == NULL) {
-        return;
-    }
-    const int ww = gtk_widget_get_width(state->window);
-    const int wh = gtk_widget_get_height(state->window);
-    if (ww <= 0 || wh <= 0) {
-        return;
-    }
-    miwear_dashboard_apply_viewport(state, ww, wh);
-}
-
-static gboolean on_window_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer user_data) {
-    (void)widget;
-    (void)clock;
-    AppState *state = user_data;
-    update_responsive_layout(state);
-    return G_SOURCE_CONTINUE;
-}
-
-/* Tooltip / labels: only a value actually stored for that minute (no blending or neighbor fill). */
-static gboolean recorded_value_exact(const GArray *arr, gint stat, guint16 minute, int *out_value) {
-    if (arr == NULL || out_value == NULL || minute >= arr->len) return FALSE;
-    int v = recorded_sample_value(&g_array_index(arr, RecordedSample, minute), stat);
-    if (v < 0) return FALSE;
-    *out_value = v;
-    return TRUE;
-}
-
-static void chart_draw_y_labels(cairo_t *cr, double left, double top, double h, int min_v, int max_v,
-                                double lr, double lg, double lb, double text_scale) {
-    cairo_set_source_rgb(cr, lr, lg, lb);
-    cairo_set_font_size(cr, 10.0 * text_scale);
-    for (int i = 0; i <= 5; i++) {
-        double y = top + (h * i / 5.0);
-        int v = max_v - (int)((double)(max_v - min_v) * ((double)i / 5.0));
-        gchar buf[32];
-        g_snprintf(buf, sizeof(buf), "%d", v);
-        cairo_move_to(cr, 4.0, y + 3.0);
-        cairo_show_text(cr, buf);
-    }
-}
-
-static void chart_draw_time_axis(cairo_t *cr, double left, double top, double h, double w, guint start_min, guint end_min,
-                                 double lr, double lg, double lb, double text_scale) {
-    if (end_min <= start_min) return;
-    cairo_set_source_rgb(cr, lr, lg, lb);
-    cairo_set_font_size(cr, 10.0 * text_scale);
-    const guint ticks = 6;
-    for (guint i = 0; i <= ticks; i++) {
-        double t = (double)i / (double)ticks;
-        double x = left + (t * w);
-        guint m = start_min + (guint)((double)(end_min - start_min) * t + 0.5);
-        guint hh = (m / 60u) % 24u;
-        guint mm = m % 60u;
-        gchar buf[16];
-        g_snprintf(buf, sizeof(buf), "%02u:%02u", hh, mm);
-        cairo_move_to(cr, x - 14.0, top + h + 14.0);
-        cairo_show_text(cr, buf);
-    }
-}
-
-static void on_chart_motion(GtkEventControllerMotion *controller, double x, double y, gpointer user_data) {
-    (void)controller;
-    (void)y;
-    chart_pointer_set_hover_x((AppState *)user_data, x, TRUE);
-}
-
-static void on_chart_leave(GtkEventControllerMotion *controller, gpointer user_data) {
-    (void)controller;
-    AppState *state = user_data;
-    state->chart_hover_active = FALSE;
-    if (state->recorded_chart != NULL) {
-        gtk_widget_queue_draw(state->recorded_chart);
-    }
-}
-
-static void on_chart_touch_pressed(GtkGestureClick *gesture, gint n_press, double x, double y, gpointer user_data) {
-    (void)gesture;
-    (void)n_press;
-    (void)y;
-    chart_pointer_set_hover_x((AppState *)user_data, x, FALSE);
-}
-
-static void on_chart_drag_begin(GtkGestureDrag *gesture, double start_x, double start_y, gpointer user_data) {
-    (void)gesture;
-    (void)start_y;
-    AppState *state = user_data;
-    state->chart_touch_drag_start_x = start_x;
-    state->chart_touch_dragging = TRUE;
-    chart_pointer_set_hover_x(state, start_x, FALSE);
-}
-
-static void on_chart_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer user_data) {
-    (void)gesture;
-    (void)offset_y;
-    AppState *state = user_data;
-    chart_pointer_set_hover_x(state, state->chart_touch_drag_start_x + offset_x, FALSE);
-}
-
-static void on_chart_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer user_data) {
-    (void)gesture;
-    (void)offset_x;
-    (void)offset_y;
-    ((AppState *)user_data)->chart_touch_dragging = FALSE;
-}
-
-static void draw_recorded_chart(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
-    (void)area;
-    AppState *state = user_data;
-    const double text_scale = miwear_dashboard_ui_scale(state->dash_ui);
-
-    gboolean dark = adw_style_manager_get_dark(adw_style_manager_get_default());
-    double bg0 = dark ? 0.11 : 0.94;
-    double bg1 = dark ? 0.14 : 0.98;
-    double border = dark ? 0.28 : 0.82;
-    double grid_maj = dark ? 0.22 : 0.88;
-    const double txt_r = dark ? 0.70 : 0.32;
-    const double txt_g = dark ? 0.70 : 0.34;
-    const double txt_b = dark ? 0.74 : 0.36;
-
-    cairo_set_source_rgb(cr, bg0, bg0, bg0 + (dark ? 0.02 : -0.02));
-    cairo_rectangle(cr, 0, 0, width, height);
-    cairo_fill(cr);
-
-    ChartPlotGeom geo;
-    if (!chart_plot_geometry(width, height, &geo)) {
-        return;
-    }
-    const double left = geo.left, top = geo.top, w = geo.w, h = geo.h;
-
-    cairo_set_source_rgb(cr, bg1, bg1, bg1 + (dark ? 0.02 : -0.02));
-    cairo_rectangle(cr, left, top, w, h);
-    cairo_fill(cr);
-
-    cairo_set_source_rgb(cr, border, border, border);
-    cairo_set_line_width(cr, 1.0);
-    cairo_rectangle(cr, left + 0.5, top + 0.5, w - 1.0, h - 1.0);
-    cairo_stroke(cr);
-
-    if (state->selected_recorded_day == NULL || state->recorded_days == NULL) {
-        chart_submit_caption_literal(state, "Recorded history chart: no day selected.");
-        return;
-    }
-
-    g_mutex_lock(&state->recorded_lock);
-    GArray *arr = g_hash_table_lookup(state->recorded_days, state->selected_recorded_day);
-    if (arr == NULL || arr->len == 0) {
-        g_mutex_unlock(&state->recorded_lock);
-        chart_submit_caption_literal(state, "Recorded history chart: no samples for selected day.");
-        return;
-    }
-
-    if (state->selected_recorded_stat == REC_STAT_SLEEP) {
-        guint16 first_m = 0, last_m = 0;
-        if (!compute_sleep_window_from_array(arr, &first_m, &last_m)) {
-            g_mutex_unlock(&state->recorded_lock);
-            chart_submit_caption_literal(state, "Sleep: no sleep samples for selected day.");
-            return;
-        }
-
-        const double sleep_span = (double)((last_m > first_m) ? (last_m - first_m) : 1);
-        for (guint i = 0; i < arr->len; i++) {
-            if (i < first_m || i > last_m) continue;
-            const RecordedSample *s = &g_array_index(arr, RecordedSample, i);
-            if (s->sleep_stage < 0) continue;
-            double x0 = left + (((double)(i - first_m)) / sleep_span) * w;
-            double x1 = left + (((double)(i + 1 - first_m)) / sleep_span) * w;
-            switch (s->sleep_stage) {
-                case 4: cairo_set_source_rgba(cr, 0.90, 0.30, 0.80, 0.45); break; /* REM */
-                case 2: cairo_set_source_rgba(cr, 0.25, 0.35, 0.95, 0.45); break; /* DEEP */
-                case 3: cairo_set_source_rgba(cr, 0.35, 0.85, 0.55, 0.35); break; /* LIGHT */
-                case 5: cairo_set_source_rgba(cr, 0.80, 0.80, 0.80, 0.20); break; /* AWAKE */
-                default: cairo_set_source_rgba(cr, 0.80, 0.80, 0.80, 0.20); break; /* awake/other */
-            }
-            cairo_rectangle(cr, x0, top, x1 - x0 + 1.0, h);
-            cairo_fill(cr);
-        }
-        int hr_min = 40, hr_max = 180;
-        int spo2_min = 80, spo2_max = 100;
-        chart_draw_y_labels(cr, left, top, h, hr_min, hr_max, txt_r, txt_g, txt_b, text_scale);
-        cairo_set_source_rgb(cr, txt_r, txt_g, txt_b);
-        cairo_set_font_size(cr, 10.0 * text_scale);
-        for (int i = 0; i <= 5; i++) {
-            double y = top + (h * i / 5.0);
-            int v = spo2_max - (int)((double)(spo2_max - spo2_min) * ((double)i / 5.0));
-            gchar buf[32];
-            g_snprintf(buf, sizeof(buf), "%d%%", v);
-            cairo_move_to(cr, left + w + 4.0, y + 3.0);
-            cairo_show_text(cr, buf);
-        }
-
-        cairo_set_source_rgb(cr, 0.95, 0.90, 0.30); /* HR: segments only between consecutive measured minutes */
-        gboolean need_hr_move = TRUE;
-        guint prev_hr_i = G_MAXUINT;
-        guint hr_points = 0, spo2_points = 0;
-        int hover_hr = -1, hover_spo2 = -1, hover_stage = -1;
-        for (guint i = 0; i < arr->len; i++) {
-            if (i < first_m || i > last_m) continue;
-            const RecordedSample *s = &g_array_index(arr, RecordedSample, i);
-            if (s->heart_rate > 0) {
-                double x = left + (((double)(i - first_m)) / sleep_span) * w;
-                double y = top + h - (((double)(s->heart_rate - hr_min)) / (double)(hr_max - hr_min) * h);
-                if (need_hr_move) {
-                    cairo_move_to(cr, x, y);
-                    need_hr_move = FALSE;
-                } else if (prev_hr_i != G_MAXUINT && i - prev_hr_i > 1u) {
-                    cairo_stroke(cr);
-                    cairo_set_source_rgb(cr, 0.95, 0.90, 0.30);
-                    cairo_move_to(cr, x, y);
-                } else {
-                    cairo_line_to(cr, x, y);
-                }
-                prev_hr_i = i;
-                hr_points++;
-            }
-        }
-        cairo_stroke(cr);
-
-        cairo_set_source_rgb(cr, 0.30, 0.95, 0.95); /* SpO2 */
-        gboolean need_sp_move = TRUE;
-        guint prev_sp_i = G_MAXUINT;
-        for (guint i = 0; i < arr->len; i++) {
-            if (i < first_m || i > last_m) continue;
-            const RecordedSample *s = &g_array_index(arr, RecordedSample, i);
-            if (s->spo2 > 0) {
-                double x = left + (((double)(i - first_m)) / sleep_span) * w;
-                double y = top + h - (((double)(s->spo2 - spo2_min)) / (double)(spo2_max - spo2_min) * h);
-                if (need_sp_move) {
-                    cairo_move_to(cr, x, y);
-                    need_sp_move = FALSE;
-                } else if (prev_sp_i != G_MAXUINT && i - prev_sp_i > 1u) {
-                    cairo_stroke(cr);
-                    cairo_set_source_rgb(cr, 0.30, 0.95, 0.95);
-                    cairo_move_to(cr, x, y);
-                } else {
-                    cairo_line_to(cr, x, y);
-                }
-                prev_sp_i = i;
-                spo2_points++;
-            }
-        }
-        cairo_stroke(cr);
-
-        guint16 hover_m = state->chart_hover_minute;
-        if (state->chart_hover_active) {
-            if (hover_m < first_m) hover_m = (guint16)first_m;
-            if (hover_m > last_m) hover_m = (guint16)last_m;
-            (void)recorded_value_exact(arr, REC_STAT_HEART_RATE, hover_m, &hover_hr);
-            (void)recorded_value_exact(arr, REC_STAT_SPO2, hover_m, &hover_spo2);
-            if (hover_m < arr->len) {
-                hover_stage = g_array_index(arr, RecordedSample, hover_m).sleep_stage;
-            }
-        }
-
-        if (state->chart_hover_active) {
-            double xh = left + (((double)(hover_m - first_m)) / sleep_span) * w;
-            if (dark) {
-                cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.42);
-            } else {
-                cairo_set_source_rgba(cr, 0.10, 0.42, 0.92, 0.65);
-            }
-            cairo_set_line_width(cr, 1.0);
-            cairo_move_to(cr, xh + 0.5, top);
-            cairo_line_to(cr, xh + 0.5, top + h);
-            cairo_stroke(cr);
-        }
-        chart_draw_time_axis(cr, left, top, h, w, first_m, last_m, txt_r, txt_g, txt_b, text_scale);
-        g_mutex_unlock(&state->recorded_lock);
-
-        const char *stage_txt = "n/a";
-        if (hover_stage == 4) stage_txt = "REM";
-        else if (hover_stage == 2) stage_txt = "Deep";
-        else if (hover_stage == 3) stage_txt = "Light";
-        else if (hover_stage == 5) stage_txt = "Awake";
-
-        gchar *lbl = NULL;
-        if (state->chart_hover_active) {
-            gchar hr_buf[32], sp_buf[32];
-            if (hover_hr >= 0) {
-                g_snprintf(hr_buf, sizeof(hr_buf), "%d bpm", hover_hr);
-            } else {
-                g_strlcpy(hr_buf, "n/a", sizeof(hr_buf));
-            }
-            if (hover_spo2 >= 0) {
-                g_snprintf(sp_buf, sizeof(sp_buf), "%d%%", hover_spo2);
-            } else {
-                g_strlcpy(sp_buf, "n/a", sizeof(sp_buf));
-            }
-            lbl = g_strdup_printf("Sleep: %s (HR: %s, SpO2: %s) @ %02u:%02u",
-                                  stage_txt,
-                                  hr_buf,
-                                  sp_buf,
-                                  (unsigned)(hover_m / 60u),
-                                  (unsigned)(hover_m % 60u));
-        } else {
-            lbl = g_strdup_printf("Sleep: %02u:%02u-%02u:%02u (HR: %u, SpO2: %u)",
-                                  (unsigned)(first_m / 60u), (unsigned)(first_m % 60u),
-                                  (unsigned)(last_m / 60u), (unsigned)(last_m % 60u),
-                                  hr_points, spo2_points);
-        }
-        chart_submit_caption(state, lbl);
-        return;
-    }
-
-    if (state->selected_recorded_stat == REC_STAT_STEPS) {
-        int cum_steps = 0, cum_dist_cm = 0;
-        int max_steps = 0, max_dist_cm = 0;
-        guint last_idx = 0;
-        for (guint i = 0; i < arr->len; i++) {
-            const RecordedSample *s = &g_array_index(arr, RecordedSample, i);
-            if (s->steps > 0) cum_steps += s->steps;
-            if (s->distance_cm >= 0) cum_dist_cm += s->distance_cm;
-            if (cum_steps > max_steps) max_steps = cum_steps;
-            if (cum_dist_cm > max_dist_cm) max_dist_cm = cum_dist_cm;
-            if (s->steps >= 0 || s->distance_cm >= 0) last_idx = i;
-        }
-        if (max_steps <= 0 && max_dist_cm <= 0) {
-            guint summary_steps = 0;
-            gboolean has_summary_steps = FALSE;
-            if (state->daily_summary_steps != NULL && state->selected_recorded_day != NULL) {
-                guint *p = g_hash_table_lookup(state->daily_summary_steps, state->selected_recorded_day);
-                if (p != NULL && *p > 0) {
-                    summary_steps = *p;
-                    has_summary_steps = TRUE;
-                }
-            }
-
-            if (!has_summary_steps) {
-                g_mutex_unlock(&state->recorded_lock);
-                chart_submit_caption_literal(state, "Steps + Distance: no values");
-                return;
-            }
-
-            g_mutex_unlock(&state->recorded_lock);
-            gchar *lbl = g_strdup_printf(
-                "Steps summary only: %u (minute step history not decoded/received, flat fallback removed)",
-                summary_steps
-            );
-            chart_submit_caption(state, lbl);
-            return;
-        }
-        if (max_steps <= 0) max_steps = 1;
-        int max_dist_m = (max_dist_cm + 99) / 100;
-        if (max_dist_m < 1) max_dist_m = 1;
-        int y_steps_max = (max_steps * 110 + 99) / 100;
-        int y_dist_max_m = (max_dist_m * 110 + 99) / 100;
-        if (y_steps_max < 1) y_steps_max = 1;
-        if (y_dist_max_m < 1) y_dist_max_m = 1;
-        chart_draw_y_labels(cr, left, top, h, 0, y_steps_max, txt_r, txt_g, txt_b, text_scale);
-        cairo_set_source_rgb(cr, txt_r, txt_g, txt_b);
-        cairo_set_font_size(cr, 10.0 * text_scale);
-        for (int i = 0; i <= 5; i++) {
-            double y = top + (h * i / 5.0);
-            int v = y_dist_max_m - (int)((double)y_dist_max_m * ((double)i / 5.0));
-            gchar buf[32];
-            g_snprintf(buf, sizeof(buf), "%d", v);
-            cairo_move_to(cr, left + w + 4.0, y + 3.0);
-            cairo_show_text(cr, buf);
-        }
-
-        int hover_steps = 0, hover_dist_m = 0;
-        cairo_set_source_rgb(cr, 0.25, 0.70, 0.95); /* steps */
-        gboolean first = TRUE;
-        cum_steps = 0; cum_dist_cm = 0;
-        for (guint i = 0; i <= last_idx && i < arr->len; i++) {
-            const RecordedSample *s = &g_array_index(arr, RecordedSample, i);
-            if (s->steps > 0) cum_steps += s->steps;
-            if (s->distance_cm >= 0) cum_dist_cm += s->distance_cm;
-            if (state->chart_hover_active && i == state->chart_hover_minute) {
-                hover_steps = cum_steps;
-                hover_dist_m = (cum_dist_cm + 50) / 100;
-            }
-            double x = left + ((double)i / 1439.0) * w;
-            double y = top + h - (((double)cum_steps / (double)y_steps_max) * h);
-            if (first) { cairo_move_to(cr, x, y); first = FALSE; } else { cairo_line_to(cr, x, y); }
-        }
-        cairo_stroke(cr);
-
-        cairo_set_source_rgb(cr, 0.95, 0.85, 0.30); /* cumulative distance (m), from GB distanceCm */
-        first = TRUE;
-        cum_steps = 0; cum_dist_cm = 0;
-        for (guint i = 0; i <= last_idx && i < arr->len; i++) {
-            const RecordedSample *s = &g_array_index(arr, RecordedSample, i);
-            if (s->steps > 0) cum_steps += s->steps;
-            if (s->distance_cm >= 0) cum_dist_cm += s->distance_cm;
-            double x = left + ((double)i / 1439.0) * w;
-            const double cum_m = (double)cum_dist_cm / 100.0;
-            double y = top + h - ((cum_m / (double)y_dist_max_m) * h);
-            if (first) { cairo_move_to(cr, x, y); first = FALSE; } else { cairo_line_to(cr, x, y); }
-        }
-        cairo_stroke(cr);
-
-        if (state->chart_hover_active) {
-            double xh = left + ((double)state->chart_hover_minute / 1439.0) * w;
-            if (dark) {
-                cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.42);
-            } else {
-                cairo_set_source_rgba(cr, 0.10, 0.42, 0.92, 0.65);
-            }
-            cairo_set_line_width(cr, 1.0);
-            cairo_move_to(cr, xh + 0.5, top);
-            cairo_line_to(cr, xh + 0.5, top + h);
-            cairo_stroke(cr);
-        }
-        chart_draw_time_axis(cr, left, top, h, w, 0, 1440, txt_r, txt_g, txt_b, text_scale);
-        g_mutex_unlock(&state->recorded_lock);
-        gchar *lbl = NULL;
-        if (state->chart_hover_active) {
-            lbl = g_strdup_printf("Steps: %d (Distance: %d m) @ %02u:%02u",
-                                  hover_steps, hover_dist_m,
-                                  (unsigned)(state->chart_hover_minute / 60u),
-                                  (unsigned)(state->chart_hover_minute % 60u));
-        } else {
-            lbl = g_strdup_printf("Steps: %d (Distance: %d m)", max_steps, (max_dist_cm + 50) / 100);
-        }
-        chart_submit_caption(state, lbl);
-        return;
-    }
-
-    int min_v = G_MAXINT;
-    int max_v = G_MININT;
-    guint points = 0;
-    int hover_v = -1;
-    guint last_idx = 0;
-    for (guint i = 0; i < arr->len; i++) {
-        const RecordedSample *s = &g_array_index(arr, RecordedSample, i);
-        const int v = recorded_sample_value(s, state->selected_recorded_stat);
-        if (v >= 0) {
-            if (v < min_v) min_v = v;
-            if (v > max_v) max_v = v;
-            points++;
-            last_idx = i;
-        }
-    }
-
-    if (points == 0) {
-        g_mutex_unlock(&state->recorded_lock);
-        gchar *lbl = g_strdup_printf("%s %s: no values",
-                                     state->selected_recorded_day,
-                                     recorded_stat_name(state->selected_recorded_stat));
-        chart_submit_caption(state, lbl);
-        return;
-    }
-    if (min_v == max_v) max_v = min_v + 1;
-    int y_max = (max_v * 110 + 99) / 100;
-    if (y_max <= min_v) y_max = max_v + 1;
-
-    cairo_set_source_rgb(cr, grid_maj, grid_maj, grid_maj);
-    for (int i = 1; i < 6; i++) {
-        double y = top + (h * i / 6.0);
-        cairo_move_to(cr, left, y);
-        cairo_line_to(cr, left + w, y);
-    }
-    cairo_stroke(cr);
-    chart_draw_y_labels(cr, left, top, h, min_v, y_max, txt_r, txt_g, txt_b, text_scale);
-
-    cairo_set_source_rgb(cr, 0.25, 0.70, 0.95);
-    gboolean smooth = (state->selected_recorded_stat == REC_STAT_SPO2 || state->selected_recorded_stat == REC_STAT_STRESS);
-    if (smooth) {
-        const double bar_w = 2.0;
-        for (guint i = 0; i <= last_idx && i < arr->len; i++) {
-            int raw = recorded_sample_value(&g_array_index(arr, RecordedSample, i), state->selected_recorded_stat);
-            if (raw < 0) continue;
-            int v = raw;
-            double x = left + ((double)i / 1439.0) * w;
-            double y = top + h - ((((double)(v - min_v)) / (double)(y_max - min_v)) * h);
-            cairo_rectangle(cr, x - (bar_w / 2.0), y, bar_w, (top + h) - y);
-            cairo_fill(cr);
-        }
-    } else {
-        /* Line charts: break path across gaps so we do not imply values between sparse samples. */
-        guint line_pts = 0;
-        double lone_x = 0.0, lone_y = 0.0;
-        gboolean need_move = TRUE;
-        guint prev_plot_i = G_MAXUINT;
-        for (guint i = 0; i <= last_idx && i < arr->len; i++) {
-            const RecordedSample *s = &g_array_index(arr, RecordedSample, i);
-            const int v = recorded_sample_value(s, state->selected_recorded_stat);
-            if (v < 0) continue;
-            double x = left + ((double)i / 1439.0) * w;
-            double y = top + h - ((((double)(v - min_v)) / (double)(y_max - min_v)) * h);
-            line_pts++;
-            lone_x = x;
-            lone_y = y;
-            if (need_move) {
-                cairo_move_to(cr, x, y);
-                need_move = FALSE;
-            } else if (prev_plot_i != G_MAXUINT && i - prev_plot_i > 1u) {
-                cairo_stroke(cr);
-                cairo_set_source_rgb(cr, 0.25, 0.70, 0.95);
-                cairo_move_to(cr, x, y);
-            } else {
-                cairo_line_to(cr, x, y);
-            }
-            prev_plot_i = i;
-        }
-        cairo_stroke(cr);
-        if (line_pts == 1) {
-            cairo_set_source_rgb(cr, 0.25, 0.70, 0.95);
-            cairo_arc(cr, lone_x, lone_y, 4.0, 0.0, 2.0 * M_PI);
-            cairo_fill(cr);
-        }
-    }
-
-    if (state->chart_hover_active) {
-        double xh = left + ((double)state->chart_hover_minute / 1439.0) * w;
-        if (dark) {
-            cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.42);
-        } else {
-            cairo_set_source_rgba(cr, 0.10, 0.42, 0.92, 0.65);
-        }
-        cairo_set_line_width(cr, 1.0);
-        cairo_move_to(cr, xh + 0.5, top);
-        cairo_line_to(cr, xh + 0.5, top + h);
-        cairo_stroke(cr);
-        (void)recorded_value_exact(arr, state->selected_recorded_stat, state->chart_hover_minute, &hover_v);
-    }
-    chart_draw_time_axis(cr, left, top, h, w, 0, 1440, txt_r, txt_g, txt_b, text_scale);
-    g_mutex_unlock(&state->recorded_lock);
-
-    gchar *lbl = NULL;
-    if (state->chart_hover_active) {
-        if (hover_v >= 0) {
-            lbl = g_strdup_printf("%s: %d @ %02u:%02u",
-                                  recorded_stat_name(state->selected_recorded_stat),
-                                  hover_v,
-                                  (unsigned)(state->chart_hover_minute / 60u),
-                                  (unsigned)(state->chart_hover_minute % 60u));
-        } else {
-            lbl = g_strdup_printf("%s: n/a @ %02u:%02u",
-                                  recorded_stat_name(state->selected_recorded_stat),
-                                  (unsigned)(state->chart_hover_minute / 60u),
-                                  (unsigned)(state->chart_hover_minute % 60u));
-        }
-    } else {
-        lbl = g_strdup_printf("%s: %u points (min: %d, max: %d)",
-                              recorded_stat_name(state->selected_recorded_stat),
-                              points, min_v, y_max);
-    }
-    chart_submit_caption(state, lbl);
-}
-
-static GtkWidget *miwear_create_compact_gauge(const char *title_text, const char *value_initial,
-                                             GtkWidget **value_label_out, GtkWidget **bar_out) {
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-    gtk_widget_set_hexpand(box, TRUE);
-
-    GtkWidget *head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    GtkWidget *title = gtk_label_new(title_text);
-    gtk_label_set_xalign(GTK_LABEL(title), 0.0f);
-    GtkWidget *value = gtk_label_new(value_initial);
-    gtk_label_set_xalign(GTK_LABEL(value), 1.0f);
-    gtk_widget_set_hexpand(value, TRUE);
-    gtk_box_append(GTK_BOX(head), title);
-    gtk_box_append(GTK_BOX(head), value);
-
-    GtkWidget *bar = gtk_progress_bar_new();
-    gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(bar), FALSE);
-    gtk_widget_set_hexpand(bar, TRUE);
-
-    gtk_box_append(GTK_BOX(box), head);
-    gtk_box_append(GTK_BOX(box), bar);
-
-    *value_label_out = value;
-    *bar_out = bar;
-    return box;
 }
 
 void miwear_activate(GApplication *application, gpointer user_data) {
     AppState *state = user_data;
+    if (state->window != NULL) {
+        gtk_window_present(GTK_WINDOW(state->window));
+        return;
+    }
     if (!miwear_db_open()) {
         g_warning("Gadgetbridge-compatible database could not be opened; samples will not be persisted.");
     }
+    mi_style_install(gdk_display_get_default());
+    state->log_buffer = gtk_text_buffer_new(NULL);
+
     state->window = adw_application_window_new(GTK_APPLICATION(application));
     gtk_window_set_title(GTK_WINDOW(state->window), "Mi Wear Band");
-    gtk_window_set_default_size(GTK_WINDOW(state->window), 420, 780);
-    gtk_widget_add_css_class(state->window, "miwear-app");
+    gtk_window_set_default_size(GTK_WINDOW(state->window), 980, 820);
+    gtk_widget_set_size_request(state->window, 360, 480);
 
-    state->dash_ui = miwear_dashboard_ui_new();
-    state->page_dashboard = miwear_dashboard_build(state, state->dash_ui);
     if (state->selected_address != NULL && state->selected_address[0] != '\0') {
         g_free(state->device_display_name);
         state->device_display_name = bluez_device_display_name(state->selected_address);
@@ -2091,75 +1300,32 @@ void miwear_activate(GApplication *application, gpointer user_data) {
             g_free(state->device_display_name);
             state->device_display_name = g_strdup(state->selected_address);
         }
-        miwear_dashboard_update_device_state(state, NULL, NULL, NULL);
     }
-    state->recorded_chart = NULL;
-    state->recorded_stat_dropdown = NULL;
-    state->recorded_chart_label = NULL;
-    state->stats_row = NULL;
 
-    GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_widget_set_margin_top(toolbar, 12);
-    gtk_widget_set_margin_bottom(toolbar, 12);
-    gtk_widget_set_margin_start(toolbar, 12);
-    gtk_widget_set_margin_end(toolbar, 12);
-
-    state->listbox_devices = gtk_list_box_new();
-    g_signal_connect(state->listbox_devices, "row-selected", G_CALLBACK(on_device_row_selected), state);
-    g_signal_connect(state->listbox_devices, "row-activated", G_CALLBACK(on_device_row_activated), state);
-    gtk_list_box_set_activate_on_single_click(GTK_LIST_BOX(state->listbox_devices), TRUE);
-
-    GtkWidget *device_scroll = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(device_scroll), state->listbox_devices);
-    gtk_widget_set_margin_start(device_scroll, 12);
-    gtk_widget_set_margin_end(device_scroll, 12);
-    gtk_widget_set_margin_bottom(device_scroll, 12);
-    gtk_widget_set_vexpand(device_scroll, TRUE);
-    gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(device_scroll), 0);
-
-    GtkWidget *pairing_page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-    gtk_widget_set_margin_top(pairing_page, 12);
-    gtk_widget_set_margin_bottom(pairing_page, 12);
-    gtk_widget_set_margin_start(pairing_page, 12);
-    gtk_widget_set_margin_end(pairing_page, 12);
-
-    GtkWidget *auth_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    GtkWidget *auth_label = gtk_label_new("Auth key:");
-    gtk_label_set_xalign(GTK_LABEL(auth_label), 0.0f);
-    state->entry_authkey = gtk_entry_new();
-    gtk_widget_set_hexpand(state->entry_authkey, TRUE);
-    gtk_editable_set_text(GTK_EDITABLE(state->entry_authkey), state->auth_key_hex);
-    gtk_entry_set_placeholder_text(GTK_ENTRY(state->entry_authkey), "32 hex chars");
-    gtk_box_append(GTK_BOX(auth_row), auth_label);
-    gtk_box_append(GTK_BOX(auth_row), state->entry_authkey);
-
-    GtkWidget *pairing_hint = gtk_label_new("Click a device to pair/trust if needed, then connect.");
-    gtk_label_set_xalign(GTK_LABEL(pairing_hint), 0.0f);
-    gtk_label_set_wrap(GTK_LABEL(pairing_hint), TRUE);
-
-    gtk_box_append(GTK_BOX(pairing_page), auth_row);
-    gtk_box_append(GTK_BOX(pairing_page), toolbar);
-    gtk_box_append(GTK_BOX(pairing_page), pairing_hint);
-    gtk_box_append(GTK_BOX(pairing_page), device_scroll);
+    state->dash_ui = miwear_dashboard_ui_new();
+    state->page_dashboard = miwear_dashboard_build(state, state->dash_ui);
+    state->page_pairing = build_setup_page(state);
 
     state->stack = gtk_stack_new();
-    state->page_pairing = pairing_page;
-    gtk_widget_set_vexpand(state->page_dashboard, TRUE);
-    gtk_stack_add_named(GTK_STACK(state->stack), pairing_page, "pairing");
-    gtk_stack_add_named(GTK_STACK(state->stack), state->page_dashboard, "dashboard");
-    gtk_stack_set_visible_child(GTK_STACK(state->stack), pairing_page);
-    gtk_widget_add_tick_callback(state->window, on_window_tick, state, NULL);
-    update_responsive_layout(state);
+    gtk_stack_set_transition_type(GTK_STACK(state->stack), GTK_STACK_TRANSITION_TYPE_CROSSFADE);
+    gtk_stack_add_named(GTK_STACK(state->stack), state->page_dashboard, "main");
+    gtk_stack_add_named(GTK_STACK(state->stack), state->page_pairing, "setup");
 
-    adw_application_window_set_content(ADW_APPLICATION_WINDOW(state->window), state->stack);
+    state->toast_overlay = adw_toast_overlay_new();
+    adw_toast_overlay_set_child(ADW_TOAST_OVERLAY(state->toast_overlay), state->stack);
+    miwear_dashboard_set_toast_overlay(state->dash_ui, state->toast_overlay);
+    adw_application_window_set_content(ADW_APPLICATION_WINDOW(state->window), state->toast_overlay);
+    miwear_dashboard_add_breakpoints(state->window, state->dash_ui);
+
+    if (miwear_ui_has_saved_device(state)) {
+        show_main(state);
+    } else {
+        miwear_ui_show_setup(state);
+    }
     gtk_window_present(GTK_WINDOW(state->window));
-
-    recorded_rebuild_from_db(state);
-    populate_device_list(state);
 
     if (state->notifications_enabled) {
         miwear_notifications_on_connect(state);
     }
-
     miwear_dashboard_schedule_refresh(state);
 }

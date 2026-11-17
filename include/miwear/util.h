@@ -11,4 +11,8 @@ static inline uint16_t miwear_read_u16_le(const uint8_t *p) {
     return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
 }
 
+static inline uint16_t miwear_read_u16_be(const uint8_t *p) {
+    return (uint16_t)(((uint16_t)p[0] << 8) | (uint16_t)p[1]);
+}
+
 #endif

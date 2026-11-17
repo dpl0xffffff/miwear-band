@@ -15,6 +15,9 @@ typedef struct {
     /* Band totalDuration (asleep), not bed→wake span. */
     int total_asleep;
     gboolean from_db;
+    /* Earliest bed / latest wake of the session(s) ending on this day (unix seconds, 0 = unknown). */
+    gint64 bed_sec;
+    gint64 wake_sec;
 } MiwearSleepDurationSummary;
 
 typedef struct {
@@ -35,6 +38,9 @@ typedef struct {
     int sleep_other;
     int sleep_total_band;
     gboolean has_sleep;
+    /* The band's own totals for this day (XIAOMI_DAILY_SUMMARY_SAMPLE), when synced. */
+    gboolean has_summary;
+    MiwearDailySummaryRow summary;
 } MiwearDayHealthAgg;
 
 void miwear_health_aggregate_day(AppState *state, const gchar *day_key, MiwearDayHealthAgg *out);

@@ -16,7 +16,6 @@ int main(int argc, char **argv) {
     AppState state = {0};
     state.sock_fd = -1;
     state.goal_moving = 30;
-    state.selected_recorded_stat = REC_STAT_HEART_RATE;
     state.auth_key_hex[0] = '\0';
     state.verbose_wire_log = (g_getenv("MIWEAR_VERBOSE_WIRE_LOG") != NULL);
     state.verbose_fetch_log = (g_getenv("MIWEAR_FETCH_DEBUG") != NULL);
@@ -45,5 +44,8 @@ int main(int argc, char **argv) {
     g_free(state.device_status_wearing);
     g_free(state.device_status_charging);
     g_free(state.device_status_sleep);
+    if (state.weight_log != NULL) {
+        g_array_unref(state.weight_log);
+    }
     return status;
 }

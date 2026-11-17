@@ -33,20 +33,13 @@ cd miwear-band
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 ```
 
-**Optional — sleep stage ML (TensorFlow Lite):**  
-By default CMake tries to link TFLite for in-process sleep staging. If you do not have a TFLite build yet, either:
-
-- Run the helper script (see `scripts/build-sleep-tflite.sh`), then reconfigure with  
-  `-DMIWEAR_TFLITE_BUILD_DIR=/path/to/tflite-cmake`, or  
-- Disable ML: `-DMIWEAR_ENABLE_SLEEP_ML=OFF` (embedded stage packets still work).
-
 ### 3. Compile
 
 ```bash
 cmake --build build -j"$(nproc)"
 ```
 
-The binary is `build/miwear-band`.
+The binary is `build/miwear-band`. Run the unit tests with `ctest --test-dir build`.
 
 ### 4. Run
 
@@ -54,7 +47,7 @@ The binary is `build/miwear-band`.
 ./build/miwear-band
 ```
 
-On first launch, pick the band in the pairing view and enter your **32-character Mi Fitness auth key** (hex).
+On first launch, pick the band on the setup page, enter your **32-character Mi Fitness auth key** (hex) and press **Connect**. Afterwards the app opens on your saved data and connects from the banner or the Device page.
 
 ### 5. Config (optional)
 
@@ -89,7 +82,7 @@ You can also set MAC and auth key in the UI before connecting.
 |------|------|
 | `src/spp/wire.c` | SPP framing, auth, protobuf dispatch |
 | `src/spp/fitness_sync.c` | Mi Fitness–style sync |
-| `src/ui/dashboard.c` | Health dashboard UI |
+| `src/ui/` | libadwaita UI: shell + Health (`dashboard.c`), `sleep_view.c`, `workouts_view.c`, `device_view.c`, setup (`ui.c`) |
 | `src/notifications/` | Desktop → band notifications |
 | `src/sleep/` | Sleep stage pipeline (`docs/SLEEP_STAGES.md`) |
 | `docs/MIFITNESS_SYNC.md` | APK-derived sync reference |
@@ -98,4 +91,4 @@ You can also set MAC and auth key in the UI before connecting.
 
 This project is licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE).
 
-Third-party material under `third_party/` (Mi Fitness schemas, sleep models, reference parsers, etc.) remains under its respective upstream terms.
+Third-party material under `third_party/` (Mi Fitness schemas, reference parsers, etc.) remains under its respective upstream terms.

@@ -1,4 +1,6 @@
 #include "miwear/activity/workout_summary.h"
+#include "miwear/activity/workout_record.h"
+#include "miwear/activity/mi_fitness_sport_report.h"
 #include "miwear/activity/mi_fitness_sport_report.h"
 #include "miwear/activity/mi_fitness_sport_tables.h"
 #include "miwear/activity/mi_fitness_dispatch.h"
@@ -134,6 +136,19 @@ static gboolean summary_values_sane(const MiwearWorkoutSummary *s) {
         return FALSE;
     }
     return TRUE;
+}
+
+static void finalize_walk_summary(int subtype, MiwearWorkoutSummary *out) {
+    if (out == NULL || (subtype != 0x16 && subtype != 2)) {
+        return;
+    }
+    if (!summary_values_sane(out)) {
+        return;
+    }
+    if (out->walk_avg_pace_sec_per_km <= 0 && out->distance_m > 0 && out->duration_sec > 0) {
+        out->walk_avg_pace_sec_per_km = (int)((uint64_t)out->duration_sec * 1000u / (uint32_t)out->distance_m);
+    }
+    out->has_walk_detail = TRUE;
 }
 
 static gboolean heuristic_walk_summary(const uint8_t *payload,
@@ -318,23 +333,33 @@ static gboolean parse_outdoor_walk_v2(MiReader *r, int version, MiwearWorkoutSum
             return FALSE;
         }
     }
-    if (!mi_skip(r, 4 * 5)) {
+    uint32_t z1 = 0, z2 = 0, z3 = 0, z4 = 0, z5 = 0;
+    if (!mi_u32(r, &z1) || !mi_u32(r, &z2) || !mi_u32(r, &z3) || !mi_u32(r, &z4) || !mi_u32(r, &z5)) {
         return FALSE;
     }
     (void)workout_type;
-    (void)pace_avg;
     (void)pace_max;
     (void)pace_min;
-    (void)speed_avg;
     (void)speed_max;
-    (void)steps;
-    (void)step_len;
-    (void)step_rate_avg;
-    (void)step_rate_max;
     (void)kcal_total;
-    (void)te_aerobic;
-    (void)te_anaerobic;
     fill_core(out, start, end, active, (int)dist, (int)kcal, (int)hr_avg, (int)hr_max, (int)hr_min);
+    out->has_walk_detail = TRUE;
+    out->walk_steps = (int)steps;
+    out->walk_avg_pace_sec_per_km = (int)pace_avg;
+    if (out->walk_avg_pace_sec_per_km <= 0 && dist > 0 && out->duration_sec > 0) {
+        out->walk_avg_pace_sec_per_km = (int)((uint64_t)out->duration_sec * 1000u / dist);
+    }
+    out->walk_avg_speed_kmh = speed_avg;
+    out->walk_step_length_cm = (int)step_len;
+    out->walk_avg_cadence_spm = (int)step_rate_avg;
+    out->walk_max_cadence_spm = (int)step_rate_max;
+    out->walk_te_aerobic = te_aerobic;
+    out->walk_te_anaerobic = te_anaerobic;
+    out->hr_zones.zone1_sec = (int)z1;
+    out->hr_zones.zone2_sec = (int)z2;
+    out->hr_zones.zone3_sec = (int)z3;
+    out->hr_zones.zone4_sec = (int)z4;
+    out->hr_zones.zone5_sec = (int)z5;
     return TRUE;
 }
 
@@ -498,7 +523,28 @@ gboolean miwear_parse_workout_summary(const uint8_t *payload,
 
     miwear_workout_summary_clear(out);
 
+    out->sport_subtype = subtype;
+    out->version = version;
+
+    if (subtype == 0x16 || subtype == 2) {
+        MiwearWorkoutSummary oneden = {0};
+        oneden.sport_subtype = subtype;
+        oneden.version = version;
+        oneden.sport_name = g_strdup(miwear_sport_subtype_name(subtype));
+        if (mi_fitness_parse_outdoor_step_report(payload, payload_len, version, &oneden) &&
+            summary_values_sane(&oneden)) {
+            finalize_walk_summary(subtype, &oneden);
+            *out = oneden;
+            return TRUE;
+        }
+        miwear_workout_summary_clear(&oneden);
+    }
+
     if (try_schema_workout_summary(payload, payload_len, subtype, version, out)) {
+        if (out->sport_name == NULL) {
+            out->sport_name = g_strdup(miwear_sport_subtype_name(subtype));
+        }
+        finalize_walk_summary(subtype, out);
         return TRUE;
     }
 
@@ -508,6 +554,7 @@ gboolean miwear_parse_workout_summary(const uint8_t *payload,
         trial.version = version;
         trial.sport_name = g_strdup(miwear_sport_subtype_name(subtype));
         if (mi_fitness_parse_sport_report(payload, payload_len, subtype, version, &trial) && summary_values_sane(&trial)) {
+            finalize_walk_summary(subtype, &trial);
             *out = trial;
             return TRUE;
         }
@@ -537,6 +584,7 @@ gboolean miwear_parse_workout_summary(const uint8_t *payload,
             continue;
         }
         if (summary_values_sane(&trial)) {
+            finalize_walk_summary(subtype, &trial);
             *out = trial;
             return TRUE;
         }
@@ -547,10 +595,59 @@ gboolean miwear_parse_workout_summary(const uint8_t *payload,
         out->sport_subtype = subtype;
         out->version = version;
         out->sport_name = g_strdup(miwear_sport_subtype_name(subtype));
+        finalize_walk_summary(subtype, out);
         return TRUE;
     }
 
     return FALSE;
+}
+
+static void log_walk_summary(AppState *state, const MiwearWorkoutSummary *sum, int version) {
+    if (sum == NULL || !sum->has_walk_detail) {
+        return;
+    }
+    gchar pace[32];
+    miwear_format_walk_pace(sum->walk_avg_pace_sec_per_km, pace, sizeof(pace));
+    gchar *line = g_strdup_printf(
+        "Outdoor walk v%d: %d min, %d m, %d kcal, %d steps, pace %s/km, cadence %d, HR %d/%d/%d",
+        version,
+        sum->duration_sec > 0 ? sum->duration_sec / 60 : 0,
+        sum->distance_m > 0 ? sum->distance_m : 0,
+        sum->calories > 0 ? sum->calories : 0,
+        sum->walk_steps,
+        pace,
+        sum->walk_avg_cadence_spm,
+        sum->hr_avg,
+        sum->hr_max,
+        sum->hr_min);
+    append_log(state, line);
+    g_free(line);
+}
+
+static void log_swim_summary(AppState *state, const MiwearWorkoutSummary *sum, int version) {
+    if (sum == NULL || !sum->has_swim_detail) {
+        return;
+    }
+    gchar pace[32];
+    miwear_format_swim_pace(sum->swim_avg_pace_sec_per_100m, pace, sizeof(pace));
+    gchar *line = g_strdup_printf(
+        "Pool swim v%d: %d kcal, %d lengths, %s, pace %s/100m, SWOLF %d, strokes %d, SPM %d, load %d, recovery %d min, vitality +%d, HR %d/%d/%d",
+        version,
+        sum->calories,
+        sum->swim_lengths,
+        miwear_swim_stroke_name(sum->swim_main_stroke),
+        pace,
+        sum->swim_avg_swolf,
+        sum->swim_total_strokes,
+        sum->swim_avg_spm,
+        sum->swim_training_load,
+        sum->swim_recovery_min,
+        sum->swim_vitality_points,
+        sum->hr_avg,
+        sum->hr_max,
+        sum->hr_min);
+    append_log(state, line);
+    g_free(line);
 }
 
 void miwear_apply_workout_file(AppState *state,
@@ -567,17 +664,46 @@ void miwear_apply_workout_file(AppState *state,
     miwear_schema_maybe_capture(payload, payload_len, subtype, detail, version, file_ts);
 
     if (detail == 2) {
-        gchar *line = g_strdup_printf("Workout GPS track (%s, decode TBD)", mi_fitness_sport_report_parser_name(subtype));
-        append_log(state, line);
-        g_free(line);
+        MiwearWorkoutSummary patch = {0};
+        if (miwear_parse_workout_gps(payload, payload_len, subtype, version, &patch)) {
+            miwear_sport_merge_attachment(state, file_ts, subtype, &patch);
+            gchar *line = g_strdup_printf("Workout GPS: %u track point(s)",
+                                          patch.gps_track != NULL ? patch.gps_track->len : 0u);
+            append_log(state, line);
+            g_free(line);
+        } else {
+            gchar *line = g_strdup_printf("Workout GPS track (%s v%d, %zu bytes — no points decoded)",
+                                          mi_fitness_sport_report_parser_name(subtype),
+                                          version,
+                                          payload_len);
+            append_log(state, line);
+            g_free(line);
+        }
+        miwear_workout_summary_clear(&patch);
         return;
     }
     if (detail == 0) {
-        gchar *line = g_strdup_printf("Workout time-series record (%s, schema/native TBD)",
-                                      mi_fitness_sport_record_parser_name(subtype));
-        append_log(state, line);
-        g_free(line);
-        miwear_sport_add_entry(state, file_ts, 1, subtype, NULL);
+        MiwearWorkoutSummary patch = {0};
+        const gboolean ok = miwear_parse_workout_record(payload, payload_len, subtype, version, &patch);
+        if (ok) {
+            miwear_sport_merge_attachment(state, file_ts, subtype, &patch);
+            gchar *line = g_strdup_printf("Workout record (%s v%d): %u sample(s), interval ~%d s",
+                                          mi_fitness_sport_record_parser_name(subtype),
+                                          version,
+                                          patch.record_samples != NULL ? patch.record_samples->len : 0u,
+                                          patch.record_interval_sec);
+            append_log(state, line);
+            g_free(line);
+        } else {
+            gchar *line = g_strdup_printf("Workout time-series record (%s v%d, %zu bytes — decode failed)",
+                                          mi_fitness_sport_record_parser_name(subtype),
+                                          version,
+                                          payload_len);
+            append_log(state, line);
+            g_free(line);
+            miwear_sport_add_entry(state, file_ts, 1, subtype, NULL);
+        }
+        miwear_workout_summary_clear(&patch);
         return;
     }
     if (detail == 3) {
@@ -587,22 +713,35 @@ void miwear_apply_workout_file(AppState *state,
 
     MiwearWorkoutSummary sum = {0};
     sum.file_ts_sec = file_ts;
+    sum.sport_subtype = subtype;
+    sum.version = version;
     if (miwear_parse_workout_summary(payload, payload_len, subtype, version, file_ts, &sum)) {
         sum.file_ts_sec = file_ts;
+        sum.sport_subtype = subtype;
+        sum.version = version;
+        if (sum.sport_name == NULL) {
+            sum.sport_name = g_strdup(miwear_sport_subtype_name(subtype));
+        }
         miwear_sport_add_entry(state, file_ts, 1, subtype, &sum);
-        miwear_dashboard_refresh(state);
-        gchar *line = g_strdup_printf(
-            "Workout summary: %s v%d — %d min, %d m, %d kcal, HR %d/%d/%d",
-            sum.sport_name != NULL ? sum.sport_name : "Workout",
-            version,
-            sum.duration_sec > 0 ? sum.duration_sec / 60 : 0,
-            sum.distance_m > 0 ? sum.distance_m : 0,
-            sum.calories > 0 ? sum.calories : 0,
-            sum.hr_avg > 0 ? sum.hr_avg : 0,
-            sum.hr_max > 0 ? sum.hr_max : 0,
-            sum.hr_min > 0 ? sum.hr_min : 0);
-        append_log(state, line);
-        g_free(line);
+        miwear_dashboard_schedule_refresh(state);
+        if (sum.has_swim_detail) {
+            log_swim_summary(state, &sum, version);
+        } else if (sum.has_walk_detail) {
+            log_walk_summary(state, &sum, version);
+        } else {
+            gchar *line = g_strdup_printf(
+                "Workout summary: %s v%d — %d min, %d m, %d kcal, HR %d/%d/%d",
+                sum.sport_name != NULL ? sum.sport_name : "Workout",
+                version,
+                sum.duration_sec > 0 ? sum.duration_sec / 60 : 0,
+                sum.distance_m > 0 ? sum.distance_m : 0,
+                sum.calories > 0 ? sum.calories : 0,
+                sum.hr_avg > 0 ? sum.hr_avg : 0,
+                sum.hr_max > 0 ? sum.hr_max : 0,
+                sum.hr_min > 0 ? sum.hr_min : 0);
+            append_log(state, line);
+            g_free(line);
+        }
     } else {
         gchar *line = g_strdup_printf("Workout summary: %s v%d — parser not ported yet (%zu bytes)",
                                       miwear_sport_subtype_name(subtype),

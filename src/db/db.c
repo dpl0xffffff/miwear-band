@@ -1,4 +1,5 @@
 #include "miwear/db/db.h"
+#include "miwear/db/workout_store.h"
 
 #include <sqlite3.h>
 #include <string.h>
@@ -121,6 +122,14 @@ static gboolean ensure_schema(sqlite3 *db) {
         "\"deviceId\" INTEGER NOT NULL,"
         "\"userId\" INTEGER NOT NULL,"
         "PRIMARY KEY (\"timestamp\",\"deviceId\")"
+        ");",
+        "CREATE TABLE IF NOT EXISTS \"MIWEAR_SPORT_WORKOUT\" ("
+        "\"fileTs\" INTEGER NOT NULL,"
+        "\"deviceId\" INTEGER NOT NULL,"
+        "\"sportType\" INTEGER NOT NULL,"
+        "\"sportSubtype\" INTEGER NOT NULL,"
+        "\"detailJson\" TEXT NOT NULL,"
+        "PRIMARY KEY (\"fileTs\",\"deviceId\",\"sportSubtype\")"
         ");",
         NULL,
     };
@@ -364,7 +373,7 @@ gboolean miwear_db_replace_daily_summary(const MiwearDailySummaryRow *row) {
                       "\"calories\",\"spo2Max\",\"spo2MaxTs\",\"spo2Min\",\"spo2MinTs\",\"spo2Avg\","
                       "\"trainingLoadDay\",\"trainingLoadWeek\",\"trainingLoadLevel\","
                       "\"vitalityIncreaseLight\",\"vitalityIncreaseModerate\",\"vitalityIncreaseHigh\",\"vitalityCurrent\") "
-                      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);";
+                      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);";
     if (sqlite3_prepare_v2(s_db, sql, -1, &st, NULL) != SQLITE_OK) {
         g_mutex_unlock(&s_lock);
         return FALSE;
@@ -905,6 +914,77 @@ gboolean miwear_db_foreach_daily_summary(MiwearDbDailySummaryRowFn fn, gpointer 
         if (!fn(&r, user_data)) {
             break;
         }
+    }
+    sqlite3_finalize(st);
+    g_mutex_unlock(&s_lock);
+    return TRUE;
+}
+
+gboolean miwear_db_replace_sport_workout(int sport_type,
+                                           uint32_t file_ts,
+                                           int sport_subtype,
+                                           const MiwearWorkoutSummary *summary) {
+    if (summary == NULL || file_ts == 0) {
+        return FALSE;
+    }
+    gchar *json = miwear_workout_summary_to_json(sport_type, summary);
+    if (json == NULL) {
+        return FALSE;
+    }
+    g_mutex_lock(&s_lock);
+    if (!can_write()) {
+        g_free(json);
+        g_mutex_unlock(&s_lock);
+        return FALSE;
+    }
+    sqlite3_stmt *st = NULL;
+    const char *sql = "INSERT OR REPLACE INTO \"MIWEAR_SPORT_WORKOUT\" ("
+                      "\"fileTs\",\"deviceId\",\"sportType\",\"sportSubtype\",\"detailJson\") "
+                      "VALUES (?,?,?,?,?);";
+    gboolean ok = FALSE;
+    if (sqlite3_prepare_v2(s_db, sql, -1, &st, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(st, 1, (int)file_ts);
+        sqlite3_bind_int64(st, 2, s_device_id);
+        sqlite3_bind_int(st, 3, sport_type);
+        sqlite3_bind_int(st, 4, sport_subtype);
+        sqlite3_bind_text(st, 5, json, -1, SQLITE_TRANSIENT);
+        ok = sqlite3_step(st) == SQLITE_DONE;
+        sqlite3_finalize(st);
+    }
+    g_free(json);
+    g_mutex_unlock(&s_lock);
+    return ok;
+}
+
+gboolean miwear_db_foreach_sport_workout(MiwearDbSportWorkoutRowFn fn, gpointer user_data) {
+    if (fn == NULL) {
+        return FALSE;
+    }
+    g_mutex_lock(&s_lock);
+    if (!can_write()) {
+        g_mutex_unlock(&s_lock);
+        return FALSE;
+    }
+    sqlite3_stmt *st = NULL;
+    const char *sql = "SELECT \"fileTs\",\"sportType\",\"sportSubtype\",\"detailJson\" "
+                      "FROM \"MIWEAR_SPORT_WORKOUT\" WHERE \"deviceId\" = ? ORDER BY \"fileTs\" DESC;";
+    if (sqlite3_prepare_v2(s_db, sql, -1, &st, NULL) != SQLITE_OK) {
+        g_mutex_unlock(&s_lock);
+        return FALSE;
+    }
+    sqlite3_bind_int64(st, 1, s_device_id);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        MiwearDbSportWorkoutRow row = {0};
+        row.file_ts = (uint32_t)sqlite3_column_int(st, 0);
+        row.sport_type = sqlite3_column_int(st, 1);
+        row.sport_subtype = sqlite3_column_int(st, 2);
+        const unsigned char *txt = sqlite3_column_text(st, 3);
+        row.detail_json = g_strdup(txt != NULL ? (const char *)txt : "{}");
+        if (!fn(&row, user_data)) {
+            g_free(row.detail_json);
+            break;
+        }
+        g_free(row.detail_json);
     }
     sqlite3_finalize(st);
     g_mutex_unlock(&s_lock);

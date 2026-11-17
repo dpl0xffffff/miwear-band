@@ -22,7 +22,8 @@ void miwear_fitness_sync_on_auth(AppState *state) {
     if (!state->auth_initialized || state->sock_fd < 0) {
         return;
     }
-    recorded_rebuild_from_db(state);
+    /* No rebuild here: switch_to_dashboard() (queued just before this on auth) already rebuilt
+     * the timelines from the DB, and no file data arrives before begin_file_sync below. */
     append_log(state, "Mi Fitness sync: startSyncWithDevice → requestData (today, then history).");
     sync_wear_sport_status(state);
     miwear_wire_send_device_bootstrap(state);

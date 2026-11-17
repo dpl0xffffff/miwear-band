@@ -20,6 +20,7 @@ static gchar *find_bluez_device_path_by_address(GDBusConnection *system_bus, con
         &error
     );
     if (reply == NULL) {
+        g_clear_error(&error);
         return NULL;
     }
 
@@ -29,7 +30,7 @@ static gchar *find_bluez_device_path_by_address(GDBusConnection *system_bus, con
     g_variant_iter_init(&iter, objects);
     GVariant *entry = NULL;
 
-    while ((entry = g_variant_iter_next_value(&iter)) != NULL && found_path == NULL) {
+    while (found_path == NULL && (entry = g_variant_iter_next_value(&iter)) != NULL) {
         gchar *path = NULL;
         GVariant *ifaces = NULL;
         g_variant_get(entry, "{o@a{sa{sv}}}", &path, &ifaces);
@@ -214,22 +215,22 @@ gchar *bluez_device_display_name(const gchar *address) {
     GVariantDict dict;
     g_variant_dict_init(&dict, props);
 
+    /* "&s" borrows from the variants: copy the result before they are released. */
     const gchar *name = NULL;
     const gchar *alias = NULL;
     (void)g_variant_dict_lookup(&dict, "Name", "&s", &name);
     (void)g_variant_dict_lookup(&dict, "Alias", "&s", &alias);
+    gchar *result = NULL;
+    if (name != NULL && name[0] != '\0') {
+        result = g_strdup(name);
+    } else if (alias != NULL && alias[0] != '\0') {
+        result = g_strdup(alias);
+    }
 
     g_variant_dict_clear(&dict);
     g_variant_unref(props);
     g_variant_unref(reply);
-
-    if (name != NULL && name[0] != '\0') {
-        return g_strdup(name);
-    }
-    if (alias != NULL && alias[0] != '\0') {
-        return g_strdup(alias);
-    }
-    return NULL;
+    return result;
 }
 
 gboolean bluez_pair_trust_connect(AppState *state, const gchar *address) {

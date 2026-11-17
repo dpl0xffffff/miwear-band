@@ -148,63 +148,15 @@ static void apply_daily_activity_report_schema(AppState *state, JsonNode *decode
     g_free(line);
 }
 
-static guint16 minute_of_day_local(gint64 unix_sec) {
-    GDateTime *dt = g_date_time_new_from_unix_local(unix_sec);
-    if (dt == NULL) {
-        return 0;
-    }
-    const guint16 mod = (guint16)(g_date_time_get_hour(dt) * 60 + g_date_time_get_minute(dt));
-    g_date_time_unref(dt);
-    return mod;
-}
-
-static void append_sleep_minute(GHashTable *by_day, gint64 unix_sec, int stage) {
-    GDateTime *dt = g_date_time_new_from_unix_local(unix_sec);
-    if (dt == NULL) {
-        return;
-    }
-    gchar *day_key = g_date_time_format(dt, "%Y-%m-%d");
-    g_date_time_unref(dt);
-
-    GArray *bucket = g_hash_table_lookup(by_day, day_key);
-    if (bucket == NULL) {
-        bucket = g_array_new(FALSE, FALSE, sizeof(RecordedSample));
-        g_hash_table_insert(by_day, day_key, bucket);
-    } else {
-        g_free(day_key);
-    }
-
-    RecordedSample s = {0};
-    s.minute_of_day = minute_of_day_local(unix_sec);
-    s.steps = s.active_calories = s.distance_cm = s.heart_rate = s.energy = s.spo2 = s.stress = -1;
-    s.sleep_stage = stage;
-    s.sleep_source = 1;
-    g_array_append_val(bucket, s);
-}
-
-static void flush_sleep_buckets(AppState *state, GHashTable *by_day) {
-    GHashTableIter it;
-    gpointer k, v;
-    g_hash_table_iter_init(&it, by_day);
-    while (g_hash_table_iter_next(&it, &k, &v)) {
-        GArray *bucket = v;
-        if (bucket != NULL && bucket->len > 0) {
-            recorded_store_samples_for_day_key(state, (const gchar *)k,
-                                               (const RecordedSample *)bucket->data, bucket->len);
-        }
-    }
-}
-
 static void apply_sleep_times_to_chart(AppState *state, uint32_t bed_sec, uint32_t wake_sec, int stage) {
     if (state == NULL || bed_sec == 0 || wake_sec == 0 || wake_sec <= bed_sec) {
         return;
     }
-    GHashTable *by_day = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_array_unref);
+    RecordedBatch *batch = recorded_batch_new();
     for (uint32_t sec = bed_sec; sec < wake_sec; sec += 60u) {
-        append_sleep_minute(by_day, (gint64)sec, stage);
+        recorded_batch_add_sleep_minute(batch, (gint64)sec, stage);
     }
-    flush_sleep_buckets(state, by_day);
-    g_hash_table_unref(by_day);
+    recorded_batch_commit(state, batch);
 }
 
 static void apply_full_day_sleep_schema(AppState *state,

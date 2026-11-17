@@ -176,13 +176,10 @@ static gchar *package_from_app_name(const char *app_name) {
     return g_string_free(s, FALSE);
 }
 
-static guint32 notification_track_package(AppState *state, gchar *owned_package) {
-    const guint32 id = state->notification_next_id++;
-    if (state->notification_packages == NULL) {
-        state->notification_packages = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
-    }
-    g_hash_table_insert(state->notification_packages, GUINT_TO_POINTER(id), owned_package);
-    return id;
+/* Band notification ids only need to be unique per session (the id → package map that used to be
+ * kept here was never read and grew by one entry per forwarded notification). */
+static guint32 notification_next_band_id(AppState *state) {
+    return state->notification_next_id++;
 }
 
 static gboolean send_notification3(AppState *state,
@@ -274,10 +271,11 @@ static gboolean miwear_notifications_push_at(AppState *state,
     }
 
     gchar *pkg = package_for_notification(app_name, notify_hints);
-    const guint32 band_id = notification_track_package(state, pkg);
+    const guint32 band_id = notification_next_band_id(state);
 
     const gboolean ok =
         send_notification3(state, band_id, pkg, app_name, title, body, when_unix_sec, notify_hints);
+    g_free(pkg);
     if (ok) {
         state->notification_last_sent_ms = now_ms;
         gchar *line = g_strdup_printf("Forwarded: %s — %s", app_name != NULL ? app_name : "?", title != NULL ? title : "");
@@ -336,7 +334,7 @@ static void schedule_push(AppState *state,
 
 static void handle_freedesktop_notify(AppState *state, GDBusMessage *message) {
     GVariant *params = g_dbus_message_get_body(message);
-    if (params == NULL) {
+    if (params == NULL || !g_variant_is_of_type(params, G_VARIANT_TYPE("(susssasa{sv}i)"))) {
         return;
     }
 
@@ -360,13 +358,17 @@ static void handle_freedesktop_notify(AppState *state, GDBusMessage *message) {
 
 static void handle_portal_add_notification(AppState *state, GDBusMessage *message) {
     GVariant *params = g_dbus_message_get_body(message);
-    if (params == NULL) {
+    if (params == NULL || !g_variant_is_of_type(params, G_VARIANT_TYPE("(sa{sv})"))) {
         return;
     }
 
     const char *id = NULL;
     GVariant *dict = NULL;
     g_variant_get(params, "(&s@a{sv})", &id, &dict);
+    if (dict == NULL || !g_variant_is_of_type(dict, G_VARIANT_TYPE("a{sv}"))) {
+        g_clear_pointer(&dict, g_variant_unref);
+        return;
+    }
     gchar *title = variant_dict_string_dup(dict, "title");
     gchar *body = variant_dict_string_dup(dict, "body");
     if (body == NULL) {
@@ -553,10 +555,6 @@ void miwear_notifications_shutdown(AppState *state) {
         return;
     }
     stop_dbus_listener(state);
-    if (state->notification_packages != NULL) {
-        g_hash_table_unref(state->notification_packages);
-        state->notification_packages = NULL;
-    }
 }
 
 void miwear_notifications_handle_command(AppState *state, const Xiaomi__Command *cmd) {
@@ -591,7 +589,7 @@ void miwear_notifications_send_test(AppState *state) {
         return;
     }
     static const char test_pkg[] = "com.miwear.band";
-    const guint32 band_id = notification_track_package(state, g_strdup(test_pkg));
+    const guint32 band_id = notification_next_band_id(state);
     const gboolean ok = send_notification3(state,
                                            band_id,
                                            test_pkg,

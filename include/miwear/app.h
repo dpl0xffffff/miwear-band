@@ -28,6 +28,7 @@ typedef struct MiwearSportEntry {
     int calories;
     int hr_avg;
     gchar *label;
+    MiwearWorkoutSummary *detail;
 } MiwearSportEntry;
 
 /* Set via UI or ~/.config/miwear-band/config.ini (same miwear-auth key as Mi Fitness). */
@@ -41,37 +42,18 @@ typedef struct {
     GtkWidget *page_dashboard;
     MiwearDashboardUi *dash_ui;
     GDate *health_view_date;
-    MiwearDailySummaryRow health_summary_cache;
-    gboolean health_summary_valid;
     GList *sport_entries;
-    GtkWidget *stats_row;
-    GtkWidget *entry_address;
     GtkWidget *entry_authkey;
     GtkWidget *btn_refresh;
     GtkWidget *listbox_devices;
     GtkWidget *label_status;
     GtkTextBuffer *log_buffer;
-    GtkWidget *hr_label;
-    GtkWidget *steps_label;
-    GtkWidget *calories_label;
-    GtkWidget *standing_label;
-    GtkWidget *battery_label;
-    GtkWidget *moving_label;
-    GtkWidget *spo2_label;
-    GtkWidget *stress_label;
-    GtkWidget *charging_label;
-    GtkWidget *wearing_label;
-    GtkWidget *sleep_label;
-    GtkWidget *hr_bar;
-    GtkWidget *steps_bar;
-    GtkWidget *calories_bar;
-    GtkWidget *standing_bar;
-    GtkWidget *battery_bar;
-    GtkWidget *moving_bar;
-    GtkWidget *recorded_chart;
-    GtkWidget *recorded_day_dropdown;
-    GtkWidget *recorded_stat_dropdown;
-    GtkWidget *recorded_chart_label;
+    GtkWidget *toast_overlay;
+    GtkWidget *setup_connect_button;
+    GtkWidget *setup_spinner;
+    GtkWidget *setup_cancel_button;
+    /* Band picked on the setup page; becomes selected_address only once a connect starts. */
+    gchar *pairing_selected_address;
 
     gchar *selected_address;
     gchar *device_display_name;
@@ -80,9 +62,15 @@ typedef struct {
     gchar *device_status_sleep;
     gchar auth_key_hex[33];
 
+    /*
+     * Threading model: every field of AppState is owned by the GTK main thread. The RFCOMM socket
+     * is read from a main-loop fd watch; only the blocking BlueZ/RFCOMM connect runs on a worker
+     * thread, which hands the connected fd back via the main loop (see connect_generation).
+     * Exceptions: append_log()/set_status()/set_connect_busy() are safe from any thread.
+     */
     int sock_fd;
-    GThread *reader_thread;
-    gboolean reader_running;
+    guint rx_watch_id;
+    guint connect_generation;
 
     uint8_t phone_nonce[16];
     uint8_t watch_nonce[16];
@@ -100,13 +88,9 @@ typedef struct {
     uint8_t activity_fetch_current_id[7];
     guint activity_fetch_timeout_source_id;
     GHashTable *recorded_days;
-    GHashTable *daily_summary_steps;
-    gchar *selected_recorded_day;
-    gint selected_recorded_stat;
-    gboolean chart_hover_active;
-    guint16 chart_hover_minute;
-    double chart_touch_drag_start_x;
-    gboolean chart_touch_dragging;
+    /* day key "YYYY-MM-DD" -> MiwearDailySummaryRow*, the band's own per-day totals. */
+    GHashTable *daily_summaries;
+    guint recorded_rebuild_source_id;
     GMutex recorded_lock;
     int protocol_version;
     guint activity_refetch_source_id;
@@ -121,8 +105,6 @@ typedef struct {
     gboolean populate_devices_busy;
     gboolean verbose_wire_log;
     gboolean verbose_fetch_log;
-    gchar *pending_chart_label;
-    guint chart_label_idle_id;
     GQueue *log_queue;
     GMutex log_lock;
     guint log_flush_id;
@@ -179,7 +161,9 @@ typedef struct {
     gulong notification_bus_filter_id;
     gulong notification_bus_outgoing_filter_id;
     gboolean notification_monitor_active;
-    GHashTable *notification_packages;
+
+    GCancellable *weather_cancellable;
+    gboolean weather_fetch_inflight;
 } AppState;
 
 typedef struct {
@@ -196,29 +180,11 @@ typedef struct {
 } RecordedSample;
 
 typedef struct {
-    const uint8_t *header;
-    size_t header_len;
-    size_t group;
-    int current_group_bits;
-    uint32_t current_val;
-    gboolean current_exists;
-} XiaomiComplexParser;
-
-typedef struct {
     AppState *state;
     bdaddr_t bdaddr;
     gchar *normalized;
+    guint generation;
 } ConnectTask;
-
-enum {
-    REC_STAT_HEART_RATE = 0,
-    REC_STAT_STEPS = 1,
-    REC_STAT_CALORIES = 2,
-    REC_STAT_SPO2 = 3,
-    REC_STAT_STRESS = 4,
-    REC_STAT_ENERGY = 5,
-    REC_STAT_SLEEP = 6
-};
 
 void append_log(AppState *state, const gchar *line);
 void set_status(AppState *state, const gchar *status);
@@ -239,11 +205,18 @@ void schedule_metrics_update(AppState *state,
                              const gchar *stress_text);
 void schedule_state_update(AppState *state, const gchar *charging, const gchar *wearing, const gchar *sleep);
 void recorded_store_samples_for_day_key(AppState *state, const gchar *day_key, const RecordedSample *samples, size_t count);
+/* Day-bucketed batch of per-minute sleep samples for the recorded timelines. */
+typedef struct RecordedBatch RecordedBatch;
+RecordedBatch *recorded_batch_new(void);
+void recorded_batch_add_sleep_minute(RecordedBatch *batch, gint64 unix_sec, int stage);
+/* Hands the samples to the timelines (merged on the next idle) and frees the batch. */
+void recorded_batch_commit(AppState *state, RecordedBatch *batch);
 void recorded_store_daily_details(AppState *state, uint32_t ts, const RecordedSample *samples, size_t count);
-void recorded_store_daily_summary_steps(AppState *state, uint32_t ts, guint steps);
 void recorded_merge_xiaomi_activity_rows(AppState *state, const MiwearXiaomiActivityRow *rows, size_t count);
 void health_apply_daily_summary(AppState *state, const MiwearDailySummaryRow *row);
 void recorded_rebuild_from_db(AppState *state);
+/* Coalesced rebuild on the next idle (several requests before it runs → one rebuild). */
+void recorded_schedule_rebuild(AppState *state);
 
 void handle_activity_payload(AppState *state, const uint8_t *payload, size_t payload_len);
 const char *activity_subtype_name(int type, int subtype);
@@ -266,11 +239,11 @@ gboolean aes_ccm_encrypt_4byte_tag(const uint8_t key[16],
                                    uint8_t **out,
                                    size_t *out_len);
 gboolean aes_ctr_crypt(const uint8_t key[16],
-                       const uint8_t *ctr_16,
+                       const uint8_t iv[16],
                        const uint8_t *input, size_t input_len,
                        uint8_t **out, size_t *out_len);
 gboolean aes_ctr_encrypt(const uint8_t key[16],
-                         const uint8_t *nonce_prefix,
+                         const uint8_t iv[16],
                          const uint8_t *plaintext, size_t plaintext_len,
                          uint8_t **out, size_t *out_len);
 void pb_append_varint(GByteArray *arr, uint64_t value);

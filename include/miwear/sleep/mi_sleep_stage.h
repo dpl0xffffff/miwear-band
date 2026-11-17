@@ -7,10 +7,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MI_SLEEP_FEATURE_DIM 44
-#define MI_SLEEP_MAX_EPOCHS 1800
-#define MI_SLEEP_EPOCH_SEC 25
-
 typedef struct MiwearSleepAlgoResult {
     MiwearSleepStageDurations durations;
     MiwearSleepStageRow *stage_rows;
@@ -20,7 +16,8 @@ typedef struct MiwearSleepAlgoResult {
 
 void miwear_sleep_algo_result_clear(MiwearSleepAlgoResult *result);
 
-/* Linux-native Mi Fitness sleep pipeline (feature extraction + optional TFLite). */
+/* Sleep stages from the band's embedded stage packets (types 16/17). FALSE when the
+ * feature blob carries none; the caller then tries MIWEAR_MI_SLEEP_ALGO_CMD. */
 gboolean miwear_sleep_run_mi_fitness_algo(const uint8_t *sleep_src,
                                           size_t sleep_src_len,
                                           uint32_t bed_sec,
