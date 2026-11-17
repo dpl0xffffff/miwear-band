@@ -190,17 +190,26 @@ void miwear_sport_merge_attachment(AppState *state, uint32_t ts, int subtype, Mi
 /* ======================================================================================== */
 
 static const char *sport_icon(const MiwearSportEntry *e) {
+    const int t = e->detail != NULL && e->detail->sub_sport_type > 0 ? e->detail->sub_sport_type : e->sport_subtype;
+    switch (t) {
+        case 1: case 3: case 5: case 208: return "miwear-run-symbolic";
+        case 2: case 4: case 15: case 22: case 207: case 333: return "miwear-walk-symbolic";
+        case 6: case 7: case 23: case 206: case 324: return "miwear-bike-symbolic";
+        case 9: case 10: case 25: case 109: case 111: case 112: case 116: case 117: case 118:
+            return "miwear-swim-symbolic";
+        default: break;
+    }
     const char *l = e->label != NULL ? e->label : "";
     gchar *low = g_ascii_strdown(l, -1);
-    const char *icon = "miwear-run-symbolic";
+    const char *icon = "miwear-dumbbell-symbolic";
     if (strstr(low, "swim") != NULL) {
         icon = "miwear-swim-symbolic";
-    } else if (strstr(low, "cycl") != NULL || strstr(low, "bik") != NULL) {
+    } else if (strstr(low, "cycl") != NULL || strstr(low, "bik") != NULL || strstr(low, "ride") != NULL) {
         icon = "miwear-bike-symbolic";
     } else if (strstr(low, "walk") != NULL || strstr(low, "hik") != NULL) {
         icon = "miwear-walk-symbolic";
-    } else if (strstr(low, "run") == NULL && strstr(low, "treadmill") == NULL) {
-        icon = "miwear-dumbbell-symbolic";
+    } else if (strstr(low, "run") != NULL || strstr(low, "treadmill") != NULL) {
+        icon = "miwear-run-symbolic";
     }
     g_free(low);
     return icon;
@@ -723,6 +732,115 @@ static void add_stat_tile(GtkWidget *flow, const char *caption, const char *valu
     gtk_flow_box_append(GTK_FLOW_BOX(flow), box);
 }
 
+/* ---- Per-sport metrics (Mi Fitness report field ids; units from the Mi Fitness schemas) ---- */
+
+typedef enum {
+    MF_COUNT, MF_SEC, MF_KCAL, MF_BPM, MF_PACE, MF_KMH, MF_M1, MF_M, MF_CM, MF_SPM, MF_PER_MIN, MF_RPM,
+    MF_WATT, MF_PCT, MF_DEG, MF_MS, MF_TENTH_BW, MF_FLOAT1, MF_PLUS, MF_STROKE, MF_LANDING, MF_LEVEL,
+} MetricFmt;
+
+typedef struct {
+    int id;
+    const char *label;
+    MetricFmt fmt;
+} MetricDef;
+
+/* In display order. Fields shown elsewhere (duration, distance, calories, average heart rate,
+ * training load/VO2 max/effects/recovery, heart-rate zones) are left out. */
+static const MetricDef metric_defs[] = {
+    {17, "Max heart rate", MF_BPM}, {18, "Min heart rate", MF_BPM}, {4, "Active time", MF_SEC},
+    {6, "Active calories", MF_KCAL}, {10, "Avg pace", MF_PACE}, {8, "Best pace", MF_PACE},
+    {11, "Avg speed", MF_KMH}, {12, "Max speed", MF_KMH}, {13, "Steps", MF_COUNT},
+    {15, "Avg cadence", MF_SPM}, {14, "Max cadence", MF_SPM}, {148, "Avg stride", MF_CM},
+    {19, "Total ascent", MF_M1}, {20, "Total descent", MF_M1}, {22, "Max altitude", MF_M1},
+    {23, "Min altitude", MF_M1}, {74, "Max slope", MF_DEG}, {115, "Avg cadence", MF_RPM},
+    {116, "Max cadence", MF_RPM}, {82, "Avg power", MF_WATT}, {83, "Max power", MF_WATT},
+    {84, "Avg resistance", MF_COUNT}, {85, "Max resistance", MF_COUNT}, {173, "Avg running power", MF_WATT},
+    {174, "Max running power", MF_WATT}, {39, "Lengths", MF_COUNT}, {42, "Pool length", MF_M},
+    {36, "Main stroke", MF_STROKE}, {35, "Strokes", MF_COUNT}, {157, "Avg stroke rate", MF_PER_MIN},
+    {40, "Avg SWOLF", MF_COUNT}, {41, "Best SWOLF", MF_COUNT}, {43, "Strokes", MF_COUNT},
+    {44, "Avg stroke rate", MF_PER_MIN}, {45, "Best stroke rate", MF_PER_MIN}, {46, "Drive time", MF_SEC},
+    {47, "Recovery time", MF_SEC}, {48, "Jumps", MF_COUNT}, {49, "Avg jump rate", MF_PER_MIN},
+    {50, "Best jump rate", MF_PER_MIN}, {56, "Trips", MF_COUNT}, {64, "Sets", MF_COUNT},
+    {63, "Rest between sets", MF_SEC}, {58, "Swings", MF_COUNT}, {59, "Forehands", MF_COUNT},
+    {60, "Backhands", MF_COUNT}, {61, "Smashes", MF_COUNT}, {62, "Serves", MF_COUNT}, {75, "Strokes", MF_COUNT},
+    {80, "Shots", MF_COUNT}, {81, "Dribbling time", MF_SEC}, {182, "Dive time", MF_SEC},
+    {189, "Dives", MF_COUNT}, {101, "Avg SpO₂", MF_PCT}, {104, "Avg stress", MF_COUNT},
+    {118, "Punches", MF_COUNT}, {123, "Best combo", MF_COUNT}, {124, "Hit rate", MF_PCT},
+    {220, "Reps", MF_COUNT}, {222, "Sets", MF_COUNT}, {224, "Avg rate", MF_PER_MIN},
+    {137, "Landing", MF_LANDING}, {140, "Avg impact", MF_TENTH_BW}, {142, "Avg ground contact", MF_MS},
+    {144, "Avg flight time", MF_MS}, {112, "Running index", MF_FLOAT1}, {163, "Peak training effect", MF_FLOAT1},
+    {165, "Training stress", MF_COUNT}, {28, "Energy used", MF_LEVEL}, {117, "Vitality", MF_PLUS},
+};
+
+static void format_metric(MetricFmt fmt, double v, int sport, gchar *buf, gsize len) {
+    const int n = (int)(v + (v >= 0 ? 0.5 : -0.5));
+    switch (fmt) {
+        case MF_SEC: format_duration(n, buf, len); break;
+        case MF_KCAL: g_snprintf(buf, len, "%d kcal", n); break;
+        case MF_BPM: g_snprintf(buf, len, "%d bpm", n); break;
+        case MF_PACE: {
+            gchar p[32];
+            miwear_format_walk_pace(n, p, sizeof(p));
+            g_snprintf(buf, len, "%s %s", p, sport == 9 || sport == 10 ? "/100 m" : "/km");
+            break;
+        }
+        case MF_KMH: g_snprintf(buf, len, "%.1f km/h", v); break;
+        case MF_M1: g_snprintf(buf, len, "%.0f m", v); break;
+        case MF_M: g_snprintf(buf, len, "%d m", n); break;
+        case MF_CM: g_snprintf(buf, len, "%d cm", n); break;
+        case MF_SPM: g_snprintf(buf, len, "%d spm", n); break;
+        case MF_PER_MIN: g_snprintf(buf, len, "%d /min", n); break;
+        case MF_RPM: g_snprintf(buf, len, "%d rpm", n); break;
+        case MF_WATT: g_snprintf(buf, len, "%d W", n); break;
+        case MF_PCT: g_snprintf(buf, len, "%d%%", n); break;
+        case MF_DEG: g_snprintf(buf, len, "%d°", n); break;
+        case MF_MS: g_snprintf(buf, len, "%d ms", n); break;
+        case MF_TENTH_BW: g_snprintf(buf, len, "%.1f × body weight", v / 10.0); break;
+        case MF_FLOAT1: g_snprintf(buf, len, "%.1f", v); break;
+        case MF_PLUS: g_snprintf(buf, len, "+%d", n); break;
+        case MF_LEVEL: g_snprintf(buf, len, "%d / 100", n); break;
+        case MF_STROKE: g_strlcpy(buf, miwear_swim_stroke_name(n), len); break;
+        case MF_LANDING: {
+            static const char *k[] = {"—", "Whole foot", "Forefoot", "Heel"};
+            g_strlcpy(buf, n >= 1 && n <= 3 ? k[n] : "—", len);
+            break;
+        }
+        default: {
+            gchar t[32];
+            mi_format_thousands(n, t, sizeof(t));
+            g_strlcpy(buf, t, len);
+            break;
+        }
+    }
+}
+
+/* Tiles for every catalogued metric the workout reported (non-zero). TRUE when any was added. */
+static gboolean add_metric_tiles(GtkWidget *flow, const MiwearWorkoutSummary *d, int sport) {
+    if (d == NULL || d->metrics == NULL || d->metrics->len == 0) {
+        return FALSE;
+    }
+    gboolean any = FALSE;
+    for (size_t i = 0; i < G_N_ELEMENTS(metric_defs); i++) {
+        const MetricDef *m = &metric_defs[i];
+        if (!miwear_workout_has_metric(d, m->id)) {
+            continue;
+        }
+        const double v = miwear_workout_metric(d, m->id, 0);
+        if (v == 0 && m->fmt != MF_STROKE) {
+            continue;
+        }
+        if (m->id == 6 && miwear_workout_metric(d, 7, 0) <= 0) {
+            continue; /* active calories already shown as the workout's calories */
+        }
+        gchar buf[64];
+        format_metric(m->fmt, v, sport, buf, sizeof(buf));
+        add_stat_tile(flow, m->label, buf);
+        any = TRUE;
+    }
+    return any;
+}
+
 static GtkWidget *zones_card(const MiwearWorkoutHrZones *z) {
     const int secs[5] = {z->zone1_sec, z->zone2_sec, z->zone3_sec, z->zone4_sec, z->zone5_sec};
     const int lows[5] = {z->zone1_lower_bpm, z->zone2_lower_bpm, z->zone3_lower_bpm, z->zone4_lower_bpm,
@@ -829,7 +947,10 @@ static void open_detail(AppState *state, MiwearSportEntry *e) {
     gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(flow), 4);
     gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(flow), 12);
     gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(flow), 12);
-    if (d != NULL) {
+    if (d != NULL && add_metric_tiles(flow, d, e->sport_subtype)) {
+        /* Workouts decoded with the Mi Fitness tables carry every reported value. */
+    } else if (d != NULL) {
+        /* Older stored workouts: only the fields the previous decoder kept. */
         gchar t[48];
         if (d->hr_max > 0) {
             g_snprintf(t, sizeof(t), "%d bpm", d->hr_max);

@@ -1,8 +1,6 @@
 #include "miwear/activity/workout_summary.h"
 #include "miwear/activity/workout_record.h"
 #include "miwear/activity/mi_fitness_sport_report.h"
-#include "miwear/activity/mi_fitness_sport_report.h"
-#include "miwear/activity/mi_fitness_sport_tables.h"
 #include "miwear/activity/mi_fitness_dispatch.h"
 #include "miwear/activity/schema_reader.h"
 #include "miwear/ui/dashboard.h"
@@ -486,31 +484,6 @@ static gboolean parse_with_header(const uint8_t *payload,
     }
 }
 
-static gboolean try_schema_workout_summary(const uint8_t *payload,
-                                           size_t payload_len,
-                                           int subtype,
-                                           int version,
-                                           MiwearWorkoutSummary *out) {
-    gchar *rel = miwear_schema_resolve_sport(subtype, 1, version);
-    if (rel == NULL) {
-        return FALSE;
-    }
-    gchar *schema_path = g_build_filename(miwear_schema_dir(), rel, NULL);
-    g_free(rel);
-    MiwearWorkoutSummary trial = {0};
-    trial.sport_subtype = subtype;
-    trial.version = version;
-    trial.sport_name = g_strdup(miwear_sport_subtype_name(subtype));
-    const gboolean ok = miwear_schema_parse_sport_report(schema_path, payload, payload_len, &trial);
-    g_free(schema_path);
-    if (!ok) {
-        miwear_workout_summary_clear(&trial);
-        return FALSE;
-    }
-    *out = trial;
-    return TRUE;
-}
-
 gboolean miwear_parse_workout_summary(const uint8_t *payload,
                                       size_t payload_len,
                                       int subtype,
@@ -526,41 +499,22 @@ gboolean miwear_parse_workout_summary(const uint8_t *payload,
     out->sport_subtype = subtype;
     out->version = version;
 
-    if (subtype == 0x16 || subtype == 2) {
-        MiwearWorkoutSummary oneden = {0};
-        oneden.sport_subtype = subtype;
-        oneden.version = version;
-        oneden.sport_name = g_strdup(miwear_sport_subtype_name(subtype));
-        if (mi_fitness_parse_outdoor_step_report(payload, payload_len, version, &oneden) &&
-            summary_values_sane(&oneden)) {
-            finalize_walk_summary(subtype, &oneden);
-            *out = oneden;
-            return TRUE;
-        }
-        miwear_workout_summary_clear(&oneden);
-    }
-
-    if (try_schema_workout_summary(payload, payload_len, subtype, version, out)) {
-        if (out->sport_name == NULL) {
-            out->sport_name = g_strdup(miwear_sport_subtype_name(subtype));
-        }
-        finalize_walk_summary(subtype, out);
-        return TRUE;
-    }
-
+    /* Mi Fitness's own decoding (field tables / schemas extracted from the app) for every sport. */
     {
         MiwearWorkoutSummary trial = {0};
         trial.sport_subtype = subtype;
         trial.version = version;
-        trial.sport_name = g_strdup(miwear_sport_subtype_name(subtype));
-        if (mi_fitness_parse_sport_report(payload, payload_len, subtype, version, &trial) && summary_values_sane(&trial)) {
-            finalize_walk_summary(subtype, &trial);
+        if (mi_fitness_parse_sport_report(payload, payload_len, subtype, version, &trial) &&
+            summary_values_sane(&trial)) {
+            const int shown = trial.sub_sport_type > 0 ? trial.sub_sport_type : subtype;
+            trial.sport_name = g_strdup(miwear_sport_subtype_name(shown));
             *out = trial;
             return TRUE;
         }
         miwear_workout_summary_clear(&trial);
     }
 
+    /* Versions Mi Fitness itself cannot read: older Gadgetbridge-style layouts. */
     const int default_header = header_size_for(subtype, version);
     int headers[4];
     size_t n_headers = 0;

@@ -14,8 +14,13 @@ typedef struct MiFitnessOneDimenField {
     uint8_t is_unsigned;
     int16_t counts_type; /* -1 if none */
     uint8_t has_depend;
-    /* When has_depend: 1=courseIdExistType (field 205 value 1), 2=lactateTypeExistType (205 values 2,3). */
+    /* Legacy hand-written tables: 1=courseIdExistType, 2=lactateTypeExistType (see mi_fitness_oneden.c). */
     uint8_t depend_profile;
+    /* Generated tables: the field exists only when field `depend_type` was read, valid, and equals one
+     * of `depend_values` (FitnessDataBaseParser.DependDataType). depend_count 0 = use depend_profile. */
+    int16_t depend_type;
+    uint8_t depend_count;
+    int16_t depend_values[4];
 } MiFitnessOneDimenField;
 
 #define MI_FITNESS_DEPEND_COURSE 1
@@ -31,12 +36,6 @@ typedef struct MiFitnessFieldValue {
 
 #define MI_FITNESS_FIELD_VALUE_MAX 128
 
-extern const MiFitnessOneDimenField mi_fitness_outdoor_step_report_fields[];
-extern const size_t mi_fitness_outdoor_step_report_field_count;
-
-extern const MiFitnessOneDimenField mi_fitness_outdoor_sport_report_fields[];
-extern const size_t mi_fitness_outdoor_sport_report_field_count;
-
 extern const MiFitnessOneDimenField mi_fitness_abnormal_record_fields[];
 extern const size_t mi_fitness_abnormal_record_field_count;
 
@@ -48,6 +47,9 @@ extern const size_t mi_fitness_sport_gps_field_count;
 
 extern const MiFitnessOneDimenField mi_fitness_ecg_measure_fields[];
 extern const size_t mi_fitness_ecg_measure_field_count;
+
+extern const MiFitnessOneDimenField mi_fitness_ecg_record_fields[];
+extern const size_t mi_fitness_ecg_record_field_count;
 
 extern const MiFitnessOneDimenField mi_fitness_temperature_measure_fields[];
 extern const size_t mi_fitness_temperature_measure_field_count;

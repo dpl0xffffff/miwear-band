@@ -28,6 +28,12 @@ typedef struct {
     double lon;
 } MiwearWorkoutGpsPoint;
 
+/* One reported value, keyed by Mi Fitness report field id (SportReportBaseParser.ReportType). */
+typedef struct {
+    int id;
+    double value;
+} MiwearWorkoutMetric;
+
 typedef struct MiwearWorkoutSummary {
     uint32_t file_ts_sec;
     uint32_t start_sec;
@@ -41,6 +47,10 @@ typedef struct MiwearWorkoutSummary {
     int sport_subtype;
     int version;
     gchar *sport_name;
+    /* Specific sport (FitnessSportType, e.g. 1 outdoor run under file type 22); 0 = not reported. */
+    int sub_sport_type;
+    /* Every other valid report field (MiwearWorkoutMetric), for per-sport details. NULL = none. */
+    GArray *metrics;
     /* Pool swim (subtype 9/10) report fields from swimming_report_v8. */
     gboolean has_swim_detail;
     int swim_lengths;
@@ -93,5 +103,8 @@ void miwear_format_recovery_duration(int recovery_min, gchar *buf, gsize buf_len
 void miwear_workout_summary_free_series(MiwearWorkoutSummary *s);
 void miwear_workout_summary_clear(MiwearWorkoutSummary *s);
 MiwearWorkoutSummary *miwear_workout_summary_dup(const MiwearWorkoutSummary *src);
+/* Value of report field `id` from `metrics`, or `fallback` when absent. */
+double miwear_workout_metric(const MiwearWorkoutSummary *s, int id, double fallback);
+gboolean miwear_workout_has_metric(const MiwearWorkoutSummary *s, int id);
 
 #endif

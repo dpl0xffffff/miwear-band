@@ -30,10 +30,6 @@ gboolean miwear_schema_decode(const JsonNode *schema_root,
                               size_t buffer_len,
                               JsonNode **out_decoded);
 
-gboolean miwear_schema_parse_sport_report(const char *schema_json_path,
-                                          const uint8_t *payload,
-                                          size_t payload_len,
-                                          MiwearWorkoutSummary *out);
 
 /* Save raw payload when MIWEAR_CAPTURE_DIR is set (for schema_binary_dump.py). */
 void miwear_schema_maybe_capture(const uint8_t *payload,

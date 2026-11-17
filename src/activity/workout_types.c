@@ -1,4 +1,5 @@
 #include "miwear/activity/workout_types.h"
+#include "miwear/activity/mi_fitness_report_tables.h"
 
 #include <string.h>
 
@@ -18,37 +19,9 @@ void miwear_workout_summary_free_series(MiwearWorkoutSummary *s) {
 }
 
 const char *miwear_sport_subtype_name(int subtype) {
-    /* Wire subtype uses flags>>2; Mi Fitness sportType is the same numeric id (e.g. 22 outdoor_foot). */
-    switch (subtype) {
-        case 1:
-            return "Outdoor run";
-        case 2:
-            return "Outdoor walk";
-        case 3:
-            return "Treadmill";
-        case 6:
-            return "Outdoor cycling";
-        case 7:
-            return "Indoor cycling";
-        case 8:
-            return "Free training";
-        case 9:
-            return "Pool swim";
-        case 11:
-            return "Elliptical";
-        case 13:
-            return "Rowing";
-        case 14:
-            return "Jump rope";
-        case 16:
-            return "HIIT";
-        case 22:
-            return "Outdoor walk";
-        case 23:
-            return "Outdoor cycling";
-        default:
-            return "Workout";
-    }
+    /* Same ids as Mi Fitness FitnessSportType: 1–26 are the band's file types, 100+ specific sports. */
+    const char *name = mi_fitness_sport_type_name(subtype);
+    return name != NULL ? name : "Workout";
 }
 
 const char *miwear_swim_stroke_name(int main_stroke) {
@@ -115,6 +88,9 @@ void miwear_workout_summary_clear(MiwearWorkoutSummary *s) {
     }
     g_free(s->sport_name);
     miwear_workout_summary_free_series(s);
+    if (s->metrics != NULL) {
+        g_array_unref(s->metrics);
+    }
     memset(s, 0, sizeof(*s));
 }
 
@@ -127,6 +103,7 @@ MiwearWorkoutSummary *miwear_workout_summary_dup(const MiwearWorkoutSummary *src
     d->sport_name = g_strdup(src->sport_name);
     d->record_samples = NULL;
     d->gps_track = NULL;
+    d->metrics = src->metrics != NULL ? g_array_ref(src->metrics) : NULL;
     if (src->record_samples != NULL) {
         d->record_samples = g_array_ref(src->record_samples);
     }
@@ -134,4 +111,29 @@ MiwearWorkoutSummary *miwear_workout_summary_dup(const MiwearWorkoutSummary *src
         d->gps_track = g_array_ref(src->gps_track);
     }
     return d;
+}
+
+gboolean miwear_workout_has_metric(const MiwearWorkoutSummary *s, int id) {
+    if (s == NULL || s->metrics == NULL) {
+        return FALSE;
+    }
+    for (guint i = 0; i < s->metrics->len; i++) {
+        if (g_array_index(s->metrics, MiwearWorkoutMetric, i).id == id) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+double miwear_workout_metric(const MiwearWorkoutSummary *s, int id, double fallback) {
+    if (s == NULL || s->metrics == NULL) {
+        return fallback;
+    }
+    for (guint i = 0; i < s->metrics->len; i++) {
+        const MiwearWorkoutMetric *m = &g_array_index(s->metrics, MiwearWorkoutMetric, i);
+        if (m->id == id) {
+            return m->value;
+        }
+    }
+    return fallback;
 }

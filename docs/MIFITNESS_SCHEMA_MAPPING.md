@@ -45,18 +45,28 @@ FitnessDataParser.parse(dataId, bytes)
 
 **Important:** Schema lookup is **exact** on wire `version`. Band 10 outdoor walk summaries often use **v6**, while `index.json` only lists `outdoor_foot` **report v8/v9**. For v6, Mi Fitness uses **`OutdoorStepReportParser` + `nativeParse`**, not the v8 JSON schema.
 
-### Legacy native path in miwear-band (Mi Fitness Java, not Gadgetbridge)
+### How miwear-band decodes workout summaries
 
-When schema lookup misses, sport **report** payloads use the same pipeline as `OneDimenDataParser` + `SportReportBaseParser.parseReport`:
+`src/activity/mi_fitness_sport_report.c` follows `FitnessDataParser.parse` for every sport type 1–26:
 
-| C module | APK source |
-|----------|------------|
-| `mi_fitness_data.c` | `FitnessDataHeader`, `FitnessDataValidity.getSportStepReportValidityLen` |
-| `mi_fitness_oneden.c` | `OneDimenDataParser.parseDataValid` / `parseOneRecord` |
-| `outdoor_step_report_fields.c` | `OutdoorStepReportParser.reportDataTypeArray` (102 fields, regen via `scripts/gen_outdoor_step_table.py`) |
-| `mi_fitness_sport_report.c` | `SportReportBaseParser.setReportValue` (field ids 1=start, 3=duration, 5=distance, 6/7=kcal, 16–18=HR) |
+1. If `index.json` has a schema for the exact `(sport, report, version)`, the schema is turned into a
+   field table at runtime (field names → report ids via `schema_field_ids.json`).
+2. Otherwise the sport's native table (`*ReportParser.reportDataTypeArray`) is used, with the
+   validity length from `FitnessDataValidity`.
+3. The body is read by `mi_fitness_oneden.c` (`OneDimenDataParser`), and every value is applied by
+   its global report field id (`SportReportBaseParser.ReportType`, e.g. 16 avg HR, 110 training load).
+   Values without a dedicated summary field are kept in `MiwearWorkoutSummary.metrics`.
 
-`miwear_parse_workout_summary` tries JSON schema first, then **outdoor_foot (subtype 22)** native parse, then older GB-aligned fallbacks.
+All tables are generated from the app — see `tools/mi-fitness-extract/README.md`. Where Mi Fitness
+has both a schema and a native table they agree field-for-field (checked by `test/report_test.c`),
+with one exception in the app itself: the native tables add the cloud course id for
+`selectedCourse == 251`, the schemas only for 252/253/255.
+
+Field 65 (`subSportType`) carries the specific sport (`FitnessSportType`, e.g. 1 outdoor run inside
+file type 22); `sport_types.json` names all 180 of them.
+
+Older versions that Mi Fitness itself cannot decode fall back to the Gadgetbridge-style parsers in
+`workout_summary.c`.
 
 ## Schema resolution
 

@@ -62,15 +62,8 @@ add_executable(miwear-band
     src/sleep/mi_sleep_packets.c
     src/sleep/mi_sleep_pipeline.c
     src/sleep/mi_sleep_external.c
-    src/activity/mi_fitness_sport_tables.c
     src/activity/mi_fitness_sport_report.c
-    src/activity/outdoor_step_report_fields.c
-    src/activity/outdoor_sport_report_fields.c
-    src/activity/abnormal_record_fields.c
-    src/activity/weight_record_fields.c
-    src/activity/sport_gps_fields.c
-    src/activity/ecg_measure_fields.c
-    src/activity/temperature_measure_fields.c
+    src/activity/mi_fitness_report_tables.c
     src/ui/ui.c
     src/ui/dashboard.c
     src/ui/widgets.c
@@ -113,9 +106,8 @@ add_executable(miwear-schema-dump tools/schema_dump.c
     src/activity/mi_fitness_data.c
     src/activity/mi_fitness_validity.c
     src/activity/mi_fitness_oneden.c
-    src/activity/mi_fitness_sport_report.c
-    src/activity/outdoor_step_report_fields.c
     src/activity/workout_types.c
+    src/activity/mi_fitness_report_tables.c
 )
 target_include_directories(miwear-schema-dump PRIVATE include)
 target_link_libraries(miwear-schema-dump PRIVATE PkgConfig::GLIB PkgConfig::JSON m)
@@ -135,6 +127,22 @@ target_include_directories(miwear-parser-test PRIVATE include)
 target_link_libraries(miwear-parser-test PRIVATE PkgConfig::GLIB PkgConfig::GTK PkgConfig::ADW PkgConfig::PROTOBUF_C
     PkgConfig::SQLITE3 PkgConfig::JSON)
 add_test(NAME parsers COMMAND miwear-parser-test)
+
+add_executable(miwear-report-test
+    test/report_test.c
+    src/activity/mi_fitness_sport_report.c
+    src/activity/mi_fitness_report_tables.c
+    src/activity/mi_fitness_oneden.c
+    src/activity/mi_fitness_validity.c
+    src/activity/mi_fitness_data.c
+    src/activity/schema_reader.c
+    src/activity/workout_types.c
+)
+target_include_directories(miwear-report-test PRIVATE include)
+target_link_libraries(miwear-report-test PRIVATE PkgConfig::GLIB PkgConfig::JSON m)
+target_compile_definitions(miwear-report-test PRIVATE MIWEAR_SCHEMA_DIR="${MIWEAR_SCHEMA_EXTRACT_DIR}")
+add_dependencies(miwear-report-test miwear_schemas)
+add_test(NAME reports COMMAND miwear-report-test)
 add_executable(miwear-local-time-test test/local_time_test.c src/core/local_time.c)
 target_include_directories(miwear-local-time-test PRIVATE include)
 target_link_libraries(miwear-local-time-test PRIVATE PkgConfig::GLIB)

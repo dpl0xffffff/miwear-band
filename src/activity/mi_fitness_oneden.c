@@ -3,40 +3,34 @@
 
 #include <string.h>
 
-static bool build_valid_map(const MiFitnessOneDimenField *fields,
-                            size_t field_count,
-                            int data_version,
-                            const uint8_t *data_valid,
-                            size_t data_valid_len,
-                            bool valid_map[256]) {
-    memset(valid_map, 0, 256);
-    if (data_valid_len == 0) {
-        for (size_t i = 0; i < field_count; i++) {
-            const MiFitnessOneDimenField *f = &fields[i];
-            if (f->support_version <= (uint8_t)data_version && f->type >= 0 && f->type < 256) {
-                valid_map[f->type] = true;
-            }
-        }
-        return true;
-    }
+/*
+ * OneDimenDataParser.parseDataValid: every field the version supports and whose id is >= 0 takes
+ * the next validity bit (MSB first); fields with negative ids (course / lactate extras) take no bit
+ * and count as valid. Indexed by field position. An empty bitmap means "all valid".
+ */
+static bool build_valid_flags(const MiFitnessOneDimenField *fields,
+                              size_t field_count,
+                              int data_version,
+                              const uint8_t *data_valid,
+                              size_t data_valid_len,
+                              bool *valid) {
     size_t bit_index = 0;
     for (size_t i = 0; i < field_count; i++) {
         const MiFitnessOneDimenField *f = &fields[i];
-        bool valid = false;
+        valid[i] = false;
         if (f->support_version > (uint8_t)data_version) {
-            valid = false;
-        } else {
-            const size_t byte_i = bit_index / 8;
-            const size_t bit_i = bit_index % 8;
-            if (byte_i >= data_valid_len) {
-                return false;
-            }
-            valid = (data_valid[byte_i] & (1u << (7 - bit_i))) != 0;
-            bit_index++;
+            continue;
         }
-        if (f->type >= 0 && f->type < 256) {
-            valid_map[f->type] = valid;
+        if (f->type < 0 || data_valid_len == 0) {
+            valid[i] = true;
+            continue;
         }
+        const size_t byte_i = bit_index / 8;
+        if (byte_i >= data_valid_len) {
+            return false; /* bitmap shorter than the table needs: wrong table or version */
+        }
+        valid[i] = (data_valid[byte_i] & (1u << (7 - bit_index % 8))) != 0;
+        bit_index++;
     }
     return true;
 }
@@ -133,6 +127,18 @@ static bool field_exists(const MiFitnessOneDimenField *f,
     if (!f->has_depend) {
         return true;
     }
+    if (f->depend_count > 0) {
+        const MiFitnessFieldValue *dep = parsed_get(parsed, parsed_count, f->depend_type);
+        if (dep == NULL || !dep->valid) {
+            return false;
+        }
+        for (uint8_t i = 0; i < f->depend_count && i < 4; i++) {
+            if (dep->i64 == f->depend_values[i]) {
+                return true;
+            }
+        }
+        return false;
+    }
     const MiFitnessFieldValue *ref = parsed_get(parsed, parsed_count, 205);
     if (ref == NULL || !ref->valid) {
         return false;
@@ -173,8 +179,11 @@ bool mi_fitness_oneden_parse_one_record(const MiFitnessOneDimenField *fields,
         return false;
     }
 
-    bool valid_map[256];
-    if (!build_valid_map(fields, field_count, data_version, data_valid, data_valid_len, valid_map)) {
+    if (field_count > MI_FITNESS_FIELD_VALUE_MAX * 2) {
+        return false;
+    }
+    bool valid_flags[MI_FITNESS_FIELD_VALUE_MAX * 2];
+    if (!build_valid_flags(fields, field_count, data_version, data_valid, data_valid_len, valid_flags)) {
         return false;
     }
 
@@ -187,7 +196,7 @@ bool mi_fitness_oneden_parse_one_record(const MiFitnessOneDimenField *fields,
         if (!field_exists(f, data_version, scratch, scratch_count)) {
             continue;
         }
-        const bool valid = valid_map[(uint8_t)f->type];
+        const bool valid = valid_flags[i];
         int repeat = -1;
         if (f->counts_type >= 0) {
             const MiFitnessFieldValue *cnt = parsed_get(scratch, scratch_count, f->counts_type);
@@ -257,8 +266,11 @@ bool mi_fitness_oneden_parse_report(const MiFitnessOneDimenField *fields,
         return false;
     }
 
-    bool valid_map[256];
-    if (!build_valid_map(fields, field_count, data_version, data_valid, data_valid_len, valid_map)) {
+    if (field_count > MI_FITNESS_FIELD_VALUE_MAX * 2) {
+        return false;
+    }
+    bool valid_flags[MI_FITNESS_FIELD_VALUE_MAX * 2];
+    if (!build_valid_flags(fields, field_count, data_version, data_valid, data_valid_len, valid_flags)) {
         return false;
     }
 
@@ -271,7 +283,7 @@ bool mi_fitness_oneden_parse_report(const MiFitnessOneDimenField *fields,
         if (!field_exists(f, data_version, scratch, scratch_count)) {
             continue;
         }
-        const bool valid = valid_map[(uint8_t)f->type];
+        const bool valid = valid_flags[i];
         int repeat = -1;
         if (f->counts_type >= 0) {
             const MiFitnessFieldValue *cnt = parsed_get(scratch, scratch_count, f->counts_type);

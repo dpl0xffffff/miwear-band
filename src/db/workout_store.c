@@ -1,4 +1,5 @@
 #include "miwear/db/workout_store.h"
+#include <stdlib.h>
 
 #include "miwear/activity/workout_record.h"
 
@@ -215,6 +216,21 @@ gchar *miwear_workout_summary_to_json(int sport_type, const MiwearWorkoutSummary
         json_builder_set_member_name(b, training[i].name);
         json_builder_add_int_value(b, training[i].value);
     }
+    json_builder_set_member_name(b, "sub_sport_type");
+    json_builder_add_int_value(b, summary->sub_sport_type);
+    if (summary->metrics != NULL && summary->metrics->len > 0) {
+        /* Mi Fitness report field id → value, for per-sport details. */
+        json_builder_set_member_name(b, "metrics");
+        json_builder_begin_object(b);
+        for (guint i = 0; i < summary->metrics->len; i++) {
+            const MiwearWorkoutMetric *m = &g_array_index(summary->metrics, MiwearWorkoutMetric, i);
+            gchar key[16];
+            g_snprintf(key, sizeof(key), "%d", m->id);
+            json_builder_set_member_name(b, key);
+            json_builder_add_double_value(b, m->value);
+        }
+        json_builder_end_object(b);
+    }
     json_add_hr_zones(b, &summary->hr_zones);
     json_add_series(b, summary);
     json_builder_end_object(b);
@@ -328,6 +344,19 @@ gboolean miwear_workout_summary_from_json(const char *json,
         if (json_object_has_member(o, training[i].name)) {
             *training[i].dst = (int)json_object_get_int_member(o, training[i].name);
         }
+    }
+    if (json_object_has_member(o, "sub_sport_type")) {
+        summary_out->sub_sport_type = (int)json_object_get_int_member(o, "sub_sport_type");
+    }
+    if (json_object_has_member(o, "metrics")) {
+        JsonObject *mo = json_object_get_object_member(o, "metrics");
+        GList *keys = json_object_get_members(mo);
+        summary_out->metrics = g_array_new(FALSE, FALSE, sizeof(MiwearWorkoutMetric));
+        for (GList *l = keys; l != NULL; l = l->next) {
+            const MiwearWorkoutMetric m = {atoi(l->data), json_object_get_double_member(mo, l->data)};
+            g_array_append_val(summary_out->metrics, m);
+        }
+        g_list_free(keys);
     }
     /* Older rows kept training load only in the per-sport fields. */
     if (summary_out->training_load == 0) {
