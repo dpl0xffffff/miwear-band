@@ -394,7 +394,7 @@ GtkWidget *mi_sparkline_new(AppState *state, MiSeries series) {
 
 /* ---- Sleep night window ------------------------------------------------------------------- */
 
-static void night_copy_day(AppState *state, GDate *day, int from_min, int to_min, int *dst) {
+static void night_copy_day(AppState *state, GDate *day, int from_min, int to_min, MiNight *out, int offset) {
     gchar *key = mi_day_key(day);
     GArray *arr = state->recorded_days != NULL ? g_hash_table_lookup(state->recorded_days, key) : NULL;
     g_free(key);
@@ -403,10 +403,35 @@ static void night_copy_day(AppState *state, GDate *day, int from_min, int to_min
     }
     for (guint i = 0; i < arr->len; i++) {
         const RecordedSample *s = &g_array_index(arr, RecordedSample, i);
-        if (s->minute_of_day >= from_min && s->minute_of_day < to_min && s->sleep_stage >= 0) {
-            dst[s->minute_of_day - from_min] = s->sleep_stage;
+        if (s->minute_of_day < from_min || s->minute_of_day >= to_min) {
+            continue;
+        }
+        const int at = offset + s->minute_of_day - from_min;
+        if (s->sleep_stage >= 0) {
+            out->stage[at] = s->sleep_stage;
+        }
+        if (s->heart_rate > 0 && s->heart_rate < 240) {
+            out->hr_sum[at] += s->heart_rate;
+            out->hr_n[at]++;
+        }
+        if (miwear_spo2_value_valid(s->spo2)) {
+            out->spo2_sum[at] += s->spo2;
+            out->spo2_n[at]++;
         }
     }
+}
+
+/* Each minute weighs the same, so beat-by-beat HR bursts don't outweigh sparse readings. */
+static int night_average(const int *sum, const int *n, int first, int last) {
+    double total = 0;
+    int minutes = 0;
+    for (int i = MAX(first, 0); i <= last && i < MI_NIGHT_MINUTES; i++) {
+        if (n[i] > 0) {
+            total += (double)sum[i] / n[i];
+            minutes++;
+        }
+    }
+    return minutes > 0 ? (int)lround(total / minutes) : 0;
 }
 
 void mi_night_collect(AppState *state, GDate *wake_day, MiNight *out) {
@@ -421,8 +446,8 @@ void mi_night_collect(AppState *state, GDate *wake_day, MiNight *out) {
     const int tail = MI_DAY_MINUTES - MI_NIGHT_START_MIN;
 
     g_mutex_lock(&state->recorded_lock);
-    night_copy_day(state, prev, MI_NIGHT_START_MIN, MI_DAY_MINUTES, out->stage);
-    night_copy_day(state, wake_day, 0, MI_NIGHT_START_MIN, out->stage + tail);
+    night_copy_day(state, prev, MI_NIGHT_START_MIN, MI_DAY_MINUTES, out, 0);
+    night_copy_day(state, wake_day, 0, MI_NIGHT_START_MIN, out, tail);
 
     gchar *wake_key = mi_day_key(wake_day);
     const MiwearSleepDurationSummary *sd =
@@ -488,4 +513,8 @@ void mi_night_collect(AppState *state, GDate *wake_day, MiNight *out) {
         }
     }
     out->has_breakdown = (out->deep + out->rem + out->awake) > 0;
+    if (out->first >= 0) {
+        out->avg_hr = night_average(out->hr_sum, out->hr_n, out->first, out->last);
+        out->avg_spo2 = night_average(out->spo2_sum, out->spo2_n, out->first, out->last);
+    }
 }

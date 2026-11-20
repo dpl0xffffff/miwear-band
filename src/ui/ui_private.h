@@ -96,6 +96,11 @@ typedef struct {
     int deep, light, rem, awake, other;
     int total_asleep;            /* band total when synced, else counted */
     gboolean has_breakdown;
+    /* Per-minute sums and sample counts, used for the night's averages. */
+    int hr_sum[MI_NIGHT_MINUTES], hr_n[MI_NIGHT_MINUTES];
+    int spo2_sum[MI_NIGHT_MINUTES], spo2_n[MI_NIGHT_MINUTES];
+    int avg_hr;   /* over first … last; 0 when no samples */
+    int avg_spo2; /* over first … last; 0 when no samples */
 } MiNight;
 
 void mi_night_collect(AppState *state, GDate *wake_day, MiNight *out);

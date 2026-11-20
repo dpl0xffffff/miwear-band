@@ -291,6 +291,7 @@ static void on_week_click(GtkGestureClick *g, int n_press, double x, double y, g
 
 static GtkWidget *legend_values[4];
 static GtkWidget *sleep_bed_value, *sleep_wake_value, *sleep_inbed_value;
+static GtkWidget *sleep_hr_value, *sleep_spo2_value;
 static GtkWidget *sleep_summary_sub;
 
 GtkWidget *mi_sleep_page_new(AppState *state, MiwearDashboardUi *dash) {
@@ -331,6 +332,12 @@ GtkWidget *mi_sleep_page_new(AppState *state, MiwearDashboardUi *dash) {
     mi_stat_flow_append(times, mi_stat_new("Woke up", &sleep_wake_value));
     mi_stat_flow_append(times, mi_stat_new("Time in bed", &sleep_inbed_value));
     gtk_box_append(GTK_BOX(inner), times);
+
+    GtkWidget *vitals = mi_stat_flow_new();
+    gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(vitals), 3);
+    mi_stat_flow_append(vitals, mi_stat_new("Avg heart rate", &sleep_hr_value));
+    mi_stat_flow_append(vitals, mi_stat_new("Avg SpO₂", &sleep_spo2_value));
+    gtk_box_append(GTK_BOX(inner), vitals);
 
     dash->sleep_bar = gtk_drawing_area_new();
     gtk_widget_set_size_request(dash->sleep_bar, -1, 14);
@@ -436,6 +443,18 @@ void mi_sleep_refresh(AppState *state) {
         gtk_label_set_text(GTK_LABEL(sleep_bed_value), "—");
         gtk_label_set_text(GTK_LABEL(sleep_wake_value), "—");
         gtk_label_set_text(GTK_LABEL(sleep_inbed_value), "—");
+    }
+    if (n->avg_hr > 0) {
+        g_snprintf(buf, sizeof(buf), "%d bpm", n->avg_hr);
+        gtk_label_set_text(GTK_LABEL(sleep_hr_value), buf);
+    } else {
+        gtk_label_set_text(GTK_LABEL(sleep_hr_value), "—");
+    }
+    if (n->avg_spo2 > 0) {
+        g_snprintf(buf, sizeof(buf), "%d%%", n->avg_spo2);
+        gtk_label_set_text(GTK_LABEL(sleep_spo2_value), buf);
+    } else {
+        gtk_label_set_text(GTK_LABEL(sleep_spo2_value), "—");
     }
 
     gtk_widget_set_visible(dash->sleep_bar, n->has_breakdown);
