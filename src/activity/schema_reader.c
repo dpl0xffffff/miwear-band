@@ -18,7 +18,66 @@ typedef struct {
 typedef struct {
     const JsonNode *schema_root;
     GError **error;
+    /* Integer values decoded so far, by field name (bit-field members too), for "$data"
+     * references such as itemCount {"$data": "1/gpsPointCount"} and exists conditions. */
+    GHashTable *values;
+    gboolean has_last;
+    gint64 last;
 } SchemaDecodeCtx;
+
+static void ctx_set_value(SchemaDecodeCtx *ctx, const char *name, gint64 v) {
+    if (ctx->values != NULL && name != NULL) {
+        g_hash_table_insert(ctx->values, g_strdup(name), g_memdup2(&v, sizeof(v)));
+    }
+}
+
+/* Resolves {"$data": "<pointer>"} to an earlier decoded value. Pointers are absolute
+ * ("/body/featureFileType") or relative ("1/gpsPointCount"); field names are unique enough in
+ * these schemas that the last path segment identifies the field. */
+static gboolean ctx_data_value(const SchemaDecodeCtx *ctx, JsonNode *ref, gint64 *out) {
+    if (ref == NULL || !JSON_NODE_HOLDS_OBJECT(ref)) {
+        return FALSE;
+    }
+    JsonObject *o = json_node_get_object(ref);
+    if (!json_object_has_member(o, "$data")) {
+        return FALSE;
+    }
+    const char *ptr = json_object_get_string_member(o, "$data");
+    if (ptr == NULL || ctx->values == NULL) {
+        return FALSE;
+    }
+    const char *slash = strrchr(ptr, '/');
+    const gint64 *v = g_hash_table_lookup(ctx->values, slash != NULL ? slash + 1 : ptr);
+    if (v == NULL) {
+        return FALSE;
+    }
+    *out = *v;
+    return TRUE;
+}
+
+/* "exists": {"$data": ...} is true when the referenced value is non-zero, or, with "$in",
+ * when it is one of the listed values. Fields without "exists" are always present. */
+static gboolean field_exists(const SchemaDecodeCtx *ctx, JsonObject *spec) {
+    if (!json_object_has_member(spec, "exists")) {
+        return TRUE;
+    }
+    JsonNode *ex = json_object_get_member(spec, "exists");
+    gint64 v = 0;
+    if (!ctx_data_value(ctx, ex, &v)) {
+        return TRUE; /* unresolvable: read it, as before */
+    }
+    JsonObject *o = json_node_get_object(ex);
+    if (json_object_has_member(o, "$in")) {
+        JsonArray *in = json_object_get_array_member(o, "$in");
+        for (guint i = 0; in != NULL && i < json_array_get_length(in); i++) {
+            if (json_array_get_int_element(in, i) == v) {
+                return TRUE;
+            }
+        }
+        return FALSE;
+    }
+    return v != 0;
+}
 
 static const struct {
     int sport;
@@ -200,7 +259,7 @@ static JsonObject *resolve_ref(const SchemaDecodeCtx *ctx, JsonObject *node) {
     return json_object_get_object_member(defs, name);
 }
 
-static gboolean read_bitfield(SchemaCursor *c, JsonObject *spec, JsonBuilder *b) {
+static gboolean read_bitfield(SchemaDecodeCtx *ctx, SchemaCursor *c, JsonObject *spec, JsonBuilder *b) {
     int byte_size = 1;
     if (json_object_has_member(spec, "byteSize")) {
         byte_size = json_object_get_int_member(spec, "byteSize");
@@ -212,9 +271,14 @@ static gboolean read_bitfield(SchemaCursor *c, JsonObject *spec, JsonBuilder *b)
     if (!cursor_read(c, raw_bytes, (size_t)byte_size)) {
         return FALSE;
     }
+    /* Little-endian unless the schema says highBitFirst (e.g. 2-byte validity flags, whose
+     * bit 15 is the first bit of the first byte). */
+    const gboolean high_bit_first =
+        json_object_has_member(spec, "highBitFirst") && json_object_get_boolean_member(spec, "highBitFirst");
     uint64_t raw = 0;
     for (int i = 0; i < byte_size; i++) {
-        raw |= (uint64_t)raw_bytes[i] << (8 * i);
+        const int shift = high_bit_first ? 8 * (byte_size - 1 - i) : 8 * i;
+        raw |= (uint64_t)raw_bytes[i] << shift;
     }
     JsonObject *props = json_object_get_object_member(spec, "properties");
     JsonArray *order = NULL;
@@ -230,13 +294,27 @@ static gboolean read_bitfield(SchemaCursor *c, JsonObject *spec, JsonBuilder *b)
                 continue;
             }
             JsonObject *bit = json_object_get_object_member(props, fname);
-            int start = json_object_get_int_member(bit, "startBit");
-            int end = json_object_get_int_member(bit, "endBit");
-            int width = end - start + 1;
-            uint64_t mask = width >= 64 ? UINT64_MAX : ((uint64_t)1 << width) - 1;
-            uint64_t val = (raw >> start) & mask;
+            /* Mi Fitness writes ranges high bit first ("startBit": 31, "endBit": 0). */
+            const int a = (int)json_object_get_int_member(bit, "startBit");
+            const int z = (int)json_object_get_int_member(bit, "endBit");
+            const int lo = MIN(a, z), hi = MAX(a, z);
+            if (lo < 0 || hi >= 8 * byte_size) {
+                continue;
+            }
+            const int width = hi - lo + 1;
+            const uint64_t mask = width >= 64 ? UINT64_MAX : ((uint64_t)1 << width) - 1;
+            const uint64_t val = (raw >> lo) & mask;
             json_builder_set_member_name(b, fname);
-            json_builder_add_int_value(b, (gint64)val);
+            const char *vt = json_object_has_member(bit, "valueType") ? json_object_get_string_member(bit, "valueType") : NULL;
+            if (g_strcmp0(vt, "float") == 0 && width == 32) {
+                const uint32_t u = (uint32_t)val;
+                float f;
+                memcpy(&f, &u, sizeof(f));
+                json_builder_add_double_value(b, isfinite((double)f) ? (double)f : 0.0);
+            } else {
+                json_builder_add_int_value(b, (gint64)val);
+                ctx_set_value(ctx, fname, (gint64)val);
+            }
         }
     }
     json_builder_end_object(b);
@@ -259,10 +337,17 @@ static gboolean decode_object(SchemaDecodeCtx *ctx, SchemaCursor *c, JsonObject 
             if (name == NULL || !json_object_has_member(props, name)) {
                 continue;
             }
-            JsonObject *field = json_object_get_object_member(props, name);
+            JsonObject *field = resolve_ref(ctx, json_object_get_object_member(props, name));
+            if (!field_exists(ctx, field)) {
+                continue;
+            }
             json_builder_set_member_name(b, name);
+            ctx->has_last = FALSE;
             if (!decode_field(ctx, c, field, b)) {
                 return FALSE;
+            }
+            if (ctx->has_last) {
+                ctx_set_value(ctx, name, ctx->last);
             }
         }
     }
@@ -294,7 +379,12 @@ static int array_fixed_count(JsonObject *spec) {
 static gboolean decode_array(SchemaDecodeCtx *ctx, SchemaCursor *c, JsonObject *spec, JsonBuilder *b) {
     int count = array_fixed_count(spec);
     if (count == -2) {
-        return FALSE;
+        gint64 n = 0;
+        if (!json_object_has_member(spec, "itemCount") ||
+            !ctx_data_value(ctx, json_object_get_member(spec, "itemCount"), &n) || n < 0 || n > 1000000) {
+            return FALSE;
+        }
+        count = (int)n;
     }
     JsonObject *items = json_object_get_object_member(spec, "items");
     items = resolve_ref(ctx, items);
@@ -319,13 +409,15 @@ static gboolean decode_array(SchemaDecodeCtx *ctx, SchemaCursor *c, JsonObject *
     return TRUE;
 }
 
-static gboolean decode_scalar(SchemaCursor *c, const char *typ, JsonBuilder *b) {
+static gboolean decode_scalar(SchemaDecodeCtx *ctx, SchemaCursor *c, const char *typ, JsonBuilder *b) {
     if (g_strcmp0(typ, "uint8") == 0) {
         uint8_t v;
         if (!cursor_u8(c, &v)) {
             return FALSE;
         }
         json_builder_add_int_value(b, v);
+        ctx->has_last = TRUE;
+        ctx->last = v;
         return TRUE;
     }
     if (g_strcmp0(typ, "int8") == 0) {
@@ -334,6 +426,8 @@ static gboolean decode_scalar(SchemaCursor *c, const char *typ, JsonBuilder *b) 
             return FALSE;
         }
         json_builder_add_int_value(b, v >= 128 ? v - 256 : v);
+        ctx->has_last = TRUE;
+        ctx->last = v >= 128 ? v - 256 : v;
         return TRUE;
     }
     if (g_strcmp0(typ, "uint16") == 0) {
@@ -342,6 +436,8 @@ static gboolean decode_scalar(SchemaCursor *c, const char *typ, JsonBuilder *b) 
             return FALSE;
         }
         json_builder_add_int_value(b, v);
+        ctx->has_last = TRUE;
+        ctx->last = v;
         return TRUE;
     }
     if (g_strcmp0(typ, "uint32") == 0) {
@@ -350,6 +446,8 @@ static gboolean decode_scalar(SchemaCursor *c, const char *typ, JsonBuilder *b) 
             return FALSE;
         }
         json_builder_add_int_value(b, v);
+        ctx->has_last = TRUE;
+        ctx->last = v;
         return TRUE;
     }
     if (g_strcmp0(typ, "int32") == 0) {
@@ -358,6 +456,8 @@ static gboolean decode_scalar(SchemaCursor *c, const char *typ, JsonBuilder *b) 
             return FALSE;
         }
         json_builder_add_int_value(b, v);
+        ctx->has_last = TRUE;
+        ctx->last = v;
         return TRUE;
     }
     if (g_strcmp0(typ, "float") == 0 || g_strcmp0(typ, "float32") == 0) {
@@ -378,7 +478,7 @@ static gboolean decode_field(SchemaDecodeCtx *ctx, SchemaCursor *c, JsonObject *
         return FALSE;
     }
     if (g_strcmp0(typ, "bitField") == 0) {
-        return read_bitfield(c, spec, b);
+        return read_bitfield(ctx, c, spec, b);
     }
     if (g_strcmp0(typ, "object") == 0) {
         return decode_object(ctx, c, spec, b);
@@ -390,7 +490,12 @@ static gboolean decode_field(SchemaDecodeCtx *ctx, SchemaCursor *c, JsonObject *
         size_t n = 0;
         if (json_object_has_member(spec, "byteSize")) {
             JsonNode *bs = json_object_get_member(spec, "byteSize");
-            if (json_node_get_value_type(bs) == G_TYPE_STRING) {
+            gint64 ref_n = 0;
+            if (JSON_NODE_HOLDS_OBJECT(bs)) {
+                if (ctx_data_value(ctx, bs, &ref_n) && ref_n > 0) {
+                    n = (size_t)ref_n;
+                }
+            } else if (json_node_get_value_type(bs) == G_TYPE_STRING) {
                 const char *s = json_node_get_string(bs);
                 if (s != NULL && g_strcmp0(s, "EOF") == 0) {
                     n = c->len - c->off;
@@ -409,7 +514,7 @@ static gboolean decode_field(SchemaDecodeCtx *ctx, SchemaCursor *c, JsonObject *
         g_free(b64);
         return TRUE;
     }
-    return decode_scalar(c, typ, b);
+    return decode_scalar(ctx, c, typ, b);
 }
 
 gboolean miwear_schema_decode(const JsonNode *schema_root,
@@ -424,11 +529,15 @@ gboolean miwear_schema_decode(const JsonNode *schema_root,
     if (!json_object_has_member(root_obj, "structure")) {
         return FALSE;
     }
-    SchemaDecodeCtx ctx = {.schema_root = schema_root, .error = NULL};
+    SchemaDecodeCtx ctx = {.schema_root = schema_root,
+                           .error = NULL,
+                           .values = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free)};
     SchemaCursor cur = {.data = buffer, .off = 0, .len = buffer_len};
     JsonBuilder *builder = json_builder_new();
     JsonObject *structure = json_object_get_object_member(root_obj, "structure");
-    if (!decode_field(&ctx, &cur, structure, builder)) {
+    const gboolean ok = decode_field(&ctx, &cur, structure, builder);
+    g_hash_table_unref(ctx.values);
+    if (!ok) {
         g_object_unref(builder);
         return FALSE;
     }

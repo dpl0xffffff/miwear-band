@@ -3,6 +3,7 @@
 #include "miwear/activity/schema_reader.h"
 
 #include <json-glib/json-glib.h>
+#include <math.h>
 
 static gboolean decode_sport_schema(const char *schema_rel,
                                     const uint8_t *payload,
@@ -155,6 +156,30 @@ gboolean miwear_parse_workout_record(const uint8_t *payload,
     return FALSE;
 }
 
+/* A number either directly at @obj.@name, or inside a bit field of the same name
+ * ({"latitude": {"latitude": 47.3}}, as schema bit fields decode). */
+static gboolean gps_number(JsonObject *obj, const char *name, double *out) {
+    if (obj == NULL || !json_object_has_member(obj, name)) {
+        return FALSE;
+    }
+    JsonNode *n = json_object_get_member(obj, name);
+    if (JSON_NODE_HOLDS_OBJECT(n)) {
+        return gps_number(json_node_get_object(n), name, out);
+    }
+    if (!JSON_NODE_HOLDS_VALUE(n)) {
+        return FALSE;
+    }
+    const GType t = json_node_get_value_type(n);
+    if (t == G_TYPE_DOUBLE) {
+        *out = json_node_get_double(n);
+    } else if (t == G_TYPE_INT64) {
+        *out = (double)json_node_get_int(n);
+    } else {
+        return FALSE;
+    }
+    return TRUE;
+}
+
 static gboolean extract_gps_points(JsonNode *decoded, MiwearWorkoutSummary *summary) {
     if (decoded == NULL || summary == NULL || json_node_get_node_type(decoded) != JSON_NODE_OBJECT) {
         return FALSE;
@@ -185,26 +210,22 @@ static gboolean extract_gps_points(JsonNode *decoded, MiwearWorkoutSummary *summ
         if (pt == NULL) {
             continue;
         }
+        JsonObject *src = pt;
+        if (json_object_has_member(pt, "latLng") && JSON_NODE_HOLDS_OBJECT(json_object_get_member(pt, "latLng"))) {
+            src = json_object_get_object_member(pt, "latLng");
+        } else if (json_object_has_member(pt, "location") &&
+                   JSON_NODE_HOLDS_OBJECT(json_object_get_member(pt, "location"))) {
+            src = json_object_get_object_member(pt, "location");
+        }
         MiwearWorkoutGpsPoint gp = {0};
-        if (json_object_has_member(pt, "latitude")) {
-            gp.lat = json_object_get_double_member(pt, "latitude");
-            gp.lon = json_object_get_double_member(pt, "longitude");
-        } else if (json_object_has_member(pt, "latLng")) {
-            JsonObject *ll = json_object_get_object_member(pt, "latLng");
-            if (ll != NULL) {
-                gp.lat = json_object_get_double_member(ll, "latitude");
-                gp.lon = json_object_get_double_member(ll, "longitude");
-            }
-        } else if (json_object_has_member(pt, "location")) {
-            JsonObject *loc = json_object_get_object_member(pt, "location");
-            if (loc != NULL) {
-                gp.lat = json_object_get_double_member(loc, "latitude");
-                gp.lon = json_object_get_double_member(loc, "longitude");
-            }
+        if (!gps_number(src, "latitude", &gp.lat) || !gps_number(src, "longitude", &gp.lon)) {
+            continue;
         }
-        if (gp.lat != 0.0 || gp.lon != 0.0) {
-            g_array_append_val(summary->gps_track, gp);
+        /* Points without a fix come through as 0/0; anything outside the globe is not a fix either. */
+        if ((gp.lat == 0.0 && gp.lon == 0.0) || fabs(gp.lat) > 90.0 || fabs(gp.lon) > 180.0) {
+            continue;
         }
+        g_array_append_val(summary->gps_track, gp);
     }
     return summary->gps_track != NULL && summary->gps_track->len > 0;
 }
