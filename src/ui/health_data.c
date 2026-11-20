@@ -33,7 +33,7 @@ void miwear_health_aggregate_day(AppState *state, const gchar *day_key, MiwearDa
             if (s->steps >= 0) {
                 out->steps = (out->steps < 0) ? s->steps : out->steps + s->steps;
             }
-            if (s->active_calories >= 0) {
+            if (s->active_calories >= 0) { /* per-minute activityCalories; the day's sum = totalactiveCalories */
                 out->calories = (out->calories < 0) ? s->active_calories : out->calories + s->active_calories;
             }
             if (s->heart_rate > 0 && s->heart_rate < 240) {
@@ -73,8 +73,10 @@ void miwear_health_aggregate_day(AppState *state, const gchar *day_key, MiwearDa
         if (summary->steps > 0) {
             out->steps = summary->steps;
         }
-        if (summary->calories > 0) {
-            out->calories = summary->calories;
+        /* The band shows totalactiveCalories, not totalCalories. Both it and the per-minute sum are
+         * synced values that only grow during the day; the larger one is the more recent. */
+        if (summary->has_active_calories && summary->active_calories > out->calories) {
+            out->calories = summary->active_calories;
         }
     }
     if (state->sleep_duration_by_day != NULL) {
@@ -345,128 +347,32 @@ guint miwear_activity_goal_default(void) {
     return 30;
 }
 
-/* Band 9/10 RealTimeStats field 3: cumulative activity-time units (not minutes). */
-#define MIWEAR_RT3_ACTIVITY_UNITS_PER_MIN 92u
-
-static guint rt3_units_to_activity_minutes(guint unknown3) {
-    if (unknown3 == 0) {
-        return 0;
-    }
-    if (unknown3 <= 180) {
-        return unknown3;
-    }
-    return (unknown3 + (MIWEAR_RT3_ACTIVITY_UNITS_PER_MIN / 2u)) / MIWEAR_RT3_ACTIVITY_UNITS_PER_MIN;
-}
-
-guint miwear_activity_time_from_realtime(gboolean has_unknown3, guint unknown3,
-                                         gboolean has_unknown5, guint unknown5,
-                                         gboolean has_steps, guint steps) {
-    /*
-     * Matches the band “Stats” screen: same RealTimeStats packet as steps/calories.
-     * Field 5 is a small counter on some firmware; field 3 is today’s activity time on Band 9/10.
-     */
-    guint from3 = 0;
-    if (has_unknown3 && unknown3 > 0 && (!has_steps || unknown3 != steps)) {
-        from3 = rt3_units_to_activity_minutes(unknown3);
-    }
-    guint from5 = 0;
-    if (has_unknown5 && unknown5 > 0 && unknown5 <= 600) {
-        from5 = unknown5;
-    }
-    /*
-     * Field 3 is the cumulative activity-time counter on Band 9/10; field 5 is a smaller
-     * auxiliary value (often higher than true minutes). When both are present and field 3
-     * is the smaller plausible value, trust it (e.g. rt3=276 → 3 min vs rt5=7).
-     * When field 3 looks inflated vs field 5 (stale day rollover), prefer field 5.
-     */
-    if (from3 > 0 && from5 > 0) {
-        if (from3 <= from5) {
-            return from3;
-        }
-        if (from3 > from5 * 2u) {
-            return from5;
-        }
-        return from3;
-    }
-    if (from3 > 0) {
-        return from3;
-    }
-    return from5;
-}
-
-guint miwear_live_activity_minutes(const AppState *state) {
-    if (state == NULL || !state->has_live_moving) {
-        return 0;
-    }
-    return state->live_moving;
-}
-
-guint miwear_display_activity_minutes(const AppState *state, const gchar *day_key, gboolean prefer_live) {
-    const guint live = miwear_live_activity_minutes(state);
-    if (state == NULL || day_key == NULL) {
-        return live;
-    }
-    if (prefer_live && state->has_activity_minutes_today) {
-        const guint synced = state->activity_minutes_today;
-        if (synced > 0 && (live == 0 || synced < live)) {
-            return synced;
-        }
-    }
-    return live;
-}
-
-/* Per-minute steps in daily details; aligns with Mi Fitness moderate ring on band firmware. */
-#define MIWEAR_MODERATE_STEPS_PER_MIN 35
-
-static gboolean minute_counts_as_moderate_activity(const RecordedSample *s, int max_hr) {
-    if (s->steps >= MIWEAR_MODERATE_STEPS_PER_MIN) {
-        return TRUE;
-    }
-    if (s->heart_rate > 0 && s->heart_rate <= 220) {
-        if (miwear_hr_zone_index(s->heart_rate, max_hr) >= 3) {
-            return TRUE;
-        }
-    }
-    if (s->active_calories >= 3) {
-        return TRUE;
-    }
-    return FALSE;
-}
+/*
+ * The band's "active time" is the number of minutes whose per-minute activity intensity
+ * (activeStreng, daily activity record) is moderate (3) or higher (4 high, 5 intense).
+ * Checked against the band: 10 minutes at intensity 3 → band shows 10.
+ */
+#define MIWEAR_ACTIVE_INTENSITY_MIN 3
+#define MIWEAR_ACTIVE_INTENSITY_MAX 5
 
 guint miwear_count_activity_minutes_from_timeline(AppState *state, const gchar *day_key) {
     if (state == NULL || day_key == NULL) {
         return 0;
     }
-    const int max_hr = state->profile_max_hr > 0 ? (int)state->profile_max_hr : 180;
     guint count = 0;
-
     g_mutex_lock(&state->recorded_lock);
     GArray *arr =
         (state->recorded_days != NULL) ? g_hash_table_lookup(state->recorded_days, day_key) : NULL;
     if (arr != NULL) {
         for (guint i = 0; i < arr->len; i++) {
             const RecordedSample *s = &g_array_index(arr, RecordedSample, i);
-            if (minute_counts_as_moderate_activity(s, max_hr)) {
+            if (s->intensity >= MIWEAR_ACTIVE_INTENSITY_MIN && s->intensity <= MIWEAR_ACTIVE_INTENSITY_MAX) {
                 count++;
             }
         }
     }
     g_mutex_unlock(&state->recorded_lock);
     return count;
-}
-
-void miwear_refresh_activity_minutes_for_day(AppState *state, const gchar *day_key) {
-    if (state == NULL || day_key == NULL) {
-        return;
-    }
-    const guint from_timeline = miwear_count_activity_minutes_from_timeline(state, day_key);
-    if (from_timeline == 0) {
-        return;
-    }
-    if (!state->has_activity_minutes_today || from_timeline > state->activity_minutes_today) {
-        state->activity_minutes_today = from_timeline;
-        state->has_activity_minutes_today = TRUE;
-    }
 }
 
 guint miwear_standing_hours_from_bitmap(int standing_raw) {

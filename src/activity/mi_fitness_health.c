@@ -61,13 +61,7 @@ static int json_optional_int(JsonObject *obj, const char *key) {
 static void apply_daily_activity_record_schema(AppState *state, JsonNode *decoded, uint32_t ts) {
     const guint pressure_points = miwear_apply_pressure_from_activity_record_json(state, decoded, ts);
     const guint moderate_min = miwear_count_moderate_activity_minutes_json(decoded);
-    if (moderate_min > 0) {
-        if (!state->has_activity_minutes_today || moderate_min > state->activity_minutes_today) {
-            state->activity_minutes_today = moderate_min;
-            state->has_activity_minutes_today = TRUE;
-        }
-        miwear_dashboard_schedule_refresh(state);
-    }
+
     gchar *line = g_strdup_printf(
         "Daily activity record (schema): moderate+ minutes=%u pressure points=%u",
         moderate_min,
@@ -95,8 +89,9 @@ static void apply_daily_activity_report_schema(AppState *state, JsonNode *decode
     dr.timezone = tz;
     dr.steps = json_obj_int64(body, "totalSteps", 0);
     dr.calories = json_obj_int64(body, "totalCalories", 0);
-    if (dr.calories <= 0) {
-        dr.calories = json_obj_int64(body, "totalactiveCalories", 0);
+    if (json_object_has_member(body, "totalactiveCalories")) {
+        dr.has_active_calories = TRUE;
+        dr.active_calories = (int)json_obj_int64(body, "totalactiveCalories", 0);
     }
     dr.hr_resting = json_obj_int64(body, "restingHeartRate", 0);
     dr.hr_max = json_obj_int64(body, "maxHeartRate", 0);
@@ -139,8 +134,11 @@ static void apply_daily_activity_report_schema(AppState *state, JsonNode *decode
     health_apply_daily_summary(state, &dr);
 
     gchar *line = g_strdup_printf(
-        "Daily report (schema): steps=%d standing_hours=%u stress=%d spo2=%d",
+        "Daily report (schema): steps=%d totalCalories=%lld totalactiveCalories=%lld "
+        "standing_hours=%u stress=%d spo2=%d",
         dr.steps,
+        (long long)json_obj_int64(body, "totalCalories", -1),
+        (long long)json_obj_int64(body, "totalactiveCalories", -1),
         miwear_standing_hours_from_bitmap(dr.standing_bits),
         dr.stress_avg,
         dr.spo2_avg);

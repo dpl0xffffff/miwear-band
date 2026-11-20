@@ -113,7 +113,7 @@ GArray *miwear_daily_details_decode(int version, const uint8_t *payload, size_t 
     while (p.pos < p.limit && !p.underflow) {
         const size_t before = p.pos;
         reset(&p);
-        MiwearDailyDetailsMinute m = {-1, -1, -1, -1, -1, -1, -1};
+        MiwearDailyDetailsMinute m = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
 
         int include_extra_entry = 0;
         if (next_group(&p, 16)) {
@@ -124,10 +124,24 @@ GArray *miwear_daily_details_decode(int version, const uint8_t *payload, size_t 
                 m.steps = get(&p, 2, 14);
             }
         }
-        if (next_group(&p, 8) && valid(&p, 1)) {
-            m.active_calories = get(&p, 2, 6);
+        /* activeTypeAndCalories: activeType bits 7..6, activityCalories bits 5..0. */
+        if (next_group(&p, 8)) {
+            if (valid(&p, 0)) {
+                m.active_type = get(&p, 0, 2);
+            }
+            if (valid(&p, 1)) {
+                m.active_calories = get(&p, 2, 6);
+            }
         }
-        (void)next_group(&p, 8);
+        /* activeStrengthAndSportType: activeStreng bits 7..5, sportType bits 4..0. */
+        if (next_group(&p, 8)) {
+            if (valid(&p, 0)) {
+                m.intensity = get(&p, 0, 3);
+            }
+            if (valid(&p, 1)) {
+                m.sport_type = get(&p, 3, 5);
+            }
+        }
         if (next_group(&p, 16) && valid(&p, 0)) {
             m.distance_cm = get(&p, 0, 16) * 100;
         }

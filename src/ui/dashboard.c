@@ -1241,7 +1241,6 @@ void mi_today_refresh(AppState *state) {
         return;
     }
     gchar *day_key = mi_day_key(mi_view_date(state));
-    miwear_refresh_activity_minutes_for_day(state, day_key);
     MiwearDayHealthAgg agg;
     miwear_health_aggregate_day(state, day_key, &agg);
     const gboolean live = live_tiles(state);
@@ -1249,16 +1248,17 @@ void mi_today_refresh(AppState *state) {
 
     /* Activity rings */
     const long steps = (live && state->has_live_steps) ? (long)state->live_steps : agg.steps;
-    const long cal = (live && state->has_live_calories) ? (long)state->live_calories : agg.calories;
+    /* The band's calories (totalactiveCalories) aren't in the live stats; only synced data has them. */
+    const long cal = agg.calories;
     const guint goal_active = state->goal_moving > 0 ? state->goal_moving : miwear_activity_goal_default();
-    const guint active = miwear_display_activity_minutes(state, day_key, live);
+    const guint active = miwear_count_activity_minutes_from_timeline(state, day_key);
     set_ring_value(dash->ring_steps, steps, GOAL_STEPS, "");
     set_ring_value(dash->ring_calories, cal, GOAL_CALORIES, " kcal");
     set_ring_value(dash->ring_active, active > 0 ? (long)active : -1, goal_active, " min");
     dash->ring_ratio[0] = steps > 0 ? (double)steps / GOAL_STEPS : 0;
     dash->ring_ratio[1] = cal > 0 ? (double)cal / GOAL_CALORIES : 0;
     dash->ring_ratio[2] = active > 0 ? (double)active / goal_active : 0;
-    gtk_widget_set_visible(dash->ring_badge, live && (state->has_live_steps || state->has_live_calories));
+    gtk_widget_set_visible(dash->ring_badge, live && state->has_live_steps);
 
     /* Heart rate */
     if (live && state->has_live_hr) {

@@ -31,6 +31,20 @@ static int exec_sql(sqlite3 *db, const char *sql) {
     return SQLITE_OK;
 }
 
+/* Adds @column to @table when an older database lacks it. */
+static void ensure_column(sqlite3 *db, const char *table, const char *column, const char *type) {
+    gchar *probe = g_strdup_printf("SELECT \"%s\" FROM \"%s\" LIMIT 0;", column, table);
+    sqlite3_stmt *st = NULL;
+    const gboolean present = sqlite3_prepare_v2(db, probe, -1, &st, NULL) == SQLITE_OK;
+    sqlite3_finalize(st);
+    g_free(probe);
+    if (!present) {
+        gchar *alter = g_strdup_printf("ALTER TABLE \"%s\" ADD COLUMN \"%s\" %s;", table, column, type);
+        (void)exec_sql(db, alter);
+        g_free(alter);
+    }
+}
+
 static gboolean ensure_schema(sqlite3 *db) {
     static const char *stmts[] = {
         "CREATE TABLE IF NOT EXISTS \"DEVICE\" ("
@@ -95,6 +109,7 @@ static gboolean ensure_schema(sqlite3 *db) {
         "\"vitalityIncreaseModerate\" INTEGER,"
         "\"vitalityIncreaseHigh\" INTEGER,"
         "\"vitalityCurrent\" INTEGER,"
+        "\"activeCalories\" INTEGER,"
         "PRIMARY KEY (\"timestamp\",\"deviceId\")"
         ");",
         "CREATE TABLE IF NOT EXISTS \"XIAOMI_SLEEP_TIME_SAMPLE\" ("
@@ -138,6 +153,7 @@ static gboolean ensure_schema(sqlite3 *db) {
             return FALSE;
         }
     }
+    ensure_column(db, "XIAOMI_DAILY_SUMMARY_SAMPLE", "activeCalories", "INTEGER");
     return TRUE;
 }
 
@@ -372,8 +388,9 @@ gboolean miwear_db_replace_daily_summary(const MiwearDailySummaryRow *row) {
                       "\"hrMin\",\"hrMinTs\",\"hrAvg\",\"stressAvg\",\"stressMax\",\"stressMin\",\"standing\","
                       "\"calories\",\"spo2Max\",\"spo2MaxTs\",\"spo2Min\",\"spo2MinTs\",\"spo2Avg\","
                       "\"trainingLoadDay\",\"trainingLoadWeek\",\"trainingLoadLevel\","
-                      "\"vitalityIncreaseLight\",\"vitalityIncreaseModerate\",\"vitalityIncreaseHigh\",\"vitalityCurrent\") "
-                      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);";
+                      "\"vitalityIncreaseLight\",\"vitalityIncreaseModerate\",\"vitalityIncreaseHigh\",\"vitalityCurrent\","
+                      "\"activeCalories\") "
+                      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);";
     if (sqlite3_prepare_v2(s_db, sql, -1, &st, NULL) != SQLITE_OK) {
         g_mutex_unlock(&s_lock);
         return FALSE;
@@ -413,6 +430,11 @@ gboolean miwear_db_replace_daily_summary(const MiwearDailySummaryRow *row) {
         for (int k = 22; k <= 28; k++) {
             sqlite3_bind_null(st, k);
         }
+    }
+    if (row->has_active_calories) {
+        sqlite3_bind_int(st, 29, row->active_calories);
+    } else {
+        sqlite3_bind_null(st, 29);
     }
 
     gboolean ok = sqlite3_step(st) == SQLITE_DONE;
@@ -873,7 +895,8 @@ gboolean miwear_db_foreach_daily_summary(MiwearDbDailySummaryRowFn fn, gpointer 
                       "\"hrMin\",\"hrMinTs\",\"hrAvg\",\"stressAvg\",\"stressMax\",\"stressMin\",\"standing\","
                       "\"calories\",\"spo2Max\",\"spo2MaxTs\",\"spo2Min\",\"spo2MinTs\",\"spo2Avg\","
                       "\"trainingLoadDay\",\"trainingLoadWeek\",\"trainingLoadLevel\","
-                      "\"vitalityIncreaseLight\",\"vitalityIncreaseModerate\",\"vitalityIncreaseHigh\",\"vitalityCurrent\" "
+                      "\"vitalityIncreaseLight\",\"vitalityIncreaseModerate\",\"vitalityIncreaseHigh\",\"vitalityCurrent\","
+                      "\"activeCalories\" "
                       "FROM \"XIAOMI_DAILY_SUMMARY_SAMPLE\" WHERE \"deviceId\" = ? ORDER BY \"timestamp\";";
     if (sqlite3_prepare_v2(s_db, sql, -1, &st, NULL) != SQLITE_OK) {
         g_mutex_unlock(&s_lock);
@@ -910,6 +933,10 @@ gboolean miwear_db_foreach_daily_summary(MiwearDbDailySummaryRowFn fn, gpointer 
             r.vitality_increase_moderate = sqlite3_column_int(st, 23);
             r.vitality_increase_high = sqlite3_column_int(st, 24);
             r.vitality_current = sqlite3_column_int(st, 25);
+        }
+        if (sqlite3_column_type(st, 26) != SQLITE_NULL) {
+            r.has_active_calories = TRUE;
+            r.active_calories = sqlite3_column_int(st, 26);
         }
         if (!fn(&r, user_data)) {
             break;

@@ -177,6 +177,7 @@ typedef struct {
     int stress;
     int sleep_stage;
     int sleep_source;
+    int intensity; /* per-minute activeStreng (3 moderate, 4 high, 5 intense); 0 when still or unknown */
 } RecordedSample;
 
 typedef struct {

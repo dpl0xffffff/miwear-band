@@ -40,10 +40,11 @@ static void dd_end(Buf *w) {
 
 /* v4 record with every group present: steps word, calories, unknown, distance, hr, energy,
  * unknown, spo2, stress, [extra byte], light, momentum. */
-static void dd_v4_record(Buf *w, int steps, gboolean extra, int cal, int dist_m, int hr, int spo2, int stress) {
+static void dd_v4_record_ex(Buf *w, int steps, gboolean extra, int type, int cal, int intensity, int sport,
+                            int dist_m, int hr, int spo2, int stress) {
     put16le(w, (extra ? 0x4000 : 0) | (steps & 0x3fff));
-    put8(w, cal & 0x3f);
-    put8(w, 0x00);
+    put8(w, ((type & 0x03) << 6) | (cal & 0x3f));
+    put8(w, ((intensity & 0x07) << 5) | (sport & 0x1f));
     put16le(w, dist_m);
     put8(w, hr);
     put8(w, 0x11);
@@ -55,6 +56,10 @@ static void dd_v4_record(Buf *w, int steps, gboolean extra, int cal, int dist_m,
     }
     put16le(w, 0x1234);
     put16le(w, 0x5678);
+}
+
+static void dd_v4_record(Buf *w, int steps, gboolean extra, int cal, int dist_m, int hr, int spo2, int stress) {
+    dd_v4_record_ex(w, steps, extra, 0, cal, 0, 0, dist_m, hr, spo2, stress);
 }
 
 /* 11 groups, all present with all fields valid; 12th nibble unused. */
@@ -82,6 +87,34 @@ static void test_daily_details_v4(void) {
     g_assert_cmpint(r[1].stress, ==, -1);
     g_assert_cmpint(r[2].heart_rate, ==, 58); /* still aligned after the extra byte */
     g_assert_cmpint(r[2].stress, ==, 12);
+    g_array_unref(m);
+    g_byte_array_unref(w.b);
+}
+
+/* activeType / activityCalories share a byte, and so do activeStreng / sportType. */
+static void test_daily_details_intensity(void) {
+    Buf w = dd_begin(v4_header_all, sizeof(v4_header_all));
+    dd_v4_record_ex(&w, 110, FALSE, 2 /* walk */, 63, 3 /* moderate */, 0, 80, 95, 98, 20);
+    dd_v4_record_ex(&w, 160, FALSE, 3 /* run */, 9, 5 /* intense */, 1 /* outdoor run */, 120, 150, 97, 40);
+    dd_v4_record_ex(&w, 0, FALSE, 1 /* still */, 1, 7 /* unknown */, 31, 0, 60, 99, 10);
+    dd_end(&w);
+
+    GArray *m = miwear_daily_details_decode(4, w.b->data, w.b->len, NULL);
+    g_assert_nonnull(m);
+    g_assert_cmpuint(m->len, ==, 3);
+    const MiwearDailyDetailsMinute *r = (const MiwearDailyDetailsMinute *)m->data;
+    g_assert_cmpint(r[0].active_type, ==, 2);
+    g_assert_cmpint(r[0].active_calories, ==, 63);
+    g_assert_cmpint(r[0].intensity, ==, 3);
+    g_assert_cmpint(r[0].sport_type, ==, 0);
+    g_assert_cmpint(r[1].active_type, ==, 3);
+    g_assert_cmpint(r[1].active_calories, ==, 9);
+    g_assert_cmpint(r[1].intensity, ==, 5);
+    g_assert_cmpint(r[1].sport_type, ==, 1);
+    g_assert_cmpint(r[1].heart_rate, ==, 150);
+    g_assert_cmpint(r[2].active_type, ==, 1);
+    g_assert_cmpint(r[2].intensity, ==, 7);
+    g_assert_cmpint(r[2].sport_type, ==, 31);
     g_array_unref(m);
     g_byte_array_unref(w.b);
 }
@@ -235,6 +268,7 @@ static void test_sleep_stage_codes(void) {
 int main(int argc, char **argv) {
     g_test_init(&argc, &argv, NULL);
     g_test_add_func("/daily-details/v4", test_daily_details_v4);
+    g_test_add_func("/daily-details/intensity", test_daily_details_intensity);
     g_test_add_func("/daily-details/absent-groups", test_daily_details_absent_groups);
     g_test_add_func("/daily-details/trailing-bytes", test_daily_details_trailing_bytes_keep_layout);
     g_test_add_func("/daily-details/bad-input", test_daily_details_bad_input);

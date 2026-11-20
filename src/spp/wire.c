@@ -137,6 +137,25 @@ typedef struct {
     uint8_t watch_hmac[32];
     gboolean has_watch_nonce;
 } ParsedAuthCommand;
+/* Appends " <label>.f<tag>=<hex>" for each field the .proto schema doesn't define. Varints are
+ * also shown decoded. */
+static void append_unknown_fields(GString *s, const char *label, const ProtobufCMessage *m) {
+    for (unsigned i = 0; i < m->n_unknown_fields; i++) {
+        const ProtobufCMessageUnknownField *f = &m->unknown_fields[i];
+        g_string_append_printf(s, " %s.f%u=", label, f->tag);
+        for (size_t j = 0; j < f->len; j++) {
+            g_string_append_printf(s, "%02x", f->data[j]);
+        }
+        if (f->wire_type == PROTOBUF_C_WIRE_TYPE_VARINT) {
+            guint64 v = 0;
+            for (size_t j = 0; j < f->len && j < 10; j++) {
+                v |= (guint64)(f->data[j] & 0x7f) << (7 * j);
+            }
+            g_string_append_printf(s, "(%" G_GUINT64_FORMAT ")", v);
+        }
+    }
+}
+
 static void append_friendly_command_log(AppState *state, const Xiaomi__Command *cmd) {
     GString *s = g_string_new("Friendly ");
     g_string_append_printf(s, "type=%u", cmd->type);
@@ -195,18 +214,22 @@ static void append_friendly_command_log(AppState *state, const Xiaomi__Command *
         g_string_append_printf(s, "Realtime stats");
         if (rt->has_steps) g_string_append_printf(s, " steps=%u", rt->steps);
         if (rt->has_heartrate) g_string_append_printf(s, " hr=%u", rt->heartrate);
-        if (rt->has_calories) g_string_append_printf(s, " calories=%u", rt->calories);
-        if (rt->has_unknown3 || rt->has_unknown5) {
-            const guint activity_min = miwear_activity_time_from_realtime(
-                rt->has_unknown3, rt->unknown3, rt->has_unknown5, rt->unknown5,
-                rt->has_steps, rt->steps);
-            if (activity_min > 0) {
-                g_string_append_printf(s, " activity=%u", activity_min);
-            }
-        }
+        /* calories = totalCalories (not the band's active calories); distance in metres. */
+        if (rt->has_calories) g_string_append_printf(s, " totalCalories=%u", rt->calories);
+        if (rt->has_unknown3) g_string_append_printf(s, " distance_m=%u", rt->unknown3);
         if (rt->has_unknown5) g_string_append_printf(s, " rt5=%u", rt->unknown5);
-        if (rt->has_unknown3) g_string_append_printf(s, " rt3=%u", rt->unknown3);
         if (rt->has_standinghours) g_string_append_printf(s, " standing=%u", rt->standinghours);
+        /* Raw bytes, for working out what the band's own calories / active minutes are. */
+        append_unknown_fields(s, "rt", &rt->base);
+        append_unknown_fields(s, "health", &cmd->health->base);
+        const size_t raw_len = xiaomi__real_time_stats__get_packed_size(rt);
+        uint8_t *raw = g_malloc(raw_len > 0 ? raw_len : 1);
+        xiaomi__real_time_stats__pack(rt, raw);
+        g_string_append(s, " raw=");
+        for (size_t i = 0; i < raw_len; i++) {
+            g_string_append_printf(s, "%02x", raw[i]);
+        }
+        g_free(raw);
     } else if (cmd->type == 8 && cmd->has_subtype &&
                (cmd->subtype == 1 || cmd->subtype == 2) &&
                cmd->health && cmd->health->has_activityrequestfileids) {
@@ -247,10 +270,8 @@ static void log_decoded_command_proto(AppState *state, const uint8_t *plain, siz
 
     if (cmd->health && cmd->health->realtimestats) {
         const Xiaomi__RealTimeStats *rt = cmd->health->realtimestats;
-        const guint activity_min = miwear_activity_time_from_realtime(
-            rt->has_unknown3, rt->unknown3, rt->has_unknown5, rt->unknown5,
-            rt->has_steps, rt->steps);
-        const gboolean has_moving = activity_min > 0;
+        /* The live stats carry neither the band's active calories nor its active minutes, so
+         * only steps, heart rate and standing hours are used from them. */
         schedule_metrics_update(
             state,
             rt->has_heartrate, rt->heartrate,
@@ -258,7 +279,7 @@ static void log_decoded_command_proto(AppState *state, const uint8_t *plain, siz
             rt->has_calories, rt->calories,
             rt->has_standinghours, rt->standinghours,
             FALSE, 0,
-            has_moving, activity_min,
+            FALSE, 0,
             NULL, NULL
         );
     }

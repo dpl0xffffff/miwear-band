@@ -14,6 +14,9 @@ typedef struct {
     int energy;
     int spo2;
     int stress;
+    int active_type; /* 0 unknown, 1 still, 2 walking, 3 running; -1 when not valid */
+    int intensity;   /* 0 still, 1 very light, 2 light, 3 moderate, 4 high, 5 intense, 7 unknown; -1 when not valid */
+    int sport_type;  /* 0 none, else a workout type; -1 when not valid */
 } MiwearDailyDetailsMinute;
 
 /* Header size (bytes after the 8-byte file id) for a daily-details file version, 0 if unknown. */

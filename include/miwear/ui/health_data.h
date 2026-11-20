@@ -58,13 +58,8 @@ guint miwear_standing_display_value(int standing_field);
 void miwear_format_standing_value(guint value, gchar *buf, gsize buf_len);
 void miwear_format_activity_minutes(guint minutes, guint goal_minutes, gchar *buf, gsize buf_len);
 guint miwear_activity_goal_default(void);
-guint miwear_activity_time_from_realtime(gboolean has_unknown3, guint unknown3,
-                                         gboolean has_unknown5, guint unknown5,
-                                         gboolean has_steps, guint steps);
-guint miwear_live_activity_minutes(const AppState *state);
-guint miwear_display_activity_minutes(const AppState *state, const gchar *day_key, gboolean prefer_live);
+/* Minutes of @day_key at moderate or higher intensity, from synced per-minute data. */
 guint miwear_count_activity_minutes_from_timeline(AppState *state, const gchar *day_key);
-void miwear_refresh_activity_minutes_for_day(AppState *state, const gchar *day_key);
 guint miwear_standing_hours_from_bitmap(int standing_raw);
 guint miwear_count_moderate_activity_minutes_json(JsonNode *decoded);
 float miwear_profile_bmi_kg_m2(float weight_kg, guint height_cm);

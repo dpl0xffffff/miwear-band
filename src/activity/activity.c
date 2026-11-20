@@ -98,6 +98,68 @@ static void log_sleep_samples_summary(AppState *state, const char *tag, const GA
     g_free(line);
 }
 
+typedef struct {
+    gint64 from, to;
+    guint minutes, steps, kcal, kcal_minutes;
+    guint intensity[9]; /* 0..7, [8] = not stored (older build or not valid) */
+    guint kcal_by_intensity[9];
+    guint type[5];      /* 0..3, [4] = not stored */
+} DayActivityTotals;
+
+static gboolean day_totals_row(const MiwearXiaomiActivityRow *r, gpointer user_data) {
+    DayActivityTotals *t = user_data;
+    if (r->timestamp_sec < t->from || r->timestamp_sec >= t->to) {
+        return TRUE;
+    }
+    t->minutes++;
+    if (r->steps > 0) {
+        t->steps += (guint)r->steps;
+    }
+    const int lvl = (r->raw_intensity >= 0 && r->raw_intensity <= 7) ? r->raw_intensity : 8;
+    t->intensity[lvl]++;
+    t->type[(r->raw_kind >= 0 && r->raw_kind <= 3) ? r->raw_kind : 4]++;
+    if (r->active_calories > 0) {
+        t->kcal += (guint)r->active_calories;
+        t->kcal_minutes++;
+        t->kcal_by_intensity[lvl] += (guint)r->active_calories;
+    }
+    return TRUE;
+}
+
+/* Whole-day sums over every stored minute of the local day that contains @any_sec. The band only
+ * sends minutes since the last acked file, so one file's sums never cover the day. */
+static void log_day_activity_totals(AppState *state, gint64 any_sec) {
+    GDateTime *t = g_date_time_new_from_unix_local(any_sec);
+    if (t == NULL) {
+        return;
+    }
+    GDateTime *day = g_date_time_new_local(g_date_time_get_year(t), g_date_time_get_month(t),
+                                           g_date_time_get_day_of_month(t), 0, 0, 0);
+    GDateTime *next = g_date_time_add_days(day, 1);
+    DayActivityTotals tot = {.from = g_date_time_to_unix(day), .to = g_date_time_to_unix(next)};
+    gchar *day_txt = g_date_time_format(day, "%Y-%m-%d");
+    g_date_time_unref(next);
+    g_date_time_unref(day);
+    g_date_time_unref(t);
+    if (miwear_db_foreach_xiaomi_activity(day_totals_row, &tot)) {
+        gchar *line = g_strdup_printf(
+            "Day activity totals %s: minutes=%u steps_sum=%u kcal_sum=%u kcal_minutes=%u "
+            "intensity{0=%u 1=%u 2=%u 3=%u 4=%u 5=%u 6=%u 7=%u n/a=%u} "
+            "kcal_by_intensity{0=%u 1=%u 2=%u 3=%u 4=%u 5=%u 6=%u 7=%u n/a=%u} "
+            "type{unknown=%u still=%u walk=%u run=%u n/a=%u}",
+            day_txt, tot.minutes, tot.steps, tot.kcal, tot.kcal_minutes,
+            tot.intensity[0], tot.intensity[1], tot.intensity[2], tot.intensity[3], tot.intensity[4],
+            tot.intensity[5], tot.intensity[6], tot.intensity[7], tot.intensity[8],
+            tot.kcal_by_intensity[0], tot.kcal_by_intensity[1], tot.kcal_by_intensity[2],
+            tot.kcal_by_intensity[3], tot.kcal_by_intensity[4], tot.kcal_by_intensity[5],
+            tot.kcal_by_intensity[6], tot.kcal_by_intensity[7], tot.kcal_by_intensity[8],
+            tot.type[0], tot.type[1], tot.type[2], tot.type[3], tot.type[4]);
+        append_log(state, line);
+        g_free(line);
+    }
+    g_free(day_txt);
+}
+
 static void parse_daily_details_for_log(AppState *state,
                                         uint32_t ts,
                                         int version,
@@ -119,8 +181,16 @@ static void parse_daily_details_for_log(AppState *state,
     uint32_t hr_max = 0;
     uint32_t step_points = 0;
     uint32_t distance_points = 0;
+    uint32_t kcal_sum = 0, steps_sum = 0, kcal_minutes = 0;
+    uint32_t intensity_n[9] = {0}; /* 0..7, [8] = not valid */
+    uint32_t type_n[5] = {0};      /* 0..3, [4] = not valid */
+    uint32_t sport_minutes = 0;
+    uint32_t kcal_by_intensity[9] = {0};
     GString *hr_track = g_string_new("");
     GArray *samples = g_array_new(FALSE, FALSE, sizeof(RecordedSample));
+    /* Per sample: intensity << 8 | activity type, each 0xff when not valid. Stored as the
+     * row's rawIntensity / rawKind. */
+    GArray *raw_levels = g_array_new(FALSE, FALSE, sizeof(int));
     for (guint i = 0; i < minutes_arr->len; i++) {
         const MiwearDailyDetailsMinute *m = &g_array_index(minutes_arr, MiwearDailyDetailsMinute, i);
         minutes++;
@@ -135,6 +205,18 @@ static void parse_daily_details_for_log(AppState *state,
         sample.sleep_stage = -1;
         if (sample.steps > 0) {
             step_points++;
+            steps_sum += (uint32_t)sample.steps;
+        }
+        const int lvl = (m->intensity >= 0 && m->intensity <= 7) ? m->intensity : 8;
+        intensity_n[lvl]++;
+        type_n[(m->active_type >= 0 && m->active_type <= 3) ? m->active_type : 4]++;
+        if (m->sport_type > 0) {
+            sport_minutes++;
+        }
+        if (m->active_calories > 0) {
+            kcal_sum += (uint32_t)m->active_calories;
+            kcal_minutes++;
+            kcal_by_intensity[lvl] += (uint32_t)m->active_calories;
         }
         if (sample.distance_cm > 0) {
             distance_points++;
@@ -151,6 +233,8 @@ static void parse_daily_details_for_log(AppState *state,
             }
         }
         g_array_append_val(samples, sample);
+        const int packed = ((m->intensity >= 0 ? m->intensity : 0xff) << 8) | (m->active_type >= 0 ? m->active_type : 0xff);
+        g_array_append_val(raw_levels, packed);
     }
     g_array_unref(minutes_arr);
 
@@ -162,6 +246,22 @@ static void parse_daily_details_for_log(AppState *state,
                                   hr_count ? hr_min : 0,
                                   hr_count ? (hr_sum / hr_count) : 0,
                                   hr_count ? hr_max : 0);
+    append_log(state, line);
+    g_free(line);
+
+    /* For matching the band's own calories / active minutes against the per-minute data. */
+    line = g_strdup_printf(
+        "Daily detail %s activity: steps_sum=%u kcal_sum=%u kcal_minutes=%u "
+        "intensity{0=%u 1=%u 2=%u 3=%u 4=%u 5=%u 6=%u 7=%u n/a=%u} "
+        "kcal_by_intensity{0=%u 1=%u 2=%u 3=%u 4=%u 5=%u 6=%u 7=%u n/a=%u} "
+        "type{unknown=%u still=%u walk=%u run=%u n/a=%u} sport_minutes=%u",
+        ts_txt, steps_sum, kcal_sum, kcal_minutes,
+        intensity_n[0], intensity_n[1], intensity_n[2], intensity_n[3], intensity_n[4],
+        intensity_n[5], intensity_n[6], intensity_n[7], intensity_n[8],
+        kcal_by_intensity[0], kcal_by_intensity[1], kcal_by_intensity[2], kcal_by_intensity[3],
+        kcal_by_intensity[4], kcal_by_intensity[5], kcal_by_intensity[6], kcal_by_intensity[7],
+        kcal_by_intensity[8],
+        type_n[0], type_n[1], type_n[2], type_n[3], type_n[4], sport_minutes);
     append_log(state, line);
     g_free(line);
 
@@ -205,8 +305,9 @@ static void parse_daily_details_for_log(AppState *state,
                     /* Mirror DailyDetailsParser + XiaomiActivitySample defaults (ActivitySample.NOT_MEASURED = -1). */
                     MiwearXiaomiActivityRow r = {0};
                     r.timestamp_sec = (int32_t)unix_sec;
-                    r.raw_intensity = -1;
-                    r.raw_kind = -1;
+                    const int packed = g_array_index(raw_levels, int, i);
+                    r.raw_intensity = (packed >> 8) != 0xff ? (packed >> 8) : -1;
+                    r.raw_kind = (packed & 0xff) != 0xff ? (packed & 0xff) : -1;
                     r.heart_rate = src->heart_rate;
                     r.stress = src->stress;
                     r.spo2 = src->spo2;
@@ -256,6 +357,10 @@ static void parse_daily_details_for_log(AppState *state,
                     g_free(stress_txt);
                     miwear_dashboard_refresh(state);
                 }
+                if (act_rows->len > 0) {
+                    log_day_activity_totals(state,
+                                            g_array_index(act_rows, MiwearXiaomiActivityRow, act_rows->len - 1).timestamp_sec);
+                }
                 g_array_unref(act_rows);
                 g_date_time_unref(start_min);
             }
@@ -271,6 +376,7 @@ static void parse_daily_details_for_log(AppState *state,
     g_free(ts_txt);
     g_string_free(hr_track, TRUE);
     g_array_unref(samples);
+    g_array_unref(raw_levels);
 }
 
 static void parse_daily_summary_for_log(AppState *state,
@@ -293,7 +399,9 @@ static void parse_daily_summary_for_log(AppState *state,
 
     size_t off = (size_t)(8 + header_size);
     const uint32_t steps = miwear_read_u32_le(payload + off); off += 4;
-    off += 3; /* unknown bytes */
+    /* Mi Fitness daily_activity_report: totalactiveCalories (u16), then current heart rate (u8). */
+    const uint16_t active_calories = miwear_read_u16_le(payload + off); off += 2;
+    const uint8_t hr_now = payload[off++];
     const uint8_t hr_rest = payload[off++];
     const uint8_t hr_max = payload[off++];
     const uint32_t hr_max_ts = miwear_read_u32_le(payload + off); off += 4;
@@ -305,8 +413,9 @@ static void parse_daily_summary_for_log(AppState *state,
     const uint8_t stress_min = payload[off++];
     const uint32_t standing_bits = (uint32_t)payload[off] | ((uint32_t)payload[off + 1] << 8) | ((uint32_t)payload[off + 2] << 16);
     off += 3;
-    const uint16_t calories = miwear_read_u16_le(payload + off); off += 2;
-    off += 3;
+    const uint16_t calories = miwear_read_u16_le(payload + off); off += 2; /* totalCalories */
+    const uint16_t recovery_time = miwear_read_u16_le(payload + off); off += 2; /* residualrecoverytime */
+    off += 1; /* current SpO2 */
     const uint8_t spo2_max = payload[off++];
     const uint32_t spo2_max_ts = miwear_read_u32_le(payload + off); off += 4;
     const uint8_t spo2_min = payload[off++];
@@ -334,11 +443,16 @@ static void parse_daily_summary_for_log(AppState *state,
     gchar *hr_min_txt = fmt_unix_ts(hr_min_ts);
     const guint standing_metric = miwear_standing_display_value((int)standing_bits);
     gchar *line = g_strdup_printf(
-        "Daily summary %s: steps=%u calories=%u HR(rest/avg/min/max)=%u/%u/%u/%u "
+        "Daily summary %s (v%d): steps=%u totalCalories=%u totalactiveCalories=%u hr_now=%u recovery=%u "
+        "HR(rest/avg/min/max)=%u/%u/%u/%u "
         "stress avg/min/max=%u/%u/%u (day aggregate, not last manual reading) standing=%u",
         ts_txt,
+        version,
         steps,
         calories,
+        active_calories,
+        hr_now,
+        recovery_time,
         hr_rest,
         hr_avg,
         hr_min,
@@ -360,6 +474,8 @@ static void parse_daily_summary_for_log(AppState *state,
     dr.timestamp_ms = (int64_t)ts * 1000LL;
     dr.timezone = (int)tz;
     dr.steps = (int)steps;
+    dr.has_active_calories = TRUE;
+    dr.active_calories = (int)active_calories;
     dr.hr_resting = (int)hr_rest;
     dr.hr_max = (int)hr_max;
     dr.hr_max_ts_sec = (int32_t)hr_max_ts;

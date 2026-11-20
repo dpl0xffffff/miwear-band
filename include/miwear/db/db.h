@@ -36,7 +36,9 @@ typedef struct {
     int stress_max;
     int stress_min;
     int standing_bits;
-    int calories;
+    int calories;            /* totalCalories */
+    gboolean has_active_calories;
+    int active_calories;     /* totalactiveCalories: the value the band shows */
     int spo2_max;
     int32_t spo2_max_ts_sec;
     int spo2_min;

@@ -584,6 +584,7 @@ static gboolean ui_recorded_store_cb(gpointer user_data) {
         if (src->stress >= 0) dst->stress = src->stress;
         if (src->sleep_stage >= 0) dst->sleep_stage = src->sleep_stage;
         if (src->sleep_source > 0) dst->sleep_source = 1;
+        if (src->intensity > 0) dst->intensity = src->intensity;
     }
     g_mutex_unlock(&state->recorded_lock);
 
@@ -699,6 +700,7 @@ void recorded_merge_xiaomi_activity_rows(AppState *state, const MiwearXiaomiActi
         rs.stress = r->stress;
         rs.sleep_stage = -1;
         rs.sleep_source = 0;
+        rs.intensity = r->raw_intensity > 0 && r->raw_intensity <= 7 ? r->raw_intensity : 0;
         g_array_append_val(bucket, rs);
     }
     miwear_local_day_cursor_clear(&cursor);
@@ -986,6 +988,9 @@ static gboolean rebuild_activity_cb(const MiwearXiaomiActivityRow *r, gpointer u
     }
     if (r->stress >= 0) {
         dst->stress = r->stress;
+    }
+    if (r->raw_intensity > 0 && r->raw_intensity <= 7) {
+        dst->intensity = r->raw_intensity;
     }
     return TRUE;
 }
