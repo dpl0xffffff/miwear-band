@@ -5,6 +5,7 @@
 #include "miwear/weight_log.h"
 #include "miwear/spp/fitness_sync.h"
 #include "miwear/notifications/notifications.h"
+#include "miwear/spp/workout_gps.h"
 #include "miwear/spp/weather.h"
 #include "miwear/spp/wire.h"
 #include "miwear/spp/wire_internal.h"
@@ -289,6 +290,9 @@ static void log_decoded_command_proto(AppState *state, const uint8_t *plain, siz
     }
     if (cmd->type == 7) {
         miwear_notifications_handle_command(state, cmd);
+    }
+    if (cmd->type == 8) {
+        miwear_workout_gps_handle_command(state, cmd);
     }
 
     if (cmd->system && cmd->system->power && cmd->system->power->battery) {
@@ -2277,6 +2281,7 @@ void disconnect_socket(AppState *state) {
     state->has_live_calories = FALSE;
     state->has_live_hr = FALSE;
     miwear_notifications_on_disconnect(state);
+    miwear_workout_gps_stop(state, "band disconnected");
 }
 
 typedef struct {

@@ -12,6 +12,7 @@ pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0 gio-2.0)
 pkg_check_modules(PROTOBUF_C REQUIRED IMPORTED_TARGET libprotobuf-c)
 pkg_check_modules(SQLITE3 REQUIRED IMPORTED_TARGET sqlite3)
 pkg_check_modules(JSON REQUIRED IMPORTED_TARGET json-glib-1.0)
+pkg_check_modules(GEOCLUE REQUIRED IMPORTED_TARGET libgeoclue-2.0)
 find_library(BLUETOOTH_LIB bluetooth REQUIRED)
 
 set(MIWEAR_SCHEMA_EXTRACT_DIR "${CMAKE_BINARY_DIR}/mi-fitness-schemas")
@@ -61,6 +62,7 @@ add_executable(miwear-band
     src/sleep/mi_sleep_duration.c
     src/sleep/mi_sleep_packets.c
     src/sleep/mi_sleep_pipeline.c
+    src/spp/workout_gps.c
     src/sleep/mi_sleep_external.c
     src/activity/mi_fitness_sport_report.c
     src/activity/mi_fitness_report_tables.c
@@ -87,6 +89,7 @@ target_link_libraries(miwear-band PRIVATE
     PkgConfig::ADW
     PkgConfig::GLIB
     PkgConfig::JSON
+    PkgConfig::GEOCLUE
     PkgConfig::PROTOBUF_C
     PkgConfig::SQLITE3
     ${BLUETOOTH_LIB}

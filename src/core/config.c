@@ -7,6 +7,7 @@
 static const char *CONFIG_GROUP = "device";
 static const char *WEATHER_GROUP = "weather";
 static const char *NOTIF_GROUP = "notifications";
+static const char *LOCATION_GROUP = "location";
 static const char *PROFILE_GROUP = "profile";
 
 const char *miwear_config_default_path(void) {
@@ -78,6 +79,10 @@ gboolean miwear_config_load(AppState *state, const char *path) {
     }
     state->notification_next_id = 1;
 
+    state->share_location_with_band =
+        !g_key_file_has_key(kf, LOCATION_GROUP, "share_with_band", NULL) ||
+        g_key_file_get_boolean(kf, LOCATION_GROUP, "share_with_band", NULL);
+
     state->profile_height_cm = (guint)g_key_file_get_integer(kf, PROFILE_GROUP, "height_cm", NULL);
     state->profile_weight_kg = (float)g_key_file_get_double(kf, PROFILE_GROUP, "weight_kg", NULL);
     state->profile_birthday_yyyymmdd = (guint)g_key_file_get_integer(kf, PROFILE_GROUP, "birthday", NULL);
@@ -131,6 +136,7 @@ gboolean miwear_config_save(const AppState *state, const char *path) {
     }
     g_key_file_set_boolean(kf, NOTIF_GROUP, "enabled", state->notifications_enabled);
     g_key_file_set_integer(kf, NOTIF_GROUP, "min_interval_ms", (gint)state->notifications_min_interval_ms);
+    g_key_file_set_boolean(kf, LOCATION_GROUP, "share_with_band", state->share_location_with_band);
 
     if (state->profile_height_cm > 0) {
         g_key_file_set_integer(kf, PROFILE_GROUP, "height_cm", (gint)state->profile_height_cm);

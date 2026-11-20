@@ -153,6 +153,7 @@ typedef struct {
     guint find_band_stop_source;
 
     gboolean notifications_enabled;
+    gboolean share_location_with_band; /* send this computer's location during outdoor workouts */
     guint notifications_min_interval_ms;
     guint32 notification_next_id;
     gint64 notification_last_sent_ms;

@@ -1,9 +1,11 @@
 #include "ui_private.h"
 
+#include "miwear/config.h"
 #include "miwear/find_phone.h"
 #include "miwear/notifications/notifications.h"
 #include "miwear/spp/fitness_sync.h"
 #include "miwear/spp/weather.h"
+#include "miwear/spp/workout_gps.h"
 #include "miwear/spp/wire.h"
 #include "miwear/spp/wire_internal.h"
 
@@ -53,6 +55,20 @@ static void on_notif_toggled(GObject *obj, GParamSpec *pspec, gpointer user_data
     const gboolean on = adw_switch_row_get_active(ADW_SWITCH_ROW(obj));
     if (on != state->notifications_enabled) {
         miwear_notifications_set_enabled(state, on);
+    }
+}
+
+static void on_share_location_toggled(GObject *obj, GParamSpec *pspec, gpointer user_data) {
+    (void)pspec;
+    AppState *state = user_data;
+    const gboolean on = adw_switch_row_get_active(ADW_SWITCH_ROW(obj));
+    if (on == state->share_location_with_band) {
+        return;
+    }
+    state->share_location_with_band = on;
+    (void)miwear_config_save(state, NULL);
+    if (!on) {
+        miwear_workout_gps_stop(state, "location sharing turned off");
     }
 }
 
@@ -175,6 +191,19 @@ GtkWidget *mi_device_page_new(AppState *state, MiwearDashboardUi *dash) {
     dash->dev_notif_test = row_button(row, "Send", G_CALLBACK(on_notif_test), state);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(notif), row);
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(notif));
+
+    /* Location */
+    GtkWidget *location = adw_preferences_group_new();
+    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(location), "Location");
+    GtkWidget *share = adw_switch_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(share), "Share Location for Workouts");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(share),
+                                "When an outdoor workout starts, send this device's location to the band, "
+                                "like the phone app does");
+    adw_switch_row_set_active(ADW_SWITCH_ROW(share), state->share_location_with_band);
+    g_signal_connect(share, "notify::active", G_CALLBACK(on_share_location_toggled), state);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(location), share);
+    adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(location));
 
     /* Profile (read-only; edited in config.ini) */
     GtkWidget *profile = adw_preferences_group_new();
