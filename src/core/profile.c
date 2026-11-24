@@ -5,10 +5,6 @@ guint miwear_gender_config_to_proto(guint config_gender) {
     return config_gender == MIWEAR_GENDER_FEMALE ? 2u : 1u;
 }
 
-guint miwear_gender_proto_to_config(guint proto_gender) {
-    return proto_gender == 2u ? MIWEAR_GENDER_FEMALE : MIWEAR_GENDER_MALE;
-}
-
 gboolean miwear_profile_shows_cycles(guint config_gender) {
     return config_gender == MIWEAR_GENDER_FEMALE;
 }

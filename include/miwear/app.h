@@ -111,12 +111,6 @@ typedef struct {
     /* Wake-day keys → duration totals from XIAOMI_SLEEP_TIME_SAMPLE (when synced). */
     GHashTable *sleep_duration_by_day;
 
-    guint live_standing;
-    gboolean has_live_standing;
-    guint live_moving;
-    gboolean has_live_moving;
-    guint activity_minutes_today;
-    gboolean has_activity_minutes_today;
     guint goal_moving;
     /* User profile (config.ini [profile] + sent to band as UserInfo). */
     guint profile_height_cm;
@@ -129,18 +123,11 @@ typedef struct {
     guint profile_last_period_yyyymmdd;
     GArray *weight_log;
     gboolean weight_log_loaded;
-    int wellness_bp_systolic;
-    int wellness_bp_diastolic;
-    gboolean has_wellness_bp;
+    /* Real-time stats from the band while connected. */
     guint live_steps;
-    guint live_calories;
     guint live_hr;
     gboolean has_live_steps;
-    gboolean has_live_calories;
     gboolean has_live_hr;
-    gchar *live_spo2_text;
-    gchar *live_stress_text;
-    int32_t live_stress_ts_sec;
 
     gchar *weather_location_name;
     double weather_latitude;
@@ -196,16 +183,16 @@ void switch_to_dashboard(AppState *state);
 void switch_to_pairing(AppState *state);
 /* Safe from background threads (SPP reader); posts work to the GTK main loop. */
 void schedule_switch_to_dashboard(AppState *state);
-void schedule_switch_to_pairing(AppState *state);
-void schedule_metrics_update(AppState *state,
-                             gboolean has_hr, guint hr,
-                             gboolean has_steps, guint steps,
-                             gboolean has_calories, guint calories,
-                             gboolean has_standing, guint standing,
-                             gboolean has_battery, guint battery,
-                             gboolean has_moving, guint moving,
-                             const gchar *spo2_text,
-                             const gchar *stress_text);
+/* Values the band pushed while connected; unset fields are left as they were. Main thread. */
+typedef struct {
+    gboolean has_hr;
+    guint hr;
+    gboolean has_steps;
+    guint steps;
+    gboolean has_battery;
+    guint battery;
+} MiwearLiveMetrics;
+void miwear_live_metrics_update(AppState *state, const MiwearLiveMetrics *m);
 void schedule_state_update(AppState *state, const gchar *charging, const gchar *wearing, const gchar *sleep);
 void recorded_store_samples_for_day_key(AppState *state, const gchar *day_key, const RecordedSample *samples, size_t count);
 /* Day-bucketed batch of per-minute sleep samples for the recorded timelines. */

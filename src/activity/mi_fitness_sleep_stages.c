@@ -162,32 +162,3 @@ void mi_fitness_apply_sleep_stages_from_feature(AppState *state,
     g_array_unref(stage_rows);
 }
 
-void mi_fitness_apply_sleep_stages_from_schema_body(AppState *state,
-                                                    JsonObject *body,
-                                                    const uint8_t *full_payload,
-                                                    size_t full_payload_len,
-                                                    uint32_t bed_sec,
-                                                    uint32_t wake_sec) {
-    if (state == NULL || body == NULL || !json_object_has_member(body, "featureData")) {
-        return;
-    }
-    const char *b64 = json_object_get_string_member(body, "featureData");
-    if (b64 == NULL || b64[0] == '\0') {
-        return;
-    }
-    gsize raw_len = 0;
-    guchar *raw = g_base64_decode(b64, &raw_len);
-    if (raw == NULL || raw_len == 0) {
-        g_free(raw);
-        return;
-    }
-    mi_fitness_apply_sleep_stages_from_feature(state,
-                                               full_payload,
-                                               full_payload_len,
-                                               0,
-                                               raw,
-                                               raw_len,
-                                               bed_sec,
-                                               wake_sec);
-    g_free(raw);
-}

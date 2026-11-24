@@ -1,6 +1,7 @@
 #include "miwear/ui/health_data.h"
 
 #include "miwear/db/db.h"
+#include "miwear/ui/dashboard.h"
 
 #include <json-glib/json-glib.h>
 #include <string.h>
@@ -103,127 +104,12 @@ void miwear_health_aggregate_day(AppState *state, const gchar *day_key, MiwearDa
     g_mutex_unlock(&state->recorded_lock);
 }
 
-int miwear_health_sleep_total_minutes(const MiwearDayHealthAgg *agg) {
-    if (agg == NULL || !agg->has_sleep) {
-        return 0;
-    }
-    /* Mi Fitness / band “sleep time” = asleep (deep+light+REM), not awake-in-bed minutes. */
-    if (agg->sleep_total_band > 0) {
-        return agg->sleep_total_band;
-    }
-    const int asleep = agg->sleep_deep + agg->sleep_light + agg->sleep_rem + agg->sleep_other;
-    if (asleep > 0) {
-        return asleep;
-    }
-    return agg->sleep_deep + agg->sleep_light + agg->sleep_rem + agg->sleep_awake + agg->sleep_other;
-}
-
 gboolean miwear_spo2_value_valid(int spo2) {
     return spo2 > 0 && spo2 <= 100;
 }
 
 gboolean miwear_stress_value_valid(int stress) {
     return stress > 0 && stress < 255;
-}
-
-int miwear_latest_stress_for_day(AppState *state, const gchar *day_key) {
-    if (state == NULL || day_key == NULL) {
-        return -1;
-    }
-    int latest = -1;
-    guint latest_minute = 0;
-    gboolean have = FALSE;
-    g_mutex_lock(&state->recorded_lock);
-    GArray *arr =
-        (state->recorded_days != NULL) ? g_hash_table_lookup(state->recorded_days, day_key) : NULL;
-    if (arr != NULL) {
-        for (guint i = 0; i < arr->len; i++) {
-            const RecordedSample *s = &g_array_index(arr, RecordedSample, i);
-            if (!miwear_stress_value_valid(s->stress)) {
-                continue;
-            }
-            if (!have || s->minute_of_day >= latest_minute) {
-                latest_minute = s->minute_of_day;
-                latest = s->stress;
-                have = TRUE;
-            }
-        }
-    }
-    g_mutex_unlock(&state->recorded_lock);
-    return have ? latest : -1;
-}
-
-static gboolean day_key_unix_range(const gchar *day_key, int32_t *start_out, int32_t *end_out) {
-    if (day_key == NULL || start_out == NULL || end_out == NULL) {
-        return FALSE;
-    }
-    int y = 0, m = 0, d = 0;
-    if (sscanf(day_key, "%d-%d-%d", &y, &m, &d) != 3 || y < 1970) {
-        return FALSE;
-    }
-    GDateTime *start = g_date_time_new_local(y, m, d, 0, 0, 0.0);
-    GDateTime *end = g_date_time_new_local(y, m, d, 23, 59, 59.0);
-    if (start == NULL || end == NULL) {
-        if (start != NULL) {
-            g_date_time_unref(start);
-        }
-        if (end != NULL) {
-            g_date_time_unref(end);
-        }
-        return FALSE;
-    }
-    *start_out = (int32_t)g_date_time_to_unix(start);
-    *end_out = (int32_t)g_date_time_to_unix(end);
-    g_date_time_unref(start);
-    g_date_time_unref(end);
-    return TRUE;
-}
-
-int miwear_display_stress_for_day(AppState *state, const gchar *day_key, const char **source_out) {
-    if (source_out != NULL) {
-        *source_out = NULL;
-    }
-    int32_t day_start = 0;
-    int32_t day_end = 0;
-    const gboolean have_range = day_key_unix_range(day_key, &day_start, &day_end);
-
-    int best = -1;
-    int32_t best_ts = 0;
-    const char *best_src = NULL;
-
-    if (state != NULL && state->live_stress_text != NULL && state->live_stress_text[0] != '\0') {
-        const int live = atoi(state->live_stress_text);
-        if (miwear_stress_value_valid(live)) {
-            const int32_t ts = state->live_stress_ts_sec;
-            if (ts == 0 || (have_range && ts >= day_start && ts <= day_end)) {
-                best = live;
-                best_ts = ts > 0 ? ts : best_ts;
-                best_src = "live-cache";
-            }
-        }
-    }
-
-    if (have_range) {
-        int db_stress = -1;
-        int32_t db_ts = 0;
-        if (miwear_db_latest_stress_in_range(day_start, day_end, &db_stress, &db_ts) &&
-            miwear_stress_value_valid(db_stress) && db_ts >= best_ts) {
-            best = db_stress;
-            best_ts = db_ts;
-            best_src = "activity-db";
-        }
-    }
-
-    const int timeline = miwear_latest_stress_for_day(state, day_key);
-    if (miwear_stress_value_valid(timeline) && best_ts == 0) {
-        best = timeline;
-        best_src = "timeline-minute";
-    }
-
-    if (source_out != NULL) {
-        *source_out = best_src;
-    }
-    return best;
 }
 
 const char *miwear_pressure_level_label(int pressure) {
@@ -268,8 +154,6 @@ guint miwear_apply_pressure_from_activity_record_json(AppState *state, JsonNode 
     JsonArray *arr = json_node_get_array(body_node);
     const guint n = json_array_get_length(arr);
     GArray *rows = g_array_new(FALSE, FALSE, sizeof(MiwearXiaomiActivityRow));
-    int latest = -1;
-    int32_t latest_ts = 0;
 
     for (guint i = 0; i < n; i++) {
         JsonNode *el = json_array_get_element(arr, i);
@@ -287,28 +171,12 @@ guint miwear_apply_pressure_from_activity_record_json(AppState *state, JsonNode 
         r.spo2 = -1;
         r.steps = -1;
         g_array_append_val(rows, r);
-        if (r.timestamp_sec >= latest_ts) {
-            latest_ts = r.timestamp_sec;
-            latest = pressure;
-        }
     }
 
     if (rows->len > 0) {
         (void)miwear_db_replace_xiaomi_activity_batch((const MiwearXiaomiActivityRow *)rows->data, rows->len);
         recorded_merge_xiaomi_activity_rows(state, (const MiwearXiaomiActivityRow *)rows->data, rows->len);
-        if (latest >= 0) {
-            gchar *txt = g_strdup_printf("%d", latest);
-            schedule_metrics_update(
-                state,
-                FALSE, 0,
-                FALSE, 0,
-                FALSE, 0,
-                FALSE, 0,
-                FALSE, 0,
-                FALSE, 0,
-                NULL, txt);
-            g_free(txt);
-        }
+        miwear_dashboard_schedule_refresh(state);
     }
     const guint count = rows->len;
     g_array_unref(rows);
@@ -330,17 +198,6 @@ guint miwear_standing_display_value(int standing_field) {
         }
     }
     return hours > 0 ? hours : (guint)standing_field;
-}
-
-void miwear_format_standing_value(guint value, gchar *buf, gsize buf_len) {
-    if (buf == NULL || buf_len == 0) {
-        return;
-    }
-    if (value > 24) {
-        g_snprintf(buf, (gint)buf_len, "%u", value);
-    } else {
-        g_snprintf(buf, (gint)buf_len, "%u h", value);
-    }
 }
 
 guint miwear_activity_goal_default(void) {
@@ -501,19 +358,3 @@ const char *miwear_cycle_phase_label(int cycle_day, guint cycle_length_days) {
     return "Luteal";
 }
 
-void miwear_format_activity_minutes(guint minutes, guint goal_minutes, gchar *buf, gsize buf_len) {
-    if (buf == NULL || buf_len == 0) {
-        return;
-    }
-    if (goal_minutes == 0) {
-        goal_minutes = miwear_activity_goal_default();
-    }
-    g_snprintf(buf, (gint)buf_len, "%u/%u", minutes, goal_minutes);
-}
-
-gboolean miwear_health_sleep_has_stage_breakdown(const MiwearDayHealthAgg *agg) {
-    if (agg == NULL || !agg->has_sleep) {
-        return FALSE;
-    }
-    return agg->sleep_other == 0;
-}

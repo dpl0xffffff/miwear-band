@@ -1325,14 +1325,10 @@ void mi_today_refresh(AppState *state) {
     {
         int at = -1;
         const int last = last_reading(state, day_key, MI_SERIES_SPO2, &at);
-        const int live_spo2 = live && state->live_spo2_text != NULL ? atoi(state->live_spo2_text) : -1;
         if (last > 0) {
             g_snprintf(buf, sizeof(buf), "%d", last);
             last_reading_caption(at, NULL, sub, sizeof(sub));
             tile_set(&dash->tile_spo2, buf, "%", sub);
-        } else if (miwear_spo2_value_valid(live_spo2)) {
-            g_snprintf(buf, sizeof(buf), "%d", live_spo2);
-            tile_set(&dash->tile_spo2, buf, "%", "Last measurement");
         } else if (agg.has_summary && miwear_spo2_value_valid(agg.summary.spo2_avg)) {
             g_snprintf(buf, sizeof(buf), "%d", agg.summary.spo2_avg);
             tile_set(&dash->tile_spo2, buf, "%", "Daily average");
@@ -1343,14 +1339,9 @@ void mi_today_refresh(AppState *state) {
     {
         int at = -1;
         const int last = last_reading(state, day_key, MI_SERIES_STRESS, &at);
-        const int live_stress = live && state->live_stress_text != NULL ? atoi(state->live_stress_text) : -1;
         if (last > 0) {
             g_snprintf(buf, sizeof(buf), "%d", last);
             last_reading_caption(at, miwear_pressure_level_label(last), sub, sizeof(sub));
-            tile_set(&dash->tile_stress, buf, NULL, sub);
-        } else if (miwear_stress_value_valid(live_stress)) {
-            g_snprintf(buf, sizeof(buf), "%d", live_stress);
-            g_snprintf(sub, sizeof(sub), "Last measurement · %s", miwear_pressure_level_label(live_stress));
             tile_set(&dash->tile_stress, buf, NULL, sub);
         } else if (agg.has_summary && miwear_stress_value_valid(agg.summary.stress_avg)) {
             g_snprintf(buf, sizeof(buf), "%d", agg.summary.stress_avg);
@@ -1483,27 +1474,6 @@ void miwear_dashboard_refresh(AppState *state) {
 
 void miwear_dashboard_redraw_charts(AppState *state) {
     /* Called for every merged sample batch: coalesce into one refresh on idle. */
-    miwear_dashboard_schedule_refresh(state);
-}
-
-void miwear_dashboard_update_live(AppState *state,
-                                  gboolean has_hr, guint hr,
-                                  gboolean has_steps, guint steps,
-                                  gboolean has_calories, guint calories,
-                                  gboolean has_standing, guint standing,
-                                  gboolean has_battery, guint battery,
-                                  gboolean has_moving, guint moving,
-                                  const gchar *spo2_text,
-                                  const gchar *stress_text) {
-    /* schedule_metrics_update() already stored the live values in AppState. */
-    (void)has_hr, (void)hr, (void)has_steps, (void)steps, (void)has_calories, (void)calories;
-    (void)has_standing, (void)standing, (void)has_moving, (void)moving, (void)spo2_text, (void)stress_text;
-    if (state->dash_ui == NULL) {
-        return;
-    }
-    if (has_battery) {
-        state->dash_ui->battery = (int)battery;
-    }
     miwear_dashboard_schedule_refresh(state);
 }
 

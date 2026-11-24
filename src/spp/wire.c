@@ -272,17 +272,11 @@ static void log_decoded_command_proto(AppState *state, const uint8_t *plain, siz
     if (cmd->health && cmd->health->realtimestats) {
         const Xiaomi__RealTimeStats *rt = cmd->health->realtimestats;
         /* The live stats carry neither the band's active calories nor its active minutes, so
-         * only steps, heart rate and standing hours are used from them. */
-        schedule_metrics_update(
-            state,
-            rt->has_heartrate, rt->heartrate,
-            rt->has_steps, rt->steps,
-            rt->has_calories, rt->calories,
-            rt->has_standinghours, rt->standinghours,
-            FALSE, 0,
-            FALSE, 0,
-            NULL, NULL
-        );
+         * only steps and heart rate are used from them. */
+        miwear_live_metrics_update(state, &(MiwearLiveMetrics){.has_hr = rt->has_heartrate,
+                                                               .hr = rt->heartrate,
+                                                               .has_steps = rt->has_steps,
+                                                               .steps = rt->steps});
     }
 
     if (cmd->type == 10) {
@@ -298,30 +292,13 @@ static void log_decoded_command_proto(AppState *state, const uint8_t *plain, siz
     if (cmd->system && cmd->system->power && cmd->system->power->battery) {
         const Xiaomi__Battery *bat = cmd->system->power->battery;
         if (bat->has_level) {
-            schedule_metrics_update(
-                state,
-                FALSE, 0,
-                FALSE, 0,
-                FALSE, 0,
-                FALSE, 0,
-                TRUE, bat->level,
-                FALSE, 0,
-                NULL, NULL
-            );
+            miwear_live_metrics_update(state, &(MiwearLiveMetrics){.has_battery = TRUE, .battery = bat->level});
         }
     }
 
     if (cmd->system && cmd->system->basicdevicestate && cmd->system->basicdevicestate->has_batterylevel) {
-        schedule_metrics_update(
-            state,
-            FALSE, 0,
-            FALSE, 0,
-            FALSE, 0,
-            FALSE, 0,
-            TRUE, cmd->system->basicdevicestate->batterylevel,
-            FALSE, 0,
-            NULL, NULL
-        );
+        miwear_live_metrics_update(
+            state, &(MiwearLiveMetrics){.has_battery = TRUE, .battery = cmd->system->basicdevicestate->batterylevel});
     }
 
     if (cmd->system && cmd->system->basicdevicestate) {
@@ -2275,10 +2252,7 @@ void disconnect_socket(AppState *state) {
     state->auth_initialized = FALSE;
     state->protocol_version = 0;
     state->spp_v2_seq = 0;
-    state->has_live_standing = FALSE;
-    state->has_live_moving = FALSE;
     state->has_live_steps = FALSE;
-    state->has_live_calories = FALSE;
     state->has_live_hr = FALSE;
     miwear_notifications_on_disconnect(state);
     miwear_workout_gps_stop(state, "band disconnected");

@@ -91,18 +91,12 @@ static int stress_from_manual_item(JsonObject *item) {
 
 static void commit_manual_rows(AppState *state, uint32_t file_day_ts, GArray *act_rows, const char *log_tag) {
     const guint count = act_rows != NULL ? act_rows->len : 0;
-    int latest_spo2 = -1;
     int latest_stress = -1;
-    int32_t latest_spo2_ts = 0;
     int32_t latest_stress_ts = 0;
 
     if (count > 0) {
         for (guint i = 0; i < count; i++) {
             const MiwearXiaomiActivityRow *r = &g_array_index(act_rows, MiwearXiaomiActivityRow, i);
-            if (miwear_spo2_value_valid(r->spo2) && r->timestamp_sec >= latest_spo2_ts) {
-                latest_spo2_ts = r->timestamp_sec;
-                latest_spo2 = r->spo2;
-            }
             if (miwear_stress_value_valid(r->stress) && r->timestamp_sec >= latest_stress_ts) {
                 latest_stress_ts = r->timestamp_sec;
                 latest_stress = r->stress;
@@ -112,20 +106,6 @@ static void commit_manual_rows(AppState *state, uint32_t file_day_ts, GArray *ac
         recorded_merge_xiaomi_activity_rows(state, (const MiwearXiaomiActivityRow *)act_rows->data, count);
     }
 
-    gchar *spo2_txt = NULL;
-    gchar *stress_txt = NULL;
-    if (latest_spo2 >= 0) {
-        spo2_txt = g_strdup_printf("%d%%", latest_spo2);
-    }
-    if (latest_stress >= 0) {
-        stress_txt = g_strdup_printf("%d", latest_stress);
-        state->live_stress_ts_sec = latest_stress_ts;
-    }
-    if (spo2_txt != NULL || stress_txt != NULL) {
-        schedule_metrics_update(state, FALSE, 0, FALSE, 0, FALSE, 0, FALSE, 0, FALSE, 0, FALSE, 0, spo2_txt, stress_txt);
-    }
-    g_free(spo2_txt);
-    g_free(stress_txt);
     miwear_dashboard_refresh(state);
 
     gchar *summary = NULL;

@@ -52,6 +52,3 @@ void miwear_fitness_sync_resync(AppState *state) {
     miwear_wire_resync_file_lists(state, "Mi Fitness resync today IDs");
 }
 
-void miwear_request_history_resync(AppState *state) {
-    miwear_fitness_sync_resync(state);
-}

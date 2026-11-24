@@ -327,36 +327,7 @@ static void parse_daily_details_for_log(AppState *state,
                                                     (const MiwearXiaomiActivityRow *)act_rows->data,
                                                     act_rows->len);
                 (void)miwear_db_replace_xiaomi_activity_batch((const MiwearXiaomiActivityRow *)act_rows->data, act_rows->len);
-                int latest_stress = -1;
-                int32_t latest_stress_ts = 0;
-                for (guint ri = 0; ri < act_rows->len; ri++) {
-                    const MiwearXiaomiActivityRow *row = &g_array_index(act_rows, MiwearXiaomiActivityRow, ri);
-                    if (miwear_stress_value_valid(row->stress) && row->timestamp_sec >= latest_stress_ts) {
-                        latest_stress_ts = row->timestamp_sec;
-                        latest_stress = row->stress;
-                    }
-                }
-                if (latest_stress >= 0) {
-                    state->live_stress_ts_sec = latest_stress_ts;
-                    gchar *stress_txt = g_strdup_printf("%d", latest_stress);
-                    schedule_metrics_update(state,
-                                            FALSE,
-                                            0,
-                                            FALSE,
-                                            0,
-                                            FALSE,
-                                            0,
-                                            FALSE,
-                                            0,
-                                            FALSE,
-                                            0,
-                                            FALSE,
-                                            0,
-                                            NULL,
-                                            stress_txt);
-                    g_free(stress_txt);
-                    miwear_dashboard_refresh(state);
-                }
+                miwear_dashboard_schedule_refresh(state);
                 if (act_rows->len > 0) {
                     log_day_activity_totals(state,
                                             g_array_index(act_rows, MiwearXiaomiActivityRow, act_rows->len - 1).timestamp_sec);
@@ -1105,15 +1076,12 @@ void handle_activity_payload(AppState *state, const uint8_t *payload, size_t pay
                        "Manual samples (v2): no stress/SpO₂/HR extracted — not acking so the band can retry.");
             ack_allowed = FALSE;
         }
-    } else if (type == 0 && (subtype == 9 || subtype == 10 || subtype == 11 || subtype == 12)) {
-        mi_fitness_apply_health_payload(state, ts, tz, subtype, detail, version, payload, payload_len);
     } else if (type == 0) {
         mi_fitness_apply_health_payload(state, ts, tz, subtype, detail, version, payload, payload_len);
     } else {
-        gchar *line = g_strdup_printf("Unhandled fitness file type=%d subtype=%d detail=%d",
-                                      type, subtype, detail);
-        append_log(state, line);
-        g_free(line);
+        gchar *msg = g_strdup_printf("Unhandled fitness file type=%d subtype=%d detail=%d", type, subtype, detail);
+        append_log(state, msg);
+        g_free(msg);
     }
 
 finish:

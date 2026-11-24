@@ -10,7 +10,6 @@
 void miwear_profile_apply_defaults(AppState *state);
 
 guint miwear_gender_config_to_proto(guint config_gender);
-guint miwear_gender_proto_to_config(guint proto_gender);
 gboolean miwear_profile_shows_cycles(guint config_gender);
 
 #endif

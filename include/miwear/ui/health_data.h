@@ -44,19 +44,12 @@ typedef struct {
 } MiwearDayHealthAgg;
 
 void miwear_health_aggregate_day(AppState *state, const gchar *day_key, MiwearDayHealthAgg *out);
-int miwear_health_sleep_total_minutes(const MiwearDayHealthAgg *agg);
-gboolean miwear_health_sleep_has_stage_breakdown(const MiwearDayHealthAgg *agg);
 
 gboolean miwear_spo2_value_valid(int spo2);
 gboolean miwear_stress_value_valid(int stress);
-int miwear_latest_stress_for_day(AppState *state, const gchar *day_key);
-/* Picks newest stress by unix timestamp (DB + live cache + timeline). Logs source when state non-null. */
-int miwear_display_stress_for_day(AppState *state, const gchar *day_key, const char **source_out);
 const char *miwear_pressure_level_label(int pressure);
 guint miwear_apply_pressure_from_activity_record_json(AppState *state, JsonNode *decoded, uint32_t base_ts_sec);
 guint miwear_standing_display_value(int standing_field);
-void miwear_format_standing_value(guint value, gchar *buf, gsize buf_len);
-void miwear_format_activity_minutes(guint minutes, guint goal_minutes, gchar *buf, gsize buf_len);
 guint miwear_activity_goal_default(void);
 /* Minutes of @day_key at moderate or higher intensity, from synced per-minute data. */
 guint miwear_count_activity_minutes_from_timeline(AppState *state, const gchar *day_key);

@@ -155,7 +155,6 @@ struct MiwearDashboardUi {
 
     /* Sleep */
     GtkWidget *sleep_total;
-    GtkWidget *sleep_window;
     GtkWidget *sleep_bar;
     GtkWidget *sleep_legend;
     GtkWidget *sleep_hypnogram;

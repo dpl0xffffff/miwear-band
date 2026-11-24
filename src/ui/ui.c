@@ -36,24 +36,6 @@ typedef struct {
 
 typedef struct {
     AppState *state;
-    uint32_t heart_rate;
-    uint32_t steps;
-    uint32_t calories;
-    uint32_t standing_hours;
-    uint32_t battery;
-    uint32_t moving;
-    gboolean has_heart_rate;
-    gboolean has_steps;
-    gboolean has_calories;
-    gboolean has_standing_hours;
-    gboolean has_battery;
-    gboolean has_moving;
-    gchar *spo2_text;
-    gchar *stress_text;
-} UiMetricsUpdate;
-
-typedef struct {
-    AppState *state;
     gchar *charging_text;
     gchar *wearing_text;
     gchar *sleep_text;
@@ -426,80 +408,19 @@ void set_status(AppState *state, const gchar *status) {
     g_idle_add(ui_set_status_cb, ctx);
 }
 
-static gboolean ui_update_metrics_cb(gpointer user_data) {
-    UiMetricsUpdate *u = user_data;
-    AppState *state = u->state;
-
-    miwear_dashboard_update_live(
-        state,
-        u->has_heart_rate, u->heart_rate,
-        u->has_steps, u->steps,
-        u->has_calories, u->calories,
-        u->has_standing_hours, u->standing_hours,
-        u->has_battery, u->battery,
-        u->has_moving, u->moving,
-        u->spo2_text, u->stress_text);
-
-    g_free(u->spo2_text);
-    g_free(u->stress_text);
-    g_free(u);
-    return G_SOURCE_REMOVE;
-}
-
-void schedule_metrics_update(AppState *state,
-                                    gboolean has_hr, guint hr,
-                                    gboolean has_steps, guint steps,
-                                    gboolean has_calories, guint calories,
-                                    gboolean has_standing, guint standing,
-                                    gboolean has_battery, guint battery,
-                                    gboolean has_moving, guint moving,
-                                    const gchar *spo2_text,
-                                    const gchar *stress_text) {
-    UiMetricsUpdate *u = g_new0(UiMetricsUpdate, 1);
-    u->state = state;
-    u->has_heart_rate = has_hr;
-    u->heart_rate = hr;
-    u->has_steps = has_steps;
-    u->steps = steps;
-    u->has_calories = has_calories;
-    u->calories = calories;
-    u->has_standing_hours = has_standing;
-    u->standing_hours = standing;
-    if (has_standing) {
-        state->live_standing = standing;
-        state->has_live_standing = TRUE;
-    }
-    if (has_moving) {
-        state->live_moving = moving;
-        state->has_live_moving = TRUE;
-    }
-    if (has_hr) {
-        state->live_hr = hr;
+void miwear_live_metrics_update(AppState *state, const MiwearLiveMetrics *m) {
+    if (m->has_hr) {
+        state->live_hr = m->hr;
         state->has_live_hr = TRUE;
     }
-    if (has_steps) {
-        state->live_steps = steps;
+    if (m->has_steps) {
+        state->live_steps = m->steps;
         state->has_live_steps = TRUE;
     }
-    if (has_calories) {
-        state->live_calories = calories;
-        state->has_live_calories = TRUE;
+    if (m->has_battery && state->dash_ui != NULL) {
+        state->dash_ui->battery = (int)m->battery;
     }
-    if (spo2_text != NULL) {
-        g_free(state->live_spo2_text);
-        state->live_spo2_text = g_strdup(spo2_text);
-    }
-    if (stress_text != NULL) {
-        g_free(state->live_stress_text);
-        state->live_stress_text = g_strdup(stress_text);
-    }
-    u->has_battery = has_battery;
-    u->battery = battery;
-    u->has_moving = has_moving;
-    u->moving = moving;
-    u->spo2_text = spo2_text ? g_strdup(spo2_text) : NULL;
-    u->stress_text = stress_text ? g_strdup(stress_text) : NULL;
-    g_idle_add(ui_update_metrics_cb, u);
+    miwear_dashboard_schedule_refresh(state);
 }
 
 static gboolean ui_update_state_cb(gpointer user_data) {
@@ -1139,18 +1060,6 @@ void switch_to_pairing(AppState *state) {
     }
 }
 
-static gboolean idle_switch_to_pairing(gpointer user_data) {
-    switch_to_pairing((AppState *)user_data);
-    return G_SOURCE_REMOVE;
-}
-
-void schedule_switch_to_pairing(AppState *state) {
-    if (state == NULL) {
-        return;
-    }
-    g_idle_add(idle_switch_to_pairing, state);
-}
-
 void start_connect_for_address(AppState *state, const gchar *raw_address) {
     set_connect_busy(state, TRUE);
     disconnect_socket(state);
@@ -1257,15 +1166,10 @@ void miwear_app_shutdown(GApplication *app, gpointer user_data) {
         state->sleep_duration_by_day = NULL;
     }
     g_mutex_unlock(&state->recorded_lock);
-    g_free(state->live_spo2_text);
-    g_free(state->live_stress_text);
     g_free(state->weather_location_name);
     g_free(state->weather_last_status);
     g_free(state->notification_status);
     miwear_notifications_shutdown(state);
-    state->live_spo2_text = NULL;
-    state->live_stress_text = NULL;
-    state->live_stress_ts_sec = 0;
     state->weather_location_name = NULL;
     state->weather_last_status = NULL;
     if (state->health_view_date != NULL) {

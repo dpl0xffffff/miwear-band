@@ -19,11 +19,5 @@ void mi_fitness_apply_sleep_stages_from_feature(AppState *state,
                                                 uint32_t bed_sec,
                                                 uint32_t wake_sec);
 
-void mi_fitness_apply_sleep_stages_from_schema_body(AppState *state,
-                                                    JsonObject *body,
-                                                    const uint8_t *full_payload,
-                                                    size_t full_payload_len,
-                                                    uint32_t bed_sec,
-                                                    uint32_t wake_sec);
 
 #endif

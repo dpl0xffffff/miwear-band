@@ -13,7 +13,5 @@ void miwear_fitness_sync_on_auth_async(AppState *state);
 
 void miwear_fitness_sync_resync(AppState *state);
 
-/* UI / wire: same as miwear_fitness_sync_resync */
-void miwear_request_history_resync(AppState *state);
 
 #endif

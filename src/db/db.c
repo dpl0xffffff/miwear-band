@@ -771,46 +771,6 @@ gboolean miwear_db_foreach_xiaomi_activity(MiwearDbActivityRowFn fn, gpointer us
     return ok;
 }
 
-gboolean miwear_db_latest_stress_in_range(int32_t start_sec,
-                                        int32_t end_sec,
-                                        int *stress_out,
-                                        int32_t *timestamp_sec_out) {
-    if (stress_out == NULL || timestamp_sec_out == NULL || start_sec > end_sec) {
-        return FALSE;
-    }
-    *stress_out = -1;
-    *timestamp_sec_out = 0;
-    g_mutex_lock(&s_lock);
-    if (!can_write()) {
-        g_mutex_unlock(&s_lock);
-        return FALSE;
-    }
-    sqlite3_stmt *st = NULL;
-    const char *sql =
-        "SELECT \"timestamp\",\"stress\" FROM \"XIAOMI_ACTIVITY_SAMPLE\" "
-        "WHERE \"deviceId\" = ? AND \"timestamp\" >= ? AND \"timestamp\" <= ? "
-        "AND \"stress\" IS NOT NULL ORDER BY \"timestamp\" DESC LIMIT 1;";
-    if (sqlite3_prepare_v2(s_db, sql, -1, &st, NULL) != SQLITE_OK) {
-        g_mutex_unlock(&s_lock);
-        return FALSE;
-    }
-    sqlite3_bind_int64(st, 1, s_device_id);
-    sqlite3_bind_int(st, 2, start_sec);
-    sqlite3_bind_int(st, 3, end_sec);
-    gboolean ok = FALSE;
-    if (sqlite3_step(st) == SQLITE_ROW) {
-        const int stress = sqlite3_column_int(st, 1);
-        if (stress > 0 && stress < 255) {
-            *stress_out = stress;
-            *timestamp_sec_out = sqlite3_column_int(st, 0);
-            ok = TRUE;
-        }
-    }
-    sqlite3_finalize(st);
-    g_mutex_unlock(&s_lock);
-    return ok;
-}
-
 static int db_nullable_int(sqlite3_stmt *st, int col) {
     return sqlite3_column_type(st, col) == SQLITE_NULL ? -1 : sqlite3_column_int(st, col);
 }
