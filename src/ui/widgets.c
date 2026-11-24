@@ -513,6 +513,7 @@ void mi_night_collect(AppState *state, GDate *wake_day, MiNight *out) {
         }
     }
     out->has_breakdown = (out->deep + out->rem + out->awake) > 0;
+    out->has_timeline = real_stages;
     if (out->first >= 0) {
         out->avg_hr = night_average(out->hr_sum, out->hr_n, out->first, out->last);
         out->avg_spo2 = night_average(out->spo2_sum, out->spo2_n, out->first, out->last);

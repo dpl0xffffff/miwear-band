@@ -96,6 +96,7 @@ typedef struct {
     int deep, light, rem, awake, other;
     int total_asleep;            /* band total when synced, else counted */
     gboolean has_breakdown;
+    gboolean has_timeline;       /* per-minute stages, not just "asleep" */
     /* Per-minute sums and sample counts, used for the night's averages. */
     int hr_sum[MI_NIGHT_MINUTES], hr_n[MI_NIGHT_MINUTES];
     int spo2_sum[MI_NIGHT_MINUTES], spo2_n[MI_NIGHT_MINUTES];

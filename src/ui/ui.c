@@ -758,84 +758,29 @@ static RecordedSample *rebuild_minute_slot(RecordedRebuildCtx *ctx, gint64 unix_
     return &g_array_index(day, RecordedSample, mod);
 }
 
+/* Sets a minute's sleep stage; a negative stage ("not asleep") clears it. */
 static void rebuild_set_sleep_minute(RecordedRebuildCtx *ctx, gint64 unix_sec, int stage) {
-    if (ctx == NULL || stage < 0) {
-        return;
-    }
     RecordedSample *dst = rebuild_minute_slot(ctx, unix_sec);
     if (dst == NULL) {
         return;
     }
-    dst->sleep_stage = stage;
-    dst->sleep_source = 1;
+    dst->sleep_stage = stage >= 0 ? stage : -1;
+    dst->sleep_source = stage >= 0 ? 1 : 0;
 }
 
-static void rebuild_sleep_span_from_durations(RecordedRebuildCtx *ctx,
-                                              gint64 bed_sec,
-                                              gint64 wake_sec,
-                                              int deep_min,
-                                              int light_min,
-                                              int rem_min,
-                                              int awake_min) {
-    if (wake_sec <= bed_sec) {
-        return;
-    }
-    const gint64 total_min = (wake_sec - bed_sec + 59) / 60;
-    if (total_min <= 0) {
-        return;
-    }
-
-    MiwearSleepStageDurations nd = {
-        .deep_min = deep_min,
-        .light_min = light_min,
-        .rem_min = rem_min,
-        .awake_min = awake_min,
-        .total_min = -1,
-    };
-    miwear_sleep_normalize_stage_durations(&nd);
-    int d = nd.deep_min > 0 ? nd.deep_min : 0;
-    int l = nd.light_min > 0 ? nd.light_min : 0;
-    int r = nd.rem_min > 0 ? nd.rem_min : 0;
-    int a = nd.awake_min > 0 ? nd.awake_min : 0;
-    const int sum = d + l + r + a;
-
-    GArray *stages = g_array_sized_new(FALSE, FALSE, sizeof(int), (guint)total_min);
-    if (sum <= 0) {
-        for (gint64 m = 0; m < total_min; m++) {
-            int st = MIWEAR_SLEEP_STAGE_UNSPEC;
-            g_array_append_val(stages, st);
+/* TRUE when a stage marker falls inside [bed, wake). Markers are sorted by time. */
+static gboolean rebuild_session_has_markers(const RecordedRebuildCtx *ctx, gint64 bed_sec, gint64 wake_sec) {
+    const GArray *m = ctx->sleep_stage_markers;
+    for (guint i = 0; m != NULL && i < m->len; i++) {
+        const gint64 t = g_array_index(m, MiwearSleepStageRow, i).timestamp_ms / 1000LL;
+        if (t >= wake_sec) {
+            break;
         }
-    } else {
-        for (int i = 0; i < d; i++) {
-            int st = 2;
-            g_array_append_val(stages, st);
-        }
-        for (int i = 0; i < l; i++) {
-            int st = 3;
-            g_array_append_val(stages, st);
-        }
-        for (int i = 0; i < r; i++) {
-            int st = 4;
-            g_array_append_val(stages, st);
-        }
-        for (int i = 0; i < a; i++) {
-            int st = 5;
-            g_array_append_val(stages, st);
-        }
-        while ((gint64)stages->len < total_min) {
-            int st = 3;
-            g_array_append_val(stages, st);
-        }
-        while ((gint64)stages->len > total_min && stages->len > 0) {
-            g_array_remove_index(stages, stages->len - 1);
+        if (t >= bed_sec) {
+            return TRUE;
         }
     }
-
-    for (guint i = 0; i < stages->len; i++) {
-        const int st = g_array_index(stages, int, i);
-        rebuild_set_sleep_minute(ctx, bed_sec + (gint64)i * 60, st);
-    }
-    g_array_unref(stages);
+    return FALSE;
 }
 
 static const RebuildSleepSession *rebuild_find_sleep_session(const RecordedRebuildCtx *ctx, gint64 unix_sec) {
@@ -942,17 +887,18 @@ static gboolean rebuild_sleep_time_cb(const MiwearSleepTimeRow *r, gpointer user
     rebuild_store_sleep_durations(ctx, r);
     const gint64 bed_sec = r->bed_ms / 1000LL;
     const gint64 wake_sec = r->wake_ms / 1000LL;
-    if (wake_sec > bed_sec) {
-        const RebuildSleepSession session = {.bed_sec = bed_sec, .wake_sec = wake_sec};
-        g_array_append_val(ctx->sleep_sessions, session);
+    if (wake_sec <= bed_sec) {
+        return TRUE;
     }
-    rebuild_sleep_span_from_durations(ctx,
-                                      bed_sec,
-                                      wake_sec,
-                                      r->deep_min,
-                                      r->light_min,
-                                      r->rem_min,
-                                      r->awake_min);
+    const RebuildSleepSession session = {.bed_sec = bed_sec, .wake_sec = wake_sec};
+    g_array_append_val(ctx->sleep_sessions, session);
+    /* Without a stage timeline the night is "asleep, stage unknown"; the band's stage totals (if
+     * any) still give the breakdown. Never invent a timeline from the totals. */
+    if (!rebuild_session_has_markers(ctx, bed_sec, wake_sec)) {
+        for (gint64 sec = bed_sec; sec < wake_sec; sec += 60) {
+            rebuild_set_sleep_minute(ctx, sec, MIWEAR_SLEEP_STAGE_UNSPEC);
+        }
+    }
     return TRUE;
 }
 
@@ -974,9 +920,9 @@ void recorded_rebuild_from_db(AppState *state) {
     miwear_local_day_cursor_init(&ctx.cursor);
 
     (void)miwear_db_foreach_xiaomi_activity(rebuild_activity_cb, &ctx);
+    (void)miwear_db_foreach_sleep_stage(rebuild_sleep_stage_cb, &ctx); /* before the sessions */
     (void)miwear_db_foreach_sleep_time(rebuild_sleep_time_cb, &ctx);
     (void)miwear_db_foreach_daily_summary(rebuild_daily_summary_cb, &ctx);
-    (void)miwear_db_foreach_sleep_stage(rebuild_sleep_stage_cb, &ctx);
     rebuild_expand_sleep_stage_markers(&ctx);
     if (ctx.sleep_stage_markers != NULL) {
         g_array_unref(ctx.sleep_stage_markers);

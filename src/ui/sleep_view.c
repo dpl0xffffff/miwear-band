@@ -470,8 +470,9 @@ void mi_sleep_refresh(AppState *state) {
     }
     gtk_widget_set_visible(gtk_widget_get_parent(dash->sleep_hypnogram), n->first >= 0);
     gtk_label_set_text(GTK_LABEL(sleep_stages_sub),
-                       n->other > 0 && !n->has_breakdown ? "The band didn't send sleep stages for this night" : "");
-    gtk_widget_set_visible(sleep_stages_sub, n->other > 0 && !n->has_breakdown);
+                       !n->has_breakdown ? "The band didn't send sleep stages for this night"
+                                         : "The band sent stage totals but no timeline for this night");
+    gtk_widget_set_visible(sleep_stages_sub, n->first >= 0 && !n->has_timeline);
     gtk_widget_queue_draw(dash->sleep_bar);
     gtk_widget_queue_draw(dash->sleep_hypnogram);
 }
