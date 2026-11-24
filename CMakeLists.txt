@@ -75,6 +75,7 @@ add_executable(salus
     src/devices/xiaomi/mi_fitness_sport_record.c
     src/devices/xiaomi/mi_fitness_report_tables.c
     src/ui/ui.c
+    src/ui/connect.c
     src/ui/dashboard.c
     src/ui/widgets.c
     src/ui/sleep_view.c

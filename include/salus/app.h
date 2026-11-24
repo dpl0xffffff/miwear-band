@@ -15,6 +15,7 @@
 #include "salus/device.h"
 
 typedef struct SalusDashboardUi SalusDashboardUi;
+typedef struct SalusConnectUi SalusConnectUi;
 
 typedef struct SalusWorkoutSummary SalusWorkoutSummary;
 
@@ -32,29 +33,19 @@ typedef struct SalusSportEntry {
     SalusWorkoutSummary *detail;
 } SalusSportEntry;
 
-/* Set via UI or ~/.config/salus/config.ini (same salus-auth key as Mi Fitness). */
-#define DEFAULT_AUTH_KEY_HEX ""
 
 typedef struct SalusApp {
     AdwApplication *app;
     GtkWidget *window;
     GtkWidget *stack;
-    GtkWidget *page_pairing;
     GtkWidget *page_dashboard;
     SalusDashboardUi *dash_ui;
     GDate *health_view_date;
     GList *sport_entries;
-    GtkWidget *entry_authkey;
-    GtkWidget *btn_refresh;
-    GtkWidget *listbox_devices;
-    GtkWidget *label_status;
     GtkTextBuffer *log_buffer;
     GtkWidget *toast_overlay;
-    GtkWidget *setup_connect_button;
-    GtkWidget *setup_spinner;
-    GtkWidget *setup_cancel_button;
-    /* Band picked on the setup page; becomes selected_address only once a connect starts. */
-    gchar *pairing_selected_address;
+    GtkWidget *page_connect;
+    SalusConnectUi *connect_ui;
 
     gchar *selected_address;
     gchar *device_display_name;
@@ -77,7 +68,6 @@ typedef struct SalusApp {
     GHashTable *daily_summaries;
     guint recorded_rebuild_source_id;
     GMutex recorded_lock;
-    gboolean populate_devices_busy;
     GQueue *log_queue;
     GMutex log_lock;
     guint log_flush_id;

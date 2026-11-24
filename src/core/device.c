@@ -1,6 +1,7 @@
 #include "salus/device.h"
 
 #include "salus/app.h"
+#include "salus/config.h"
 #include "salus/services/location.h"
 #include "salus/services/notifications.h"
 #include "salus/ui/dashboard.h"
@@ -82,6 +83,9 @@ void salus_device_set_link(SalusDevice *dev, SalusLinkState link, const char *st
             set_status(app, status != NULL ? status : "Connected.");
             set_connect_busy(app, FALSE);
             if (was != SALUS_LINK_CONNECTED) {
+                /* A device is saved (or its pairing fields updated) once it has connected. */
+                salus_app_save_device(app, dev->config);
+                (void)salus_config_save(app, NULL);
                 switch_to_dashboard(app);
             }
             break;

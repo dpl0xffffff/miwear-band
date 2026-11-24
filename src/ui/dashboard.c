@@ -225,7 +225,7 @@ void ui_toast(SalusApp *state, const char *text) {
 }
 
 void ui_connect_saved(SalusApp *state) {
-    if (!salus_ui_has_saved_device(state)) {
+    if (state->device == NULL) {
         salus_ui_show_setup(state);
         return;
     }

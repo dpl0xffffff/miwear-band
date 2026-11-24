@@ -1,6 +1,5 @@
 #include "salus/app.h"
 #include "salus/config.h"
-#include "salus/devices/xiaomi/xiaomi.h"
 #include "salus/ui/ui.h"
 #include "salus/store/workout.h"
 #include "salus/services/notifications.h"
@@ -51,262 +50,11 @@ static void ui_set_sensitive_if_widget(GtkWidget *widget, gboolean sensitive) {
 }
 
 gboolean salus_ui_has_saved_device(SalusApp *state) {
-    return state != NULL && state->device != NULL;
-}
-
-static const char *saved_auth_key(SalusApp *state) {
-    const char *key = salus_device_config_get(state->device != NULL ? state->device->config : NULL, "auth_key");
-    return key != NULL ? key : "";
-}
-
-static void setup_update_connect_sensitivity(SalusApp *state) {
-    if (state->setup_connect_button == NULL || state->entry_authkey == NULL) {
-        return;
-    }
-    const gchar *key = gtk_editable_get_text(GTK_EDITABLE(state->entry_authkey));
-    uint8_t bytes[16];
-    const gboolean key_ok = key != NULL && hex_to_bytes16(key, bytes);
-    if (key != NULL && key[0] != '\0' && !key_ok) {
-        gtk_widget_add_css_class(state->entry_authkey, "error");
-    } else {
-        gtk_widget_remove_css_class(state->entry_authkey, "error");
-    }
-    const gboolean busy = state->dash_ui != NULL && state->dash_ui->busy;
-    gtk_widget_set_sensitive(state->setup_connect_button,
-                             !busy && key_ok && state->pairing_selected_address != NULL);
-}
-
-static void on_device_check_toggled(GtkCheckButton *check, gpointer user_data) {
-    SalusApp *state = user_data;
-    if (!gtk_check_button_get_active(check)) {
-        return;
-    }
-    g_free(state->pairing_selected_address);
-    state->pairing_selected_address = g_strdup(g_object_get_data(G_OBJECT(check), "address"));
-    setup_update_connect_sensitivity(state);
-}
-
-static void on_authkey_changed(GtkEditable *e, gpointer user_data) {
-    (void)e;
-    setup_update_connect_sensitivity(user_data);
-}
-
-static void on_setup_connect(GtkButton *b, gpointer user_data) {
-    (void)b;
-    SalusApp *state = user_data;
-    if (state->pairing_selected_address != NULL) {
-        gchar *addr = g_strdup(state->pairing_selected_address);
-        start_connect_for_address(state, addr);
-        g_free(addr);
-    }
-}
-
-static void populate_device_list(SalusApp *state);
-
-static void on_setup_refresh(GtkButton *b, gpointer user_data) {
-    (void)b;
-    populate_device_list(user_data);
-}
-
-static void populate_device_list(SalusApp *state) {
-    if (state->listbox_devices == NULL || state->populate_devices_busy) {
-        return;
-    }
-    state->populate_devices_busy = TRUE;
-    gtk_list_box_remove_all(GTK_LIST_BOX(state->listbox_devices));
-    g_free(state->pairing_selected_address);
-    state->pairing_selected_address = NULL;
-
-    GError *error = NULL;
-    GDBusConnection *bus = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, &error);
-    GVariant *reply = NULL;
-    if (bus != NULL) {
-        reply = g_dbus_connection_call_sync(bus, "org.bluez", "/", "org.freedesktop.DBus.ObjectManager",
-                                            "GetManagedObjects", NULL, G_VARIANT_TYPE("(a{oa{sa{sv}}})"),
-                                            G_DBUS_CALL_FLAGS_NONE, -1, NULL, &error);
-    }
-    if (reply == NULL) {
-        set_status(state, error != NULL && error->message != NULL ? error->message : "Couldn't list Bluetooth devices.");
-        g_clear_error(&error);
-        g_clear_object(&bus);
-        state->populate_devices_busy = FALSE;
-        setup_update_connect_sensitivity(state);
-        return;
-    }
-
-    GVariant *objects = g_variant_get_child_value(reply, 0);
-    GVariantIter iter;
-    g_variant_iter_init(&iter, objects);
-    GtkCheckButton *group = NULL;
-    GtkCheckButton *match = NULL;
-    guint count = 0;
-    GVariant *entry;
-    while ((entry = g_variant_iter_next_value(&iter)) != NULL) {
-        gchar *path = NULL;
-        GVariant *ifaces = NULL;
-        g_variant_get(entry, "{o@a{sa{sv}}}", &path, &ifaces);
-        GVariant *props = g_variant_lookup_value(ifaces, "org.bluez.Device1", G_VARIANT_TYPE("a{sv}"));
-        if (props != NULL) {
-            GVariantDict dict;
-            g_variant_dict_init(&dict, props);
-            const gchar *address = NULL, *name = NULL, *alias = NULL;
-            gboolean paired = FALSE, connected = FALSE;
-            (void)g_variant_dict_lookup(&dict, "Address", "&s", &address);
-            (void)g_variant_dict_lookup(&dict, "Name", "&s", &name);
-            (void)g_variant_dict_lookup(&dict, "Alias", "&s", &alias);
-            (void)g_variant_dict_lookup(&dict, "Paired", "b", &paired);
-            (void)g_variant_dict_lookup(&dict, "Connected", "b", &connected);
-            if (address != NULL) {
-                const gchar *title = (name != NULL && name[0]) ? name : (alias != NULL && alias[0]) ? alias : address;
-                GString *sub = g_string_new(address);
-                if (paired) {
-                    g_string_append(sub, " · Paired");
-                }
-                if (connected) {
-                    g_string_append(sub, " · Connected");
-                }
-                GtkWidget *row = adw_action_row_new();
-                adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), title);
-                adw_preferences_row_set_use_markup(ADW_PREFERENCES_ROW(row), FALSE);
-                adw_action_row_set_subtitle(ADW_ACTION_ROW(row), sub->str);
-                g_string_free(sub, TRUE);
-                GtkWidget *check = gtk_check_button_new();
-                if (group != NULL) {
-                    gtk_check_button_set_group(GTK_CHECK_BUTTON(check), group);
-                } else {
-                    group = GTK_CHECK_BUTTON(check);
-                }
-                g_object_set_data_full(G_OBJECT(check), "address", g_strdup(address), g_free);
-                g_signal_connect(check, "toggled", G_CALLBACK(on_device_check_toggled), state);
-                adw_action_row_add_prefix(ADW_ACTION_ROW(row), check);
-                adw_action_row_set_activatable_widget(ADW_ACTION_ROW(row), check);
-                gtk_list_box_append(GTK_LIST_BOX(state->listbox_devices), row);
-                if (g_strcmp0(address, state->selected_address) == 0) {
-                    match = GTK_CHECK_BUTTON(check);
-                }
-                count++;
-            }
-            g_variant_dict_clear(&dict);
-            g_variant_unref(props);
-        }
-        g_variant_unref(ifaces);
-        g_free(path);
-        g_variant_unref(entry);
-    }
-    g_variant_unref(objects);
-    g_variant_unref(reply);
-    g_object_unref(bus);
-
-    /* Preselect only the configured band, or the only one there is. Never connects by itself. */
-    if (match != NULL) {
-        gtk_check_button_set_active(match, TRUE);
-    } else if (count == 1 && group != NULL) {
-        gtk_check_button_set_active(group, TRUE);
-    }
-    state->populate_devices_busy = FALSE;
-    setup_update_connect_sensitivity(state);
-}
-
-static void on_setup_cancel(GtkButton *b, gpointer user_data) {
-    (void)b;
-    SalusApp *state = user_data;
-    gtk_editable_set_text(GTK_EDITABLE(state->entry_authkey), saved_auth_key(state));
-    gtk_stack_set_visible_child_name(GTK_STACK(state->stack), "main");
-}
-
-static GtkWidget *build_setup_page(SalusApp *state) {
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 24);
-    gtk_widget_add_css_class(box, "salus-page");
-    gtk_widget_set_margin_top(box, 12);
-
-    GtkWidget *head = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-    GtkWidget *icon = gtk_image_new_from_icon_name("salus-watch-symbolic");
-    gtk_image_set_pixel_size(GTK_IMAGE(icon), 56);
-    gtk_widget_add_css_class(icon, "salus-band-icon");
-    gtk_widget_set_halign(icon, GTK_ALIGN_CENTER);
-    GtkWidget *title = gtk_label_new("Connect Your Band");
-    gtk_widget_add_css_class(title, "title-1");
-    GtkWidget *desc = gtk_label_new("Choose your Xiaomi Smart Band from the Bluetooth devices this computer knows, "
-                                    "then enter the auth key from Mi Fitness.");
-    gtk_widget_add_css_class(desc, "dimmed");
-    gtk_label_set_wrap(GTK_LABEL(desc), TRUE);
-    gtk_label_set_justify(GTK_LABEL(desc), GTK_JUSTIFY_CENTER);
-    gtk_box_append(GTK_BOX(head), icon);
-    gtk_box_append(GTK_BOX(head), title);
-    gtk_box_append(GTK_BOX(head), desc);
-    gtk_box_append(GTK_BOX(box), head);
-
-    GtkWidget *devices = adw_preferences_group_new();
-    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(devices), "Bluetooth Devices");
-    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(devices),
-                                          "Pair the band in your system's Bluetooth settings if it's missing.");
-    state->btn_refresh = gtk_button_new_from_icon_name("view-refresh-symbolic");
-    gtk_widget_add_css_class(state->btn_refresh, "flat");
-    gtk_widget_set_tooltip_text(state->btn_refresh, "Refresh device list");
-    g_signal_connect(state->btn_refresh, "clicked", G_CALLBACK(on_setup_refresh), state);
-    adw_preferences_group_set_header_suffix(ADW_PREFERENCES_GROUP(devices), state->btn_refresh);
-    state->listbox_devices = gtk_list_box_new();
-    gtk_list_box_set_selection_mode(GTK_LIST_BOX(state->listbox_devices), GTK_SELECTION_NONE);
-    gtk_widget_add_css_class(state->listbox_devices, "boxed-list");
-    GtkWidget *placeholder = gtk_label_new("No Bluetooth devices found");
-    gtk_widget_add_css_class(placeholder, "dimmed");
-    gtk_widget_set_margin_top(placeholder, 18);
-    gtk_widget_set_margin_bottom(placeholder, 18);
-    gtk_list_box_set_placeholder(GTK_LIST_BOX(state->listbox_devices), placeholder);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(devices), state->listbox_devices);
-    gtk_box_append(GTK_BOX(box), devices);
-
-    GtkWidget *auth = adw_preferences_group_new();
-    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(auth), "Authentication");
-    adw_preferences_group_set_description(
-        ADW_PREFERENCES_GROUP(auth), "32 hexadecimal characters. The README explains how to get it from Mi Fitness.");
-    state->entry_authkey = adw_password_entry_row_new();
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(state->entry_authkey), "Auth Key");
-    gtk_editable_set_text(GTK_EDITABLE(state->entry_authkey), saved_auth_key(state));
-    g_signal_connect(state->entry_authkey, "changed", G_CALLBACK(on_authkey_changed), state);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(auth), state->entry_authkey);
-    gtk_box_append(GTK_BOX(box), auth);
-
-    GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    GtkWidget *btn_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    gtk_widget_set_halign(btn_row, GTK_ALIGN_CENTER);
-    state->setup_connect_button = gtk_button_new_with_label("Connect");
-    gtk_widget_add_css_class(state->setup_connect_button, "pill");
-    gtk_widget_add_css_class(state->setup_connect_button, "suggested-action");
-    g_signal_connect(state->setup_connect_button, "clicked", G_CALLBACK(on_setup_connect), state);
-    state->setup_spinner = adw_spinner_new();
-    gtk_widget_set_visible(state->setup_spinner, FALSE);
-    gtk_box_append(GTK_BOX(btn_row), state->setup_connect_button);
-    gtk_box_append(GTK_BOX(btn_row), state->setup_spinner);
-    state->label_status = gtk_label_new("");
-    gtk_widget_add_css_class(state->label_status, "dimmed");
-    gtk_label_set_wrap(GTK_LABEL(state->label_status), TRUE);
-    gtk_label_set_justify(GTK_LABEL(state->label_status), GTK_JUSTIFY_CENTER);
-    gtk_box_append(GTK_BOX(actions), btn_row);
-    gtk_box_append(GTK_BOX(actions), state->label_status);
-    gtk_box_append(GTK_BOX(box), actions);
-
-    GtkWidget *scroll = ui_page_scroll(box, 560);
-
-    GtkWidget *header = adw_header_bar_new();
-    adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), adw_window_title_new("Set Up", NULL));
-    state->setup_cancel_button = gtk_button_new_with_label("Cancel");
-    g_signal_connect(state->setup_cancel_button, "clicked", G_CALLBACK(on_setup_cancel), state);
-    adw_header_bar_pack_start(ADW_HEADER_BAR(header), state->setup_cancel_button);
-    GtkWidget *tb = adw_toolbar_view_new();
-    adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(tb), header);
-    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(tb), scroll);
-    return tb;
+    return state != NULL && state->saved_devices != NULL && state->saved_devices->len > 0;
 }
 
 void salus_ui_show_setup(SalusApp *state) {
-    if (state == NULL || state->stack == NULL) {
-        return;
-    }
-    gtk_widget_set_visible(state->setup_cancel_button, salus_ui_has_saved_device(state));
-    gtk_editable_set_text(GTK_EDITABLE(state->entry_authkey), saved_auth_key(state));
-    gtk_stack_set_visible_child_name(GTK_STACK(state->stack), "setup");
-    populate_device_list(state);
+    salus_connect_show(state);
 }
 
 #define APP_LOG_MAX_CHARS 300000
@@ -361,9 +109,7 @@ void append_log(SalusApp *state, const gchar *line) {
 
 static gboolean ui_set_status_cb(gpointer user_data) {
     UiStatusLine *ctx = user_data;
-    if (ctx->state->label_status != NULL) {
-        gtk_label_set_text(GTK_LABEL(ctx->state->label_status), ctx->status);
-    }
+    salus_connect_set_status(ctx->state, ctx->status);
     salus_dashboard_set_status(ctx->state, ctx->status);
     g_free(ctx->status);
     g_free(ctx);
@@ -372,15 +118,8 @@ static gboolean ui_set_status_cb(gpointer user_data) {
 
 static gboolean ui_set_busy_cb(gpointer user_data) {
     UiBusyState *ctx = user_data;
-    SalusApp *state = ctx->state;
-    ui_set_sensitive_if_widget(state->btn_refresh, !ctx->busy);
-    ui_set_sensitive_if_widget(state->listbox_devices, !ctx->busy);
-    ui_set_sensitive_if_widget(state->entry_authkey, !ctx->busy);
-    if (state->setup_spinner != NULL) {
-        gtk_widget_set_visible(state->setup_spinner, ctx->busy);
-    }
-    salus_dashboard_set_busy(state, ctx->busy);
-    setup_update_connect_sensitivity(state);
+    salus_connect_set_busy(ctx->state, ctx->busy);
+    salus_dashboard_set_busy(ctx->state, ctx->busy);
     g_free(ctx);
     return G_SOURCE_REMOVE;
 }
@@ -985,29 +724,6 @@ void switch_to_pairing(SalusApp *state) {
     }
 }
 
-void start_connect_for_address(SalusApp *state, const gchar *raw_address) {
-    if (raw_address == NULL || raw_address[0] == '\0') {
-        set_status(state, "No device selected.");
-        return;
-    }
-    const gchar *auth_text = state->entry_authkey != NULL ? gtk_editable_get_text(GTK_EDITABLE(state->entry_authkey)) : NULL;
-    if (!xiaomi_auth_key_valid(auth_text)) {
-        set_status(state, "Invalid auth key. Enter 32 hex chars.");
-        return;
-    }
-    gchar *address = g_ascii_strup(raw_address, -1);
-    SalusDeviceConfig *cfg = salus_device_config_new(address, "xiaomi-band");
-    salus_device_config_set(cfg, "auth_key", auth_text);
-    cfg->name = bluez_device_display_name(address);
-    salus_app_save_device(state, cfg);
-    salus_app_activate_device(state, address);
-    salus_device_config_free(cfg);
-    g_free(address);
-    salus_dashboard_update_device_state(state, NULL, NULL, NULL);
-    (void)salus_config_save(state, NULL);
-    salus_device_connect(state);
-}
-
 void salus_app_shutdown(GApplication *app, gpointer user_data) {
     (void)app;
     SalusApp *state = user_data;
@@ -1061,7 +777,7 @@ void salus_app_shutdown(GApplication *app, gpointer user_data) {
         salus_dashboard_ui_free(state->dash_ui);
         state->dash_ui = NULL;
     }
-    g_clear_pointer(&state->pairing_selected_address, g_free);
+    salus_connect_free(state);
     salus_db_close();
 }
 
@@ -1085,12 +801,12 @@ void salus_activate(GApplication *application, gpointer user_data) {
 
     state->dash_ui = salus_dashboard_ui_new();
     state->page_dashboard = salus_dashboard_build(state, state->dash_ui);
-    state->page_pairing = build_setup_page(state);
+    state->page_connect = salus_connect_build(state);
 
     state->stack = gtk_stack_new();
     gtk_stack_set_transition_type(GTK_STACK(state->stack), GTK_STACK_TRANSITION_TYPE_CROSSFADE);
     gtk_stack_add_named(GTK_STACK(state->stack), state->page_dashboard, "main");
-    gtk_stack_add_named(GTK_STACK(state->stack), state->page_pairing, "setup");
+    gtk_stack_add_named(GTK_STACK(state->stack), state->page_connect, "setup");
 
     state->toast_overlay = adw_toast_overlay_new();
     adw_toast_overlay_set_child(ADW_TOAST_OVERLAY(state->toast_overlay), state->stack);

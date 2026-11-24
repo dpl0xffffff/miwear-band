@@ -222,8 +222,16 @@ void ui_show_log_dialog(SalusApp *state);
 void ui_show_weight_dialog(SalusApp *state);
 void ui_show_page(SalusApp *state, const char *name);
 
+/* Connect flow (connect.c): the "setup" page of the main stack. */
+GtkWidget *salus_connect_build(SalusApp *app);
+void salus_connect_free(SalusApp *app);
+void salus_connect_show(SalusApp *app);
+/* Leaves the flow (back to the dashboard when a device is saved). */
+void salus_connect_cancel(SalusApp *app);
+void salus_connect_set_busy(SalusApp *app, gboolean busy);
+void salus_connect_set_status(SalusApp *app, const char *text);
+
 /* Implemented in ui.c */
-void start_connect_for_address(SalusApp *state, const gchar *raw_address);
 void salus_ui_show_setup(SalusApp *state);
 gboolean salus_ui_has_saved_device(SalusApp *state);
 
