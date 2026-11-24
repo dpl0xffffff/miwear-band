@@ -45,6 +45,7 @@ void miwear_dashboard_ui_free(MiwearDashboardUi *dash) {
     g_ptr_array_free(dash->date_next, TRUE);
     g_ptr_array_free(dash->date_today, TRUE);
     g_ptr_array_free(dash->calendars, TRUE);
+    g_clear_object(&dash->metric_page);
     g_free(dash->night);
     g_free(dash->status_text);
     g_free(dash);
@@ -607,12 +608,18 @@ static GtkWidget *ring_legend_row(MiColor color, const char *title, GtkWidget **
     return row;
 }
 
-static GtkWidget *build_activity_card(MiwearDashboardUi *dash) {
-    GtkWidget *inner = NULL;
-    GtkWidget *card = mi_card_new(&inner, 12);
+static void on_tile_clicked(GtkButton *b, gpointer user_data);
+
+static GtkWidget *build_activity_card(AppState *state, MiwearDashboardUi *dash) {
+    GtkWidget *inner = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
     dash->ring_badge = mi_label("LIVE", "mi-live", 0.5f);
     gtk_widget_set_visible(dash->ring_badge, FALSE);
-    gtk_box_append(GTK_BOX(inner), mi_card_header("Activity", NULL, dash->ring_badge));
+    GtkWidget *end = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_append(GTK_BOX(end), dash->ring_badge);
+    GtkWidget *chev = gtk_image_new_from_icon_name("go-next-symbolic");
+    gtk_widget_add_css_class(chev, "dimmed");
+    gtk_box_append(GTK_BOX(end), chev);
+    gtk_box_append(GTK_BOX(inner), mi_card_header("Activity", NULL, end));
 
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 22);
     dash->rings = gtk_drawing_area_new();
@@ -627,6 +634,15 @@ static GtkWidget *build_activity_card(MiwearDashboardUi *dash) {
     gtk_box_append(GTK_BOX(row), dash->rings);
     gtk_box_append(GTK_BOX(row), legend);
     gtk_box_append(GTK_BOX(inner), row);
+
+    /* The whole card opens the steps chart. */
+    GtkWidget *card = gtk_button_new();
+    gtk_button_set_child(GTK_BUTTON(card), inner);
+    gtk_widget_add_css_class(card, "card");
+    gtk_widget_add_css_class(card, "mi-card");
+    gtk_widget_set_tooltip_text(card, "Steps through the day");
+    g_object_set_data(G_OBJECT(card), "mi-tile", (gpointer) "steps");
+    g_signal_connect(card, "clicked", G_CALLBACK(on_tile_clicked), state);
     return card;
 }
 
@@ -645,8 +661,6 @@ static void set_ring_value(GtkWidget *label, long value, long goal, const char *
 }
 
 /* ---- Tiles ---------------------------------------------------------------------------- */
-
-static void on_tile_clicked(GtkButton *b, gpointer user_data);
 
 static void tile_build(MiTile *t, AppState *state, const char *id, const char *title, const char *icon,
                        MiColor color, gboolean clickable, int spark_series) {
@@ -1107,49 +1121,13 @@ static void on_trend_leave(GtkEventControllerMotion *m, gpointer user_data) {
     gtk_widget_queue_draw(dash->trend_area);
 }
 
-static void on_trend_toggle(GObject *obj, GParamSpec *pspec, gpointer user_data) {
-    (void)pspec;
-    AppState *state = user_data;
-    const char *name = adw_toggle_group_get_active_name(ADW_TOGGLE_GROUP(obj));
-    for (int i = 0; i < MI_SERIES_COUNT; i++) {
-        if (g_strcmp0(name, trend_specs[i].name) == 0) {
-            state->dash_ui->trend_metric = i;
-        }
-    }
-    mi_today_refresh(state);
-}
-
-static void trend_select(AppState *state, MiSeries s) {
-    MiwearDashboardUi *dash = state->dash_ui;
-    adw_toggle_group_set_active_name(ADW_TOGGLE_GROUP(dash->trend_toggle), trend_specs[s].name);
-    GtkWidget *child = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(dash->today_scroll));
-    if (GTK_IS_VIEWPORT(child)) {
-        gtk_viewport_scroll_to(GTK_VIEWPORT(child), dash->trend_card, NULL);
-    }
-}
-
 static GtkWidget *build_trend_card(AppState *state, MiwearDashboardUi *dash) {
     GtkWidget *inner = NULL;
     GtkWidget *card = mi_card_new(&inner, 12);
-    dash->trend_card = card;
     gtk_box_append(GTK_BOX(inner), mi_card_header("Through the Day", &dash->trend_subtitle, NULL));
 
-    dash->trend_toggle = adw_toggle_group_new();
-    gtk_widget_add_css_class(dash->trend_toggle, "mi-metric-toggle");
-    adw_toggle_group_set_homogeneous(ADW_TOGGLE_GROUP(dash->trend_toggle), TRUE);
-    adw_toggle_group_set_can_shrink(ADW_TOGGLE_GROUP(dash->trend_toggle), TRUE);
-    for (int i = 0; i < MI_SERIES_COUNT; i++) {
-        AdwToggle *t = adw_toggle_new();
-        adw_toggle_set_name(t, trend_specs[i].name);
-        adw_toggle_set_label(t, trend_specs[i].label);
-        adw_toggle_group_add(ADW_TOGGLE_GROUP(dash->trend_toggle), t);
-    }
-    adw_toggle_group_set_active_name(ADW_TOGGLE_GROUP(dash->trend_toggle), trend_specs[0].name);
-    g_signal_connect(dash->trend_toggle, "notify::active-name", G_CALLBACK(on_trend_toggle), state);
-    gtk_box_append(GTK_BOX(inner), dash->trend_toggle);
-
     dash->trend_area = gtk_drawing_area_new();
-    gtk_widget_set_size_request(dash->trend_area, -1, 210);
+    gtk_widget_set_size_request(dash->trend_area, -1, 260);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(dash->trend_area), draw_trend, state, NULL);
     GtkEventController *motion = gtk_event_controller_motion_new();
     g_signal_connect(motion, "motion", G_CALLBACK(on_trend_motion), dash);
@@ -1172,16 +1150,51 @@ static GtkWidget *build_trend_card(AppState *state, MiwearDashboardUi *dash) {
     return card;
 }
 
+/* One detail page, reused for every metric: pushed onto the navigation view by a tile. */
+static AdwNavigationPage *build_metric_page(AppState *state, MiwearDashboardUi *dash) {
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
+    gtk_widget_add_css_class(box, "mi-page");
+    gtk_box_append(GTK_BOX(box), mi_date_nav_new(state, dash));
+    gtk_box_append(GTK_BOX(box), build_trend_card(state, dash));
+
+    GtkWidget *clamp = adw_clamp_new();
+    adw_clamp_set_maximum_size(ADW_CLAMP(clamp), 960);
+    adw_clamp_set_tightening_threshold(ADW_CLAMP(clamp), 600);
+    adw_clamp_set_child(ADW_CLAMP(clamp), box);
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), clamp);
+
+    GtkWidget *tb = adw_toolbar_view_new();
+    adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(tb), adw_header_bar_new());
+    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(tb), scroll);
+    /* Kept alive between pushes; the navigation view drops its own reference on pop. */
+    return g_object_ref_sink(adw_navigation_page_new_with_tag(tb, trend_specs[0].label, "metric"));
+}
+
+static void show_metric_page(AppState *state, MiSeries s) {
+    MiwearDashboardUi *dash = state->dash_ui;
+    dash->trend_metric = s;
+    dash->trend_hover_x = -1;
+    adw_navigation_page_set_title(dash->metric_page, trend_specs[s].label);
+    mi_today_refresh(state);
+    AdwNavigationView *nav = ADW_NAVIGATION_VIEW(dash->nav_view);
+    if (adw_navigation_view_get_visible_page(nav) != dash->metric_page) {
+        adw_navigation_view_pop_to_tag(nav, "main");
+        adw_navigation_view_push(nav, dash->metric_page);
+    }
+}
+
 static void on_tile_clicked(GtkButton *b, gpointer user_data) {
     AppState *state = user_data;
     const char *id = g_object_get_data(G_OBJECT(b), "mi-tile");
-    if (g_strcmp0(id, "hr") == 0) {
-        trend_select(state, MI_SERIES_HR);
-    } else if (g_strcmp0(id, "spo2") == 0) {
-        trend_select(state, MI_SERIES_SPO2);
-    } else if (g_strcmp0(id, "stress") == 0) {
-        trend_select(state, MI_SERIES_STRESS);
-    } else if (g_strcmp0(id, "sleep") == 0) {
+    for (int i = 0; i < MI_SERIES_COUNT; i++) {
+        if (g_strcmp0(id, trend_specs[i].name) == 0) {
+            show_metric_page(state, trend_specs[i].series);
+            return;
+        }
+    }
+    if (g_strcmp0(id, "sleep") == 0) {
         mi_show_page(state, "sleep");
     } else if (g_strcmp0(id, "weight") == 0) {
         mi_show_weight_dialog(state);
@@ -1192,7 +1205,7 @@ GtkWidget *mi_today_page_new(AppState *state, MiwearDashboardUi *dash) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
     gtk_widget_add_css_class(box, "mi-page");
     gtk_box_append(GTK_BOX(box), mi_date_nav_new(state, dash));
-    gtk_box_append(GTK_BOX(box), build_activity_card(dash));
+    gtk_box_append(GTK_BOX(box), build_activity_card(state, dash));
 
     GtkWidget *flow = gtk_flow_box_new();
     gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(flow), GTK_SELECTION_NONE);
@@ -1219,16 +1232,45 @@ GtkWidget *mi_today_page_new(AppState *state, MiwearDashboardUi *dash) {
         gtk_flow_box_append(GTK_FLOW_BOX(flow), tiles[i]->root);
     }
     gtk_box_append(GTK_BOX(box), flow);
-    gtk_box_append(GTK_BOX(box), build_trend_card(state, dash));
+    dash->metric_page = build_metric_page(state, dash);
 
     GtkWidget *clamp = adw_clamp_new();
     adw_clamp_set_maximum_size(ADW_CLAMP(clamp), 960);
     adw_clamp_set_tightening_threshold(ADW_CLAMP(clamp), 600);
     adw_clamp_set_child(ADW_CLAMP(clamp), box);
-    dash->today_scroll = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(dash->today_scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(dash->today_scroll), clamp);
-    return dash->today_scroll;
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), clamp);
+    return scroll;
+}
+
+/* The day's most recent per-minute reading of a series (synced, manual or live-merged); -1 if none. */
+static int last_reading(AppState *state, const gchar *day_key, MiSeries series, int *minute_out) {
+    int *values = g_new(int, MI_DAY_MINUTES);
+    int v = -1;
+    *minute_out = -1;
+    if (mi_series_collect(state, day_key, series, values) > 0) {
+        for (int m = MI_DAY_MINUTES - 1; m >= 0; m--) {
+            if (values[m] >= 0) {
+                v = values[m];
+                *minute_out = m;
+                break;
+            }
+        }
+    }
+    g_free(values);
+    return v;
+}
+
+/* "Measured at 14:32" (or "… · Relaxed"). */
+static void last_reading_caption(int minute, const char *extra, gchar *buf, gsize len) {
+    gchar clock[8];
+    mi_format_clock(minute, clock, sizeof(clock));
+    if (extra != NULL) {
+        g_snprintf(buf, len, "At %s · %s", clock, extra);
+    } else {
+        g_snprintf(buf, len, "Measured at %s", clock);
+    }
 }
 
 static gboolean live_tiles(AppState *state) {
@@ -1260,64 +1302,55 @@ void mi_today_refresh(AppState *state) {
     dash->ring_ratio[2] = active > 0 ? (double)active / goal_active : 0;
     gtk_widget_set_visible(dash->ring_badge, live && state->has_live_steps);
 
-    /* Heart rate */
-    if (live && state->has_live_hr) {
-        g_snprintf(buf, sizeof(buf), "%u", state->live_hr);
-        const int zone = miwear_hr_zone_index((int)state->live_hr, (int)state->profile_max_hr);
-        if (zone > 0) {
-            g_snprintf(sub, sizeof(sub), "Live · %s", miwear_hr_zone_label(zone));
-        } else {
-            g_snprintf(sub, sizeof(sub), "Live");
-        }
-        tile_set(&dash->tile_hr, buf, "bpm", sub);
-    } else if (agg.hr_n > 0) {
-        g_snprintf(buf, sizeof(buf), "%d", agg.hr_sum / agg.hr_n);
-        if (agg.has_summary && agg.summary.hr_resting > 0) {
-            g_snprintf(sub, sizeof(sub), "Avg · max %d · resting %d", agg.hr_max, agg.summary.hr_resting);
-        } else {
-            g_snprintf(sub, sizeof(sub), "Avg · max %d", agg.hr_max);
-        }
-        tile_set(&dash->tile_hr, buf, "bpm", sub);
-    } else if (agg.has_summary && agg.summary.hr_avg > 0) {
-        g_snprintf(buf, sizeof(buf), "%d", agg.summary.hr_avg);
-        tile_set(&dash->tile_hr, buf, "bpm", "Daily average");
-    } else {
-        tile_set(&dash->tile_hr, "—", NULL, "No readings");
-    }
-
-    /* SpO2 */
-    if (live && state->live_spo2_text != NULL && state->live_spo2_text[0] != '\0') {
-        g_snprintf(buf, sizeof(buf), "%d", atoi(state->live_spo2_text));
-        tile_set(&dash->tile_spo2, buf, "%", "Latest measurement");
-    } else if (agg.spo2_n > 0) {
-        g_snprintf(buf, sizeof(buf), "%d", agg.spo2_sum / agg.spo2_n);
-        g_snprintf(sub, sizeof(sub), "Avg of %d readings", agg.spo2_n);
-        tile_set(&dash->tile_spo2, buf, "%", sub);
-    } else if (agg.has_summary && miwear_spo2_value_valid(agg.summary.spo2_avg)) {
-        g_snprintf(buf, sizeof(buf), "%d", agg.summary.spo2_avg);
-        tile_set(&dash->tile_spo2, buf, "%", "Daily average");
-    } else {
-        tile_set(&dash->tile_spo2, "—", NULL, "No readings");
-    }
-
-    /* Stress */
+    /* Heart rate, SpO2, stress: the live reading while connected, else the day's last one. */
     {
-        int v = -1;
-        const char *src = NULL;
-        if (live) {
-            v = miwear_display_stress_for_day(state, day_key, &src);
+        int at = -1;
+        const int last = last_reading(state, day_key, MI_SERIES_HR, &at);
+        if (live && state->has_live_hr) {
+            g_snprintf(buf, sizeof(buf), "%u", state->live_hr);
+            const int zone = miwear_hr_zone_index((int)state->live_hr, (int)state->profile_max_hr);
+            g_snprintf(sub, sizeof(sub), "Live%s%s", zone > 0 ? " · " : "", miwear_hr_zone_label(zone));
+            tile_set(&dash->tile_hr, buf, "bpm", sub);
+        } else if (last > 0) {
+            g_snprintf(buf, sizeof(buf), "%d", last);
+            last_reading_caption(at, NULL, sub, sizeof(sub));
+            tile_set(&dash->tile_hr, buf, "bpm", sub);
+        } else if (agg.has_summary && agg.summary.hr_avg > 0) {
+            g_snprintf(buf, sizeof(buf), "%d", agg.summary.hr_avg);
+            tile_set(&dash->tile_hr, buf, "bpm", "Daily average");
+        } else {
+            tile_set(&dash->tile_hr, "—", NULL, "No readings");
         }
-        if (v >= 0 && src != NULL &&
-            (g_strcmp0(src, "live-cache") == 0 || g_strcmp0(src, "activity-db") == 0 ||
-             g_strcmp0(src, "timeline-minute") == 0)) {
-            g_snprintf(buf, sizeof(buf), "%d", v);
-            g_snprintf(sub, sizeof(sub), "%s · %s", g_strcmp0(src, "timeline-minute") == 0 ? "Latest" : "Live",
-                       miwear_pressure_level_label(v));
+    }
+    {
+        int at = -1;
+        const int last = last_reading(state, day_key, MI_SERIES_SPO2, &at);
+        const int live_spo2 = live && state->live_spo2_text != NULL ? atoi(state->live_spo2_text) : -1;
+        if (last > 0) {
+            g_snprintf(buf, sizeof(buf), "%d", last);
+            last_reading_caption(at, NULL, sub, sizeof(sub));
+            tile_set(&dash->tile_spo2, buf, "%", sub);
+        } else if (miwear_spo2_value_valid(live_spo2)) {
+            g_snprintf(buf, sizeof(buf), "%d", live_spo2);
+            tile_set(&dash->tile_spo2, buf, "%", "Last measurement");
+        } else if (agg.has_summary && miwear_spo2_value_valid(agg.summary.spo2_avg)) {
+            g_snprintf(buf, sizeof(buf), "%d", agg.summary.spo2_avg);
+            tile_set(&dash->tile_spo2, buf, "%", "Daily average");
+        } else {
+            tile_set(&dash->tile_spo2, "—", NULL, "No readings");
+        }
+    }
+    {
+        int at = -1;
+        const int last = last_reading(state, day_key, MI_SERIES_STRESS, &at);
+        const int live_stress = live && state->live_stress_text != NULL ? atoi(state->live_stress_text) : -1;
+        if (last > 0) {
+            g_snprintf(buf, sizeof(buf), "%d", last);
+            last_reading_caption(at, miwear_pressure_level_label(last), sub, sizeof(sub));
             tile_set(&dash->tile_stress, buf, NULL, sub);
-        } else if (agg.stress_n > 0) {
-            const int avg = agg.stress_sum / agg.stress_n;
-            g_snprintf(buf, sizeof(buf), "%d", avg);
-            g_snprintf(sub, sizeof(sub), "Avg · %s", miwear_pressure_level_label(avg));
+        } else if (miwear_stress_value_valid(live_stress)) {
+            g_snprintf(buf, sizeof(buf), "%d", live_stress);
+            g_snprintf(sub, sizeof(sub), "Last measurement · %s", miwear_pressure_level_label(live_stress));
             tile_set(&dash->tile_stress, buf, NULL, sub);
         } else if (agg.has_summary && miwear_stress_value_valid(agg.summary.stress_avg)) {
             g_snprintf(buf, sizeof(buf), "%d", agg.summary.stress_avg);

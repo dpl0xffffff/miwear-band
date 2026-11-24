@@ -121,7 +121,6 @@ struct MiwearDashboardUi {
     GtkWidget *nav_view;      /* AdwNavigationView: main page + pushed workout details */
     GtkWidget *header;
     GtkWidget *switcher_bar;
-    GtkWidget *today_scroll;
     GtkWidget *toast_overlay;
     GtkWidget *view_stack;
     GtkWidget *banner;
@@ -146,9 +145,8 @@ struct MiwearDashboardUi {
     GtkWidget *ring_badge;
     double ring_ratio[3];
     MiTile tile_hr, tile_spo2, tile_stress, tile_sleep, tile_vitality, tile_weight, tile_cycles;
-    GtkWidget *trend_toggle;
+    AdwNavigationPage *metric_page; /* chart of one MiSeries, pushed from a tile */
     GtkWidget *trend_area;
-    GtkWidget *trend_card;
     GtkWidget *trend_subtitle;
     GtkWidget *trend_stat_value[4];
     GtkWidget *trend_stat_caption[4];

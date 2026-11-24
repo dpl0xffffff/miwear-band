@@ -151,13 +151,14 @@ static void draw_hypnogram(GtkDrawingArea *area, cairo_t *cr, int width, int hei
                 cairo_line_to(cr, round(x0) + 0.5, yb);
                 cairo_stroke(cr);
             }
-            const double y = top + lane * lane_h + lane_h * 0.18;
             if (st == 2 || st == 3 || st == 4 || st == 5) {
                 mi_cairo_set_color(cr, stage_specs[lane].color, 1.0);
+                mi_rounded_rect(cr, x0, top + lane * lane_h + lane_h * 0.18, MAX(x1 - x0, 1.5), lane_h * 0.64, 4);
             } else {
-                mi_cairo_set_fg(cr, w, 0.3);
+                /* Asleep, stage unknown: span every lane so it doesn't read as light sleep. */
+                mi_cairo_set_fg(cr, w, 0.16);
+                mi_rounded_rect(cr, x0, top + 4, MAX(x1 - x0, 1.5), ph - 8, 6);
             }
-            mi_rounded_rect(cr, x0, y, MAX(x1 - x0, 1.5), lane_h * 0.64, 4);
             cairo_fill(cr);
             prev_lane = lane;
             prev_x = x1;
@@ -293,6 +294,7 @@ static GtkWidget *legend_values[4];
 static GtkWidget *sleep_bed_value, *sleep_wake_value, *sleep_inbed_value;
 static GtkWidget *sleep_hr_value, *sleep_spo2_value;
 static GtkWidget *sleep_summary_sub;
+static GtkWidget *sleep_stages_sub;
 
 GtkWidget *mi_sleep_page_new(AppState *state, MiwearDashboardUi *dash) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
@@ -354,7 +356,7 @@ GtkWidget *mi_sleep_page_new(AppState *state, MiwearDashboardUi *dash) {
 
     /* Hypnogram */
     card = mi_card_new(&inner, 12);
-    gtk_box_append(GTK_BOX(inner), mi_card_header("Sleep Stages", NULL, NULL));
+    gtk_box_append(GTK_BOX(inner), mi_card_header("Sleep Stages", &sleep_stages_sub, NULL));
     dash->sleep_hypnogram = gtk_drawing_area_new();
     gtk_widget_set_size_request(dash->sleep_hypnogram, -1, 190);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(dash->sleep_hypnogram), draw_hypnogram, dash, NULL);
@@ -467,6 +469,9 @@ void mi_sleep_refresh(AppState *state) {
         set_legend(3, n->deep, total);
     }
     gtk_widget_set_visible(gtk_widget_get_parent(dash->sleep_hypnogram), n->first >= 0);
+    gtk_label_set_text(GTK_LABEL(sleep_stages_sub),
+                       n->other > 0 && !n->has_breakdown ? "The band didn't send sleep stages for this night" : "");
+    gtk_widget_set_visible(sleep_stages_sub, n->other > 0 && !n->has_breakdown);
     gtk_widget_queue_draw(dash->sleep_bar);
     gtk_widget_queue_draw(dash->sleep_hypnogram);
 }
