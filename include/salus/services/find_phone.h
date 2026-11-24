@@ -3,7 +3,7 @@
 
 #include "salus/app.h"
 
-/* Band → phone (Mi Fit / GB CMD_FIND_PHONE): findDevice 0 = start ringing, 1 = stop. */
+/* The device asks the computer to ring (find_device 0) or to stop (1). */
 void salus_find_phone_on_band_request(SalusApp *state, guint find_device);
 
 /* User dismissed find-phone alert on the PC. */

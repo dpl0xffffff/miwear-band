@@ -1,11 +1,14 @@
 #include "salus/devices/xiaomi/workout_gps.h"
 
 #include "salus/devices/xiaomi/wire_internal.h"
+#include "salus/services/location.h"
 
-#include <geoclue.h>
 #include <math.h>
 
 #include "xiaomi.pb-c.h"
+
+/* Connected GPS, Xiaomi side: answers the band's "workout open" and streams the location
+ * service's fixes as WorkoutLocation messages. */
 
 #define HEALTH_CMD_TYPE 8u
 #define CMD_WORKOUT_WATCH_STATUS 26u
@@ -14,21 +17,7 @@
 
 #define WORKOUT_STATUS_FINISHED 3u
 
-#define GEOCLUE_DESKTOP_ID "io.salus.Salus"
-
-/* Coarser fixes (Wi-Fi/IP location on a computer without GPS) would pull the band's track off
- * course, so they are never sent. */
-#define MAX_ACCURACY_M 50.0
-
-typedef struct {
-    SalusApp *state;
-    GCancellable *cancel;
-    GClueSimple *simple;
-    gulong location_handler;
-    guint sent;
-} WorkoutGps;
-
-static WorkoutGps *s_gps; /* one band connection at a time */
+static guint s_sent; /* fixes sent in the current workout */
 
 static void send_open_reply(SalusApp *state, gboolean have_location) {
     /* Gadgetbridge: 0/2/2 when the phone provides location, 3/2/10 when it has no location
@@ -50,14 +39,6 @@ static void send_open_reply(SalusApp *state, gboolean have_location) {
                                                         : "Workout GPS: replied without computer location");
 }
 
-static gboolean location_usable(GClueLocation *loc) {
-    if (loc == NULL) {
-        return FALSE;
-    }
-    const double acc = gclue_location_get_accuracy(loc);
-    return isfinite(acc) && acc >= 0 && acc <= MAX_ACCURACY_M;
-}
-
 /* No usable location. By default the app stays silent, as before connected GPS existed: the
  * "no permission" reply makes the band show "grant location permission on your phone". */
 static void reply_unavailable(SalusApp *state, const char *why) {
@@ -73,47 +54,29 @@ static void reply_unavailable(SalusApp *state, const char *why) {
     }
 }
 
-static void send_location(WorkoutGps *g, GClueLocation *loc) {
-    if (!location_usable(loc)) {
-        return;
-    }
+static void send_location(SalusApp *state, const SalusLocationFix *fix) {
     Xiaomi__WorkoutLocation wl = XIAOMI__WORKOUT_LOCATION__INIT;
     wl.has_unknown1 = TRUE;
     wl.unknown1 = 10; /* Gadgetbridge: "number of satellites", always 10 */
-    gint64 ts = g_get_real_time() / G_USEC_PER_SEC;
-    GVariant *tv = gclue_location_get_timestamp(loc);
-    if (tv != NULL && g_variant_is_of_type(tv, G_VARIANT_TYPE("(tt)"))) {
-        guint64 sec = 0, usec = 0;
-        g_variant_get(tv, "(tt)", &sec, &usec);
-        if (sec > 0) {
-            ts = (gint64)sec;
-        }
-    }
     wl.has_timestamp = TRUE;
-    wl.timestamp = (uint32_t)ts;
+    wl.timestamp = (uint32_t)fix->timestamp;
     wl.has_latitude = wl.has_longitude = TRUE;
-    wl.latitude = gclue_location_get_latitude(loc);
-    wl.longitude = gclue_location_get_longitude(loc);
-    const double alt = gclue_location_get_altitude(loc);
-    if (alt > -1e6) { /* GeoClue: -G_MAXDOUBLE when unknown */
+    wl.latitude = fix->latitude;
+    wl.longitude = fix->longitude;
+    if (!isnan(fix->altitude)) {
         wl.has_altitude = TRUE;
-        wl.altitude = alt;
+        wl.altitude = fix->altitude;
     }
-    const double speed = gclue_location_get_speed(loc);
-    if (speed >= 0) { /* -1 when unknown */
+    if (fix->speed >= 0) {
         wl.has_speed = TRUE;
-        wl.speed = (float)speed;
+        wl.speed = (float)fix->speed;
     }
-    const double heading = gclue_location_get_heading(loc);
-    if (heading >= 0) {
+    if (fix->heading >= 0) {
         wl.has_bearing = TRUE;
-        wl.bearing = (float)heading;
+        wl.bearing = (float)fix->heading;
     }
-    const double acc = gclue_location_get_accuracy(loc);
-    if (acc >= 0 && isfinite(acc)) {
-        wl.has_horizontalaccuracy = TRUE;
-        wl.horizontalaccuracy = (float)acc;
-    }
+    wl.has_horizontalaccuracy = TRUE;
+    wl.horizontalaccuracy = (float)fix->accuracy;
 
     Xiaomi__Health health = XIAOMI__HEALTH__INIT;
     health.workoutlocation = &wl;
@@ -122,59 +85,40 @@ static void send_location(WorkoutGps *g, GClueLocation *loc) {
     cmd.has_subtype = TRUE;
     cmd.subtype = CMD_WORKOUT_LOCATION;
     cmd.health = &health;
-    const gboolean ok = salus_wire_send_xiaomi_command(g->state, &cmd, NULL);
+    const gboolean ok = salus_wire_send_xiaomi_command(state, &cmd, NULL);
     /* Log the first fix and then every 30th, so a long walk doesn't flood the log. */
-    if (!ok || g->sent == 0 || g->sent % 30 == 0) {
+    if (!ok || s_sent == 0 || s_sent % 30 == 0) {
         gchar *line = g_strdup_printf("Workout GPS: %s location #%u (%.5f, %.5f ±%.0f m)",
-                                      ok ? "sent" : "failed to send", g->sent + 1, wl.latitude, wl.longitude,
-                                      wl.has_horizontalaccuracy ? wl.horizontalaccuracy : -1.0);
-        append_log(g->state, line);
+                                      ok ? "sent" : "failed to send", s_sent + 1, wl.latitude, wl.longitude,
+                                      fix->accuracy);
+        append_log(state, line);
         g_free(line);
     }
     if (ok) {
-        g->sent++;
+        s_sent++;
     }
 }
 
-static void on_location_changed(GClueSimple *simple, GParamSpec *pspec, gpointer user_data) {
-    (void)pspec;
-    send_location(user_data, gclue_simple_get_location(simple));
+static void on_location_ready(SalusApp *state, gboolean available, const char *why, gpointer user_data) {
+    (void)user_data;
+    if (available) {
+        send_open_reply(state, TRUE);
+    } else {
+        reply_unavailable(state, why);
+    }
 }
 
-static void on_simple_ready(GObject *source, GAsyncResult *res, gpointer user_data) {
-    (void)source;
-    WorkoutGps *g = user_data;
-    GError *err = NULL;
-    GClueSimple *simple = gclue_simple_new_with_thresholds_finish(res, &err);
-    if (simple == NULL) {
-        const gboolean cancelled = g_error_matches(err, G_IO_ERROR, G_IO_ERROR_CANCELLED);
-        if (!cancelled) {
-            reply_unavailable(g->state, err != NULL ? err->message : "GeoClue error");
-            salus_workout_gps_stop(g->state, NULL);
-        }
-        g_clear_error(&err);
-        return; /* when cancelled, @g was already freed by stop() */
+static void on_location_fix(SalusApp *state, const SalusLocationFix *fix, gpointer user_data) {
+    (void)user_data;
+    if (salus_device_connected(state)) {
+        send_location(state, fix);
     }
-    g->simple = simple;
-    GClueLocation *first = gclue_simple_get_location(simple);
-    if (!location_usable(first)) {
-        gchar *why = first != NULL ? g_strdup_printf("best fix ±%.0f m", gclue_location_get_accuracy(first))
-                                   : g_strdup("no fix");
-        reply_unavailable(g->state, why);
-        g_free(why);
-        salus_workout_gps_stop(g->state, NULL);
-        return;
-    }
-    send_open_reply(g->state, TRUE);
-    append_log(g->state, "Workout GPS: sharing this computer's location with the band.");
-    g->location_handler = g_signal_connect(simple, "notify::location", G_CALLBACK(on_location_changed), g);
-    send_location(g, gclue_simple_get_location(simple));
 }
 
 static void start(SalusApp *state, uint32_t sport) {
-    if (s_gps != NULL) {
+    if (salus_location_started()) {
         /* Already sharing (the band asked again): confirm. Still starting: the answer follows. */
-        if (s_gps->simple != NULL) {
+        if (salus_location_active()) {
             send_open_reply(state, TRUE);
         }
         return;
@@ -182,39 +126,9 @@ static void start(SalusApp *state, uint32_t sport) {
     gchar *line = g_strdup_printf("Workout GPS: band started an outdoor workout (sport %u) and asked for location.", sport);
     append_log(state, line);
     g_free(line);
-    if (!state->share_location_with_band) {
-        reply_unavailable(state, "sharing is off on the Device page");
-        return;
-    }
-    WorkoutGps *g = g_new0(WorkoutGps, 1);
-    g->state = state;
-    g->cancel = g_cancellable_new();
-    s_gps = g;
-    /* Updates at most once a second, from any distance moved. */
-    gclue_simple_new_with_thresholds(GEOCLUE_DESKTOP_ID, GCLUE_ACCURACY_LEVEL_EXACT, 1, 0, g->cancel,
-                                     on_simple_ready, g);
-}
-
-void salus_workout_gps_stop(SalusApp *state, const char *reason) {
-    WorkoutGps *g = s_gps;
-    if (g == NULL) {
-        return;
-    }
-    s_gps = NULL;
-    g_cancellable_cancel(g->cancel);
-    g_object_unref(g->cancel);
-    if (g->simple != NULL) {
-        if (g->location_handler != 0) {
-            g_signal_handler_disconnect(g->simple, g->location_handler);
-        }
-        g_object_unref(g->simple); /* stops the GeoClue client */
-    }
-    if (reason != NULL && state != NULL) {
-        gchar *line = g_strdup_printf("Workout GPS: stopped (%s) after %u location(s).", reason, g->sent);
-        append_log(state, line);
-        g_free(line);
-    }
-    g_free(g);
+    s_sent = 0;
+    static const SalusLocationCallbacks callbacks = {.ready = on_location_ready, .fix = on_location_fix};
+    salus_location_start(state, &callbacks, NULL);
 }
 
 void salus_workout_gps_handle_command(SalusApp *state, const struct Xiaomi__Command *cmd) {
@@ -232,7 +146,7 @@ void salus_workout_gps_handle_command(SalusApp *state, const struct Xiaomi__Comm
         append_log(state, line);
         g_free(line);
         if (w->has_status && w->status == WORKOUT_STATUS_FINISHED) {
-            salus_workout_gps_stop(state, "workout finished");
+            salus_location_stop(state, "workout finished");
         }
     }
 }

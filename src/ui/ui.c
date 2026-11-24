@@ -3,15 +3,15 @@
 #include "salus/devices/xiaomi/xiaomi.h"
 #include "salus/ui/ui.h"
 #include "salus/store/workout.h"
-#include "salus/notifications/notifications.h"
-#include "salus/find_phone.h"
+#include "salus/services/notifications.h"
+#include "salus/services/find_phone.h"
 #include "salus/ui/dashboard.h"
 #include "ui_private.h"
 #include "salus/store/health_data.h"
 #include "salus/store/sleep.h"
 #include "salus/store/db.h"
 #include "salus/local_time.h"
-#include "salus/devices/xiaomi/weather.h"
+#include "salus/services/weather.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -975,18 +975,6 @@ void switch_to_dashboard(SalusApp *state) {
     g_free(msg);
 }
 
-static gboolean idle_switch_to_dashboard(gpointer user_data) {
-    switch_to_dashboard((SalusApp *)user_data);
-    return G_SOURCE_REMOVE;
-}
-
-void schedule_switch_to_dashboard(SalusApp *state) {
-    if (state == NULL) {
-        return;
-    }
-    g_idle_add(idle_switch_to_dashboard, state);
-}
-
 /* Connection lost: saved data stays browsable; only fall back to setup without a saved band. */
 void switch_to_pairing(SalusApp *state) {
     if (salus_ui_has_saved_device(state)) {
@@ -1129,7 +1117,7 @@ void salus_activate(GApplication *application, gpointer user_data) {
     gtk_window_present(GTK_WINDOW(state->window));
 
     if (state->notifications_enabled) {
-        salus_notifications_on_connect(state);
+        salus_notifications_start(state);
     }
     salus_dashboard_schedule_refresh(state);
 }

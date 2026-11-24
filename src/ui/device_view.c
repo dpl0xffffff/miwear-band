@@ -1,10 +1,10 @@
 #include "ui_private.h"
 
 #include "salus/config.h"
-#include "salus/find_phone.h"
-#include "salus/notifications/notifications.h"
-#include "salus/devices/xiaomi/weather.h"
-#include "salus/devices/xiaomi/workout_gps.h"
+#include "salus/services/find_phone.h"
+#include "salus/services/notifications.h"
+#include "salus/services/weather.h"
+#include "salus/services/location.h"
 
 #include <string.h>
 
@@ -34,7 +34,7 @@ static void on_find_clicked(GtkButton *b, gpointer user_data) {
 
 static void on_weather_clicked(GtkButton *b, gpointer user_data) {
     (void)b;
-    salus_weather_push_cached(user_data);
+    salus_weather_refresh(user_data);
     ui_toast(user_data, "Sending weather to the band…");
 }
 
@@ -62,7 +62,7 @@ static void on_share_location_toggled(GObject *obj, GParamSpec *pspec, gpointer 
     state->share_location_with_band = on;
     (void)salus_config_save(state, NULL);
     if (!on) {
-        salus_workout_gps_stop(state, "location sharing turned off");
+        salus_location_stop(state, "location sharing turned off");
     }
 }
 

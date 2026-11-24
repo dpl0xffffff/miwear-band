@@ -145,8 +145,6 @@ void set_status(SalusApp *state, const gchar *status);
 void set_connect_busy(SalusApp *state, gboolean busy);
 void switch_to_dashboard(SalusApp *state);
 void switch_to_pairing(SalusApp *state);
-/* Safe from background threads (SPP reader); posts work to the GTK main loop. */
-void schedule_switch_to_dashboard(SalusApp *state);
 /* Values the band pushed while connected; unset fields are left as they were. Main thread. */
 typedef struct {
     gboolean has_hr;

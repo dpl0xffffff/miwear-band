@@ -1,6 +1,8 @@
 #include "salus/devices/xiaomi/xiaomi.h"
 
 #include "salus/devices/xiaomi/fitness_sync.h"
+#include "salus/devices/xiaomi/notify.h"
+#include "salus/devices/xiaomi/weather.h"
 #include "salus/devices/xiaomi/wire.h"
 #include "salus/devices/xiaomi/wire_internal.h"
 
@@ -26,6 +28,16 @@ static void xiaomi_sync(SalusDevice *dev) {
 
 static gboolean xiaomi_find_device(SalusDevice *dev, gboolean start) {
     return salus_wire_find_band(dev->app, start);
+}
+
+static void xiaomi_find_phone_stopped(SalusDevice *dev) {
+    (void)salus_wire_send_find_device(dev->app, 17, 1, "Find phone ack (stop on band)");
+}
+
+static void xiaomi_settings_changed(SalusDevice *dev) {
+    if (dev->app->notifications_enabled) {
+        xiaomi_request_notification_prefs(dev->app);
+    }
 }
 
 static void remove_source(guint *id) {
@@ -64,6 +76,10 @@ static const SalusDeviceOps xiaomi_ops = {
     .disconnect = xiaomi_disconnect,
     .sync = xiaomi_sync,
     .find_device = xiaomi_find_device,
+    .find_phone_stopped = xiaomi_find_phone_stopped,
+    .send_notification = xiaomi_send_notification,
+    .push_weather = xiaomi_weather_push,
+    .settings_changed = xiaomi_settings_changed,
     .free = xiaomi_free,
 };
 

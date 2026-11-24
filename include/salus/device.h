@@ -18,6 +18,7 @@
 
 typedef struct SalusApp SalusApp;
 typedef struct SalusDevice SalusDevice;
+typedef struct SalusWeather SalusWeather;
 
 typedef enum {
     SALUS_KIND_BAND,
@@ -94,6 +95,8 @@ typedef struct {
     /* The user stopped the "find my phone" ringer on the computer. */
     void (*find_phone_stopped)(SalusDevice *dev);
     gboolean (*send_notification)(SalusDevice *dev, const SalusNotification *n);
+    /* Show this forecast (services/weather.c fetches it). */
+    void (*push_weather)(SalusDevice *dev, const SalusWeather *weather);
     /* Settings that live on the device changed (profile, notification forwarding, …). */
     void (*settings_changed)(SalusDevice *dev);
     /* Disconnects if needed, cancels timers and frees the session. */
@@ -138,8 +141,6 @@ void salus_device_finalize(SalusDevice *dev);
 /* Driver → core events. */
 void salus_device_set_link(SalusDevice *dev, SalusLinkState link, const char *status);
 
-/* Core helpers for the active device (all safe with no active device). */
-SalusDevice *salus_app_device(SalusApp *app);
 /* Makes @cfg the active device (taking ownership), replacing and disconnecting the previous one. */
 void salus_app_set_device(SalusApp *app, SalusDeviceConfig *cfg);
 gboolean salus_device_connected(SalusApp *app);

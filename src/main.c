@@ -3,7 +3,7 @@
 #include "salus/migrate.h"
 #include "salus/profile.h"
 #include "salus/weight_log.h"
-#include "salus/notifications/notifications.h"
+#include "salus/services/notifications.h"
 #include "salus/ui/ui.h"
 
 #include <stdlib.h>

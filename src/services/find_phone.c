@@ -1,5 +1,4 @@
-#include "salus/find_phone.h"
-#include "salus/devices/xiaomi/wire_internal.h"
+#include "salus/services/find_phone.h"
 #include "salus/ui/dashboard.h"
 
 #include <gio/gio.h>
@@ -123,7 +122,9 @@ void salus_find_phone_dismiss(SalusApp *state) {
         return;
     }
     stop_beep(state);
-    (void)salus_wire_send_find_device(state, 17, 1, "Find phone ack (stop on band)");
+    if (salus_device_connected(state) && state->device->ops->find_phone_stopped != NULL) {
+        state->device->ops->find_phone_stopped(state->device);
+    }
     append_log(state, "Find phone: stopped from Linux app.");
     set_status(state, "Find phone stopped.");
     salus_dashboard_schedule_refresh(state);

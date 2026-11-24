@@ -38,17 +38,20 @@ add_executable(salus
     src/core/migrate.c
     src/core/device.c
     src/devices/registry.c
+    src/services/weather.c
+    src/services/location.c
     src/devices/xiaomi/driver.c
+    src/devices/xiaomi/notify.c
     src/core/local_time.c
     src/core/profile.c
-    src/core/find_phone.c
+    src/services/find_phone.c
     src/core/weight_log.c
     src/devices/xiaomi/crypto.c
     src/core/bluez.c
     src/devices/xiaomi/wire.c
     src/devices/xiaomi/fitness_sync.c
     src/devices/xiaomi/weather.c
-    src/notifications/notifications.c
+    src/services/notifications.c
     src/devices/xiaomi/activity.c
     src/devices/xiaomi/daily_details.c
     src/devices/xiaomi/manual.c

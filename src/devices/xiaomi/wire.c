@@ -1,12 +1,13 @@
 #include "salus/devices/xiaomi/xiaomi.h"
 #include "salus/app.h"
 #include "salus/devices/xiaomi/activity.h"
-#include "salus/find_phone.h"
+#include "salus/services/find_phone.h"
 #include "salus/profile.h"
 #include "salus/store/health_data.h"
 #include "salus/weight_log.h"
 #include "salus/devices/xiaomi/fitness_sync.h"
-#include "salus/notifications/notifications.h"
+#include "salus/services/notifications.h"
+#include "salus/devices/xiaomi/notify.h"
 #include "salus/devices/xiaomi/workout_gps.h"
 #include "salus/devices/xiaomi/weather.h"
 #include "salus/devices/xiaomi/wire.h"
@@ -274,10 +275,10 @@ static void log_decoded_command_proto(SalusApp *state, const uint8_t *plain, siz
     }
 
     if (cmd->type == 10) {
-        salus_weather_handle_command(state, cmd);
+        xiaomi_weather_handle_command(state, cmd);
     }
     if (cmd->type == 7) {
-        salus_notifications_handle_command(state, cmd);
+        xiaomi_notifications_handle_command(state, cmd);
     }
     if (cmd->type == 8) {
         salus_workout_gps_handle_command(state, cmd);
@@ -1556,7 +1557,7 @@ void salus_wire_send_device_bootstrap(SalusApp *state) {
     (void)send_realtime_stats_start(state);
     (void)send_encrypted_simple_command(state, 2, 1, "Requested battery state");
     (void)send_encrypted_simple_command(state, 2, 78, "Requested device state");
-    salus_weather_initialize(state);
+    salus_weather_refresh(state);
 }
 
 void salus_wire_begin_file_sync(SalusApp *state, const char *today_label) {
@@ -1981,8 +1982,6 @@ void disconnect_socket(SalusApp *state) {
     xiaomi(state)->spp_v2_seq = 0;
     state->has_live_steps = FALSE;
     state->has_live_hr = FALSE;
-    salus_notifications_on_disconnect(state);
-    salus_workout_gps_stop(state, "band disconnected");
 }
 
 typedef struct {

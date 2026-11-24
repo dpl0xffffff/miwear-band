@@ -1,6 +1,8 @@
 #include "salus/device.h"
 
 #include "salus/app.h"
+#include "salus/services/location.h"
+#include "salus/services/notifications.h"
 #include "salus/ui/dashboard.h"
 
 /* ---- Config ----------------------------------------------------------------------------- */
@@ -88,16 +90,14 @@ void salus_device_set_link(SalusDevice *dev, SalusLinkState link, const char *st
             set_connect_busy(app, FALSE);
             app->has_live_steps = FALSE;
             app->has_live_hr = FALSE;
+            salus_location_stop(app, "device disconnected");
+            salus_notifications_on_disconnect(app);
             if (was == SALUS_LINK_CONNECTED) {
                 switch_to_pairing(app);
             }
             break;
     }
     salus_dashboard_schedule_refresh(app);
-}
-
-SalusDevice *salus_app_device(SalusApp *app) {
-    return app != NULL ? app->device : NULL;
 }
 
 static void device_free(SalusDevice *dev) {
@@ -107,6 +107,7 @@ static void device_free(SalusDevice *dev) {
 }
 
 void salus_app_set_device(SalusApp *app, SalusDeviceConfig *cfg) {
+    salus_location_stop(app, NULL);
     if (app->device != NULL) {
         SalusDevice *old = app->device;
         app->device = NULL; /* events from the old session during its teardown are ignored */

@@ -1,6 +1,7 @@
 #include "salus/devices/xiaomi/xiaomi.h"
 #include "salus/devices/xiaomi/fitness_sync.h"
-#include "salus/notifications/notifications.h"
+#include "salus/services/notifications.h"
+#include "salus/devices/xiaomi/notify.h"
 #include "salus/devices/xiaomi/wire_internal.h"
 
 /*
@@ -23,7 +24,10 @@ void salus_fitness_sync_on_auth(SalusApp *state) {
      * the timelines from the DB, and no file data arrives before begin_file_sync below. */
     append_log(state, "Mi Fitness sync: startSyncWithDevice → requestData (today, then history).");
     salus_wire_send_device_bootstrap(state);
-    salus_notifications_on_connect(state);
+    salus_notifications_start(state);
+    if (state->notifications_enabled) {
+        xiaomi_request_notification_prefs(state);
+    }
     salus_wire_begin_file_sync(state, "Mi Fitness today file IDs");
 }
 
