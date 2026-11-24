@@ -3,7 +3,7 @@
 
 #include "miwear/app.h"
 
-/* Load ~/.config/miwear-band/config.ini (GKeyFile). Returns FALSE if missing. */
+/* Load ~/.config/salus/config.ini (GKeyFile). Returns FALSE if missing. */
 gboolean miwear_config_load(AppState *state, const char *path);
 
 /* Persist address + auth key (creates parent dirs). */

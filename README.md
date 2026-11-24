@@ -1,8 +1,11 @@
-# miwear-band
+# Salus
 
-GTK4 desktop companion for **Xiaomi Smart Band 9/10** on Linux, written in C.
+Health app for smart bands and watches on Linux (GTK4/libadwaita, written in C). Connect your
+device, sync measurements, sleep and workouts, forward desktop notifications, and browse your
+history offline.
 
-Connect over Bluetooth Classic (RFCOMM), sync health and activity data, forward desktop notifications, and view a Mi Fitness–style dashboard.
+Devices are supported through drivers. Currently supported: **Xiaomi Smart Band 9/10**
+(Bluetooth Classic RFCOMM, Mi Fitness protocol).
 
 ## Build from source (quick guide)
 
@@ -39,19 +42,21 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j"$(nproc)"
 ```
 
-The binary is `build/miwear-band`. Run the unit tests with `ctest --test-dir build`.
+The binary is `build/salus`. Run the unit tests with `ctest --test-dir build`.
 
 ### 4. Run
 
 ```bash
-./build/miwear-band
+./build/salus
 ```
 
 On first launch, pick the band on the setup page, enter your **32-character Mi Fitness auth key** (hex) and press **Connect**. Afterwards the app opens on your saved data and connects from the banner or the Device page.
 
 ### 5. Config (optional)
 
-Settings are stored in `~/.config/miwear-band/config.ini`:
+Settings are stored in `~/.config/salus/config.ini` and health data in
+`~/.local/share/salus/salus.db`. On first start, Salus copies the settings and data of the old
+`miwear-band` app (`~/.config/miwear-band`, `~/.local/share/mi-band10-viewer`) if present:
 
 ```ini
 [device]
@@ -67,7 +72,7 @@ You can also set MAC and auth key in the UI before connecting.
 
 1. Pair the band in **Mi Fitness** once and extract the **auth key** ([Gadgetbridge pairing docs](https://gadgetbridge.org/basics/pairing/huami-xiaomi-server/)).
 2. Trust the device in BlueZ if needed: `bluetoothctl pair`, `trust`, `connect`.
-3. Start **miwear-band** and connect.
+3. Start **Salus** and connect.
 
 ## Debug
 

@@ -453,11 +453,11 @@ static void act_about(GSimpleAction *a, GVariant *p, gpointer user_data) {
     (void)p;
     AppState *state = user_data;
     AdwDialog *about = adw_about_dialog_new();
-    adw_about_dialog_set_application_name(ADW_ABOUT_DIALOG(about), "Mi Wear Band");
+    adw_about_dialog_set_application_name(ADW_ABOUT_DIALOG(about), "Salus");
     adw_about_dialog_set_application_icon(ADW_ABOUT_DIALOG(about), "miwear-watch-symbolic");
     adw_about_dialog_set_comments(ADW_ABOUT_DIALOG(about),
-                                  "Linux companion for Xiaomi Smart Band 9/10: sync health data, "
-                                  "forward notifications and browse your history offline.");
+                                  "Health data from your smart band or watch on Linux: sync measurements, "
+                                  "sleep and workouts, forward notifications and browse your history offline.");
     adw_about_dialog_set_license_type(ADW_ABOUT_DIALOG(about), GTK_LICENSE_GPL_3_0);
     adw_about_dialog_set_website(ADW_ABOUT_DIALOG(about), "https://github.com/notfatnotfunny/miwear-band");
     adw_dialog_present(about, state->window);
@@ -499,7 +499,7 @@ GtkWidget *miwear_dashboard_build(AppState *state, MiwearDashboardUi *dash) {
     g_menu_append(sec1, "Change Device…", "dash.change-device");
     g_menu_append(sec1, "Connection Log", "dash.log");
     GMenu *sec2 = g_menu_new();
-    g_menu_append(sec2, "About Mi Wear Band", "dash.about");
+    g_menu_append(sec2, "About Salus", "dash.about");
     g_menu_append_section(menu, NULL, G_MENU_MODEL(sec1));
     g_menu_append_section(menu, NULL, G_MENU_MODEL(sec2));
     GtkWidget *menu_btn = gtk_menu_button_new();
@@ -541,7 +541,7 @@ GtkWidget *miwear_dashboard_build(AppState *state, MiwearDashboardUi *dash) {
     gtk_widget_insert_action_group(tb, "dash", G_ACTION_GROUP(group));
     g_object_unref(group);
 
-    AdwNavigationPage *main_page = adw_navigation_page_new_with_tag(tb, "Mi Wear Band", "main");
+    AdwNavigationPage *main_page = adw_navigation_page_new_with_tag(tb, "Salus", "main");
     dash->nav_view = adw_navigation_view_new();
     adw_navigation_view_add(ADW_NAVIGATION_VIEW(dash->nav_view), main_page);
     return dash->nav_view;

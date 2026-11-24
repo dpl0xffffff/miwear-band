@@ -1,6 +1,8 @@
 #include "miwear/db/db.h"
 #include "miwear/db/workout_store.h"
 
+#include "miwear/migrate.h"
+
 #include <sqlite3.h>
 #include <string.h>
 
@@ -195,9 +197,9 @@ gboolean miwear_db_open(void) {
     s_device_id = 0;
     s_user_id = 0;
 
-    gchar *dir = g_build_filename(g_get_user_data_dir(), "mi-band10-viewer", NULL);
+    gchar *path = salus_database_path();
+    gchar *dir = g_path_get_dirname(path);
     g_mkdir_with_parents(dir, 0755);
-    gchar *path = g_build_filename(dir, "gadgetbridge_compat.db", NULL);
     g_free(dir);
 
     int rc = sqlite3_open_v2(path, &s_db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, NULL);

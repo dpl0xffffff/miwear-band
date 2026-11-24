@@ -160,7 +160,7 @@ static gchar *display_name_for_notification(const char *app_name, GVariant *hint
 }
 
 static gchar *package_from_app_name(const char *app_name) {
-    GString *s = g_string_new("com.miwear.");
+    GString *s = g_string_new("io.salus.");
     const char *src = (app_name != NULL && app_name[0] != '\0') ? app_name : "unknown";
     for (const char *p = src; *p && s->len < PACKAGE_MAX - 1; p++) {
         char c = *p;
@@ -319,7 +319,7 @@ static void schedule_push(AppState *state,
     if (state == NULL) {
         return;
     }
-    if (app_name != NULL && g_str_has_prefix(app_name, "miwear-band")) {
+    if (app_name != NULL && g_str_has_prefix(app_name, "salus")) {
         return;
     }
     NotifPushIdle *ctx = g_new0(NotifPushIdle, 1);
@@ -588,12 +588,12 @@ void miwear_notifications_send_test(AppState *state) {
     if (state == NULL) {
         return;
     }
-    static const char test_pkg[] = "com.miwear.band";
+    static const char test_pkg[] = "io.salus.Salus";
     const guint32 band_id = notification_next_band_id(state);
     const gboolean ok = send_notification3(state,
                                            band_id,
                                            test_pkg,
-                                           "MiWear Band",
+                                           "Salus",
                                            "Test notification",
                                            "Linux desktop to band sync",
                                            0,

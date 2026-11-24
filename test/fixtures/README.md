@@ -6,7 +6,7 @@ Generate captures during sync:
 
 ```bash
 export MIWEAR_CAPTURE_DIR="$(pwd)/test/fixtures"
-/path/to/build/miwear-band
+/path/to/build/salus
 ```
 
 Each capture: `sport_<type>_detail<D>_v<V>_<unix_ts>.bin` plus a small `.json` sidecar.

@@ -497,7 +497,7 @@ void miwear_weather_initialize(AppState *state) {
         return;
     }
     if (!state->weather_coords_valid) {
-        weather_set_status(state, "Configure [weather] latitude/longitude in ~/.config/miwear-band/config.ini");
+        weather_set_status(state, "Configure [weather] latitude/longitude in ~/.config/salus/config.ini");
         append_log(state, "Weather: missing coordinates in config.ini ([weather] latitude/longitude).");
         return;
     }

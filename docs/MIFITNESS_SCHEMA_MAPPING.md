@@ -191,8 +191,8 @@ CMake extracts `schemas.zip` into `build/mi-fitness-schemas/` and defines `MIWEA
 **Capture payloads from sync** (no extra walks needed for regression):
 
 ```bash
-export MIWEAR_CAPTURE_DIR="$HOME/.local/share/miwear-band/captures"
-./build/miwear-band   # sync workouts; writes sport_22_detail1_v6_<ts>.bin + .json
+export MIWEAR_CAPTURE_DIR="$HOME/.local/share/salus/captures"
+./build/salus   # sync workouts; writes sport_22_detail1_v6_<ts>.bin + .json
 python3 scripts/schema_binary_dump.py --sport 22 --detail 1 --version 6 --bin "$MIWEAR_CAPTURE_DIR/sport_22_detail1_v6_....bin"
 ./build/miwear-schema-dump --bin ... --sport 22 --detail 1 --version 8   # when schema version matches index
 ```

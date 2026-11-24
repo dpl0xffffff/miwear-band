@@ -1142,7 +1142,7 @@ void miwear_activate(GApplication *application, gpointer user_data) {
     state->log_buffer = gtk_text_buffer_new(NULL);
 
     state->window = adw_application_window_new(GTK_APPLICATION(application));
-    gtk_window_set_title(GTK_WINDOW(state->window), "Mi Wear Band");
+    gtk_window_set_title(GTK_WINDOW(state->window), "Salus");
     gtk_window_set_default_size(GTK_WINDOW(state->window), 980, 820);
     gtk_widget_set_size_request(state->window, 360, 480);
 

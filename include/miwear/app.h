@@ -31,7 +31,7 @@ typedef struct MiwearSportEntry {
     MiwearWorkoutSummary *detail;
 } MiwearSportEntry;
 
-/* Set via UI or ~/.config/miwear-band/config.ini (same miwear-auth key as Mi Fitness). */
+/* Set via UI or ~/.config/salus/config.ini (same miwear-auth key as Mi Fitness). */
 #define DEFAULT_AUTH_KEY_HEX ""
 
 typedef struct {

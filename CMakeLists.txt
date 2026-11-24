@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(miwear_band C)
+project(salus C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -32,9 +32,10 @@ add_custom_command(
 )
 add_custom_target(miwear_schemas DEPENDS "${MIWEAR_SCHEMA_STAMP}")
 
-add_executable(miwear-band
+add_executable(salus
     src/main.c
     src/core/config.c
+    src/core/migrate.c
     src/core/local_time.c
     src/core/profile.c
     src/core/find_phone.c
@@ -79,13 +80,13 @@ add_executable(miwear-band
     src/proto/xiaomi.pb-c.c
 )
 
-target_include_directories(miwear-band PRIVATE
+target_include_directories(salus PRIVATE
     include
     src
     src/proto
 )
 
-target_link_libraries(miwear-band PRIVATE
+target_link_libraries(salus PRIVATE
     PkgConfig::GTK
     PkgConfig::ADW
     PkgConfig::GLIB
@@ -98,12 +99,12 @@ target_link_libraries(miwear-band PRIVATE
     m
 )
 
-target_compile_definitions(miwear-band PRIVATE
+target_compile_definitions(salus PRIVATE
     MIWEAR_SCHEMA_DIR="${MIWEAR_SCHEMA_EXTRACT_DIR}"
     MIWEAR_ICONS_DIR="${CMAKE_SOURCE_DIR}/src/resources/icons"
 )
 
-add_dependencies(miwear-band miwear_schemas)
+add_dependencies(salus miwear_schemas)
 
 add_executable(miwear-schema-dump tools/schema_dump.c
     src/activity/schema_reader.c
@@ -160,4 +161,4 @@ foreach(_tz Europe/Berlin America/New_York Australia/Lord_Howe Asia/Kolkata UTC)
     set_tests_properties(local_time_${_tz_name} PROPERTIES ENVIRONMENT "TZ=${_tz}")
 endforeach()
 
-install(TARGETS miwear-band RUNTIME DESTINATION bin)
+install(TARGETS salus RUNTIME DESTINATION bin)

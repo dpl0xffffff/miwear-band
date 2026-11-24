@@ -14,7 +14,7 @@
 
 #define WORKOUT_STATUS_FINISHED 3u
 
-#define GEOCLUE_DESKTOP_ID "com.miwear.band"
+#define GEOCLUE_DESKTOP_ID "io.salus.Salus"
 
 /* Coarser fixes (Wi-Fi/IP location on a computer without GPS) would pull the band's track off
  * course, so they are never sent. */

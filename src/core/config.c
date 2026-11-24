@@ -1,4 +1,5 @@
 #include "miwear/config.h"
+#include "miwear/migrate.h"
 
 #include <glib.h>
 #include <glib/gstdio.h>
@@ -15,7 +16,7 @@ const char *miwear_config_default_path(void) {
     static gsize once;
     static gchar *path;
     if (g_once_init_enter(&once)) {
-        path = g_build_filename(g_get_user_config_dir(), "miwear-band", "config.ini", NULL);
+        path = salus_config_file_path();
         g_once_init_leave(&once, 1);
     }
     return path;

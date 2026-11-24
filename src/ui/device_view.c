@@ -209,7 +209,7 @@ GtkWidget *mi_device_page_new(AppState *state, MiwearDashboardUi *dash) {
     GtkWidget *profile = adw_preferences_group_new();
     adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(profile), "Profile");
     adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(profile),
-                                          "Sent to the band on connect. Edit in ~/.config/miwear-band/config.ini.");
+                                          "Sent to the band on connect. Edit in ~/.config/salus/config.ini.");
     static const char *titles[5] = {"Height", "Weight", "Birthday", "Max Heart Rate", "Activity Goal"};
     for (int i = 0; i < 5; i++) {
         dash->dev_profile_rows[i] = action_row(titles[i], NULL, NULL);

@@ -1,5 +1,6 @@
 #include "miwear/app.h"
 #include "miwear/config.h"
+#include "miwear/migrate.h"
 #include "miwear/profile.h"
 #include "miwear/weight_log.h"
 #include "miwear/notifications/notifications.h"
@@ -22,6 +23,7 @@ int main(int argc, char **argv) {
     g_mutex_init(&state.recorded_lock);
     g_mutex_init(&state.log_lock);
 
+    salus_migrate_legacy_files();
     if (!miwear_config_load(&state, NULL)) {
         g_strlcpy(state.auth_key_hex, DEFAULT_AUTH_KEY_HEX, sizeof(state.auth_key_hex));
         state.notifications_enabled = TRUE;
@@ -31,7 +33,7 @@ int main(int argc, char **argv) {
     miwear_profile_apply_defaults(&state);
     miwear_weight_log_load(&state);
 
-    state.app = adw_application_new("com.miwear.band", G_APPLICATION_DEFAULT_FLAGS);
+    state.app = adw_application_new("io.salus.Salus", G_APPLICATION_DEFAULT_FLAGS);
     g_signal_connect(state.app, "activate", G_CALLBACK(miwear_activate), &state);
     g_signal_connect(state.app, "shutdown", G_CALLBACK(miwear_app_shutdown), &state);
 
