@@ -1,10 +1,10 @@
-#include "miwear/app.h"
-#include "miwear/config.h"
-#include "miwear/migrate.h"
-#include "miwear/profile.h"
-#include "miwear/weight_log.h"
-#include "miwear/notifications/notifications.h"
-#include "miwear/ui/ui.h"
+#include "salus/app.h"
+#include "salus/config.h"
+#include "salus/migrate.h"
+#include "salus/profile.h"
+#include "salus/weight_log.h"
+#include "salus/notifications/notifications.h"
+#include "salus/ui/ui.h"
 
 #include <stdlib.h>
 
@@ -18,24 +18,24 @@ int main(int argc, char **argv) {
     state.sock_fd = -1;
     state.goal_moving = 30;
     state.auth_key_hex[0] = '\0';
-    state.verbose_wire_log = (g_getenv("MIWEAR_VERBOSE_WIRE_LOG") != NULL);
-    state.verbose_fetch_log = (g_getenv("MIWEAR_FETCH_DEBUG") != NULL);
+    state.verbose_wire_log = (g_getenv("SALUS_VERBOSE_WIRE_LOG") != NULL);
+    state.verbose_fetch_log = (g_getenv("SALUS_FETCH_DEBUG") != NULL);
     g_mutex_init(&state.recorded_lock);
     g_mutex_init(&state.log_lock);
 
     salus_migrate_legacy_files();
-    if (!miwear_config_load(&state, NULL)) {
+    if (!salus_config_load(&state, NULL)) {
         g_strlcpy(state.auth_key_hex, DEFAULT_AUTH_KEY_HEX, sizeof(state.auth_key_hex));
         state.notifications_enabled = TRUE;
         state.notifications_min_interval_ms = 3000;
         state.notification_next_id = 1;
     }
-    miwear_profile_apply_defaults(&state);
-    miwear_weight_log_load(&state);
+    salus_profile_apply_defaults(&state);
+    salus_weight_log_load(&state);
 
     state.app = adw_application_new("io.salus.Salus", G_APPLICATION_DEFAULT_FLAGS);
-    g_signal_connect(state.app, "activate", G_CALLBACK(miwear_activate), &state);
-    g_signal_connect(state.app, "shutdown", G_CALLBACK(miwear_app_shutdown), &state);
+    g_signal_connect(state.app, "activate", G_CALLBACK(salus_activate), &state);
+    g_signal_connect(state.app, "shutdown", G_CALLBACK(salus_app_shutdown), &state);
 
     const int status = g_application_run(G_APPLICATION(state.app), argc, argv);
     g_object_unref(state.app);

@@ -7,16 +7,16 @@
 
 typedef struct {
     const char *name;
-    MiColor color;
+    UiColor color;
     int stage;
 } StageSpec;
 
 /* Top to bottom in the hypnogram. */
 static const StageSpec stage_specs[4] = {
-    {"Awake", MI_COLOR_AWAKE, 5},
-    {"REM", MI_COLOR_REM, 4},
-    {"Light", MI_COLOR_LIGHT, 3},
-    {"Deep", MI_COLOR_DEEP, 2},
+    {"Awake", UI_COLOR_AWAKE, 5},
+    {"REM", UI_COLOR_REM, 4},
+    {"Light", UI_COLOR_LIGHT, 3},
+    {"Deep", UI_COLOR_DEEP, 2},
 };
 
 static int stage_lane(int stage) {
@@ -42,15 +42,15 @@ static const char *stage_name(int stage) {
 
 static void draw_stage_bar(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user_data) {
     (void)area;
-    MiwearDashboardUi *dash = user_data;
-    const MiNight *n = dash->night;
+    SalusDashboardUi *dash = user_data;
+    const UiNight *n = dash->night;
     const int parts[4] = {n->awake, n->rem, n->light + (n->has_breakdown ? 0 : n->other), n->deep};
     const int total = parts[0] + parts[1] + parts[2] + parts[3];
     if (total <= 0) {
         return;
     }
     cairo_save(cr);
-    mi_rounded_rect(cr, 0, 0, w, h, h / 2.0);
+    ui_rounded_rect(cr, 0, 0, w, h, h / 2.0);
     cairo_clip(cr);
     /* Deep → light → REM → awake from left to right. */
     double x = 0;
@@ -59,7 +59,7 @@ static void draw_stage_bar(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpoi
             continue;
         }
         const double pw = (double)w * parts[i] / total;
-        mi_cairo_set_color(cr, stage_specs[i].color, 1.0);
+        ui_cairo_set_color(cr, stage_specs[i].color, 1.0);
         cairo_rectangle(cr, x, 0, pw + 0.5, h);
         cairo_fill(cr);
         x += pw;
@@ -70,15 +70,15 @@ static void draw_stage_bar(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpoi
     cairo_restore(cr);
 }
 
-static GtkWidget *legend_item(MiColor color, const char *name, GtkWidget **value_out) {
+static GtkWidget *legend_item(UiColor color, const char *name, GtkWidget **value_out) {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     GtkWidget *dot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_add_css_class(dot, "mi-dot");
-    gtk_widget_add_css_class(dot, mi_color_css_class(color));
+    gtk_widget_add_css_class(dot, "salus-dot");
+    gtk_widget_add_css_class(dot, ui_color_css_class(color));
     gtk_widget_set_valign(dot, GTK_ALIGN_CENTER);
     GtkWidget *col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_append(GTK_BOX(col), mi_label(name, "caption dimmed", 0.0f));
-    GtkWidget *value = mi_label("—", "mi-stat-value numeric", 0.0f);
+    gtk_box_append(GTK_BOX(col), ui_label(name, "caption dimmed", 0.0f));
+    GtkWidget *value = ui_label("—", "salus-stat-value numeric", 0.0f);
     gtk_label_set_use_markup(GTK_LABEL(value), TRUE);
     gtk_box_append(GTK_BOX(col), value);
     gtk_box_append(GTK_BOX(row), dot);
@@ -89,20 +89,20 @@ static GtkWidget *legend_item(MiColor color, const char *name, GtkWidget **value
 
 /* ---- Hypnogram ---------------------------------------------------------------------------- */
 
-static void hypno_bounds(const MiNight *n, int *from, int *to) {
+static void hypno_bounds(const UiNight *n, int *from, int *to) {
     *from = MAX(0, n->first - 20);
-    *to = MIN(MI_NIGHT_MINUTES, n->last + 21);
+    *to = MIN(UI_NIGHT_MINUTES, n->last + 21);
     /* Round to whole hours of the clock for tidy axis labels. */
-    *from = ((MI_NIGHT_START_MIN + *from) / 60) * 60 - MI_NIGHT_START_MIN;
+    *from = ((UI_NIGHT_START_MIN + *from) / 60) * 60 - UI_NIGHT_START_MIN;
     *from = MAX(0, *from);
-    *to = ((MI_NIGHT_START_MIN + *to + 59) / 60) * 60 - MI_NIGHT_START_MIN;
-    *to = MIN(MI_NIGHT_MINUTES, *to);
+    *to = ((UI_NIGHT_START_MIN + *to + 59) / 60) * 60 - UI_NIGHT_START_MIN;
+    *to = MIN(UI_NIGHT_MINUTES, *to);
 }
 
 static void draw_hypnogram(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
-    MiwearDashboardUi *dash = user_data;
+    SalusDashboardUi *dash = user_data;
     GtkWidget *w = GTK_WIDGET(area);
-    const MiNight *n = dash->night;
+    const UiNight *n = dash->night;
     if (n->first < 0 || width < 80) {
         return;
     }
@@ -116,9 +116,9 @@ static void draw_hypnogram(GtkDrawingArea *area, cairo_t *cr, int width, int hei
 
     for (int l = 0; l < 4; l++) {
         const double y = top + l * lane_h;
-        mi_draw_text(cr, w, stage_specs[l].name, 0, y + lane_h / 2 + 4, 11, 0.6, 0.0);
-        mi_cairo_set_fg(cr, w, 0.06);
-        mi_rounded_rect(cr, left, y + 2, pw, lane_h - 4, 6);
+        ui_draw_text(cr, w, stage_specs[l].name, 0, y + lane_h / 2 + 4, 11, 0.6, 0.0);
+        ui_cairo_set_fg(cr, w, 0.06);
+        ui_rounded_rect(cr, left, y + 2, pw, lane_h - 4, 6);
         cairo_fill(cr);
     }
     /* One label per N hours so that labels stay ~48 px apart at any width. */
@@ -126,8 +126,8 @@ static void draw_hypnogram(GtkDrawingArea *area, cairo_t *cr, int width, int hei
     const int step = MAX(1, (int)ceil(48.0 / MAX(px_per_hour, 1.0)));
     for (int m = from; m <= to; m += 60 * step) {
         gchar t[8];
-        mi_format_clock(MI_NIGHT_START_MIN + m, t, sizeof(t));
-        mi_draw_text(cr, w, t, CLAMP(HX(m), left + 14, left + pw - 14), top + ph + 16, 10.5, 0.55, 0.5);
+        ui_format_clock(UI_NIGHT_START_MIN + m, t, sizeof(t));
+        ui_draw_text(cr, w, t, CLAMP(HX(m), left + 14, left + pw - 14), top + ph + 16, 10.5, 0.55, 0.5);
     }
 
     /* Transitions first (thin connectors), blocks on top. */
@@ -144,7 +144,7 @@ static void draw_hypnogram(GtkDrawingArea *area, cairo_t *cr, int width, int hei
             const int lane = stage_lane(st);
             const double x0 = HX(i), x1 = HX(j + 1);
             if (prev_lane >= 0 && prev_lane != lane && fabs(prev_x - x0) < 2.0) {
-                mi_cairo_set_fg(cr, w, 0.18);
+                ui_cairo_set_fg(cr, w, 0.18);
                 cairo_set_line_width(cr, 1.0);
                 const double ya = top + prev_lane * lane_h + lane_h / 2, yb = top + lane * lane_h + lane_h / 2;
                 cairo_move_to(cr, round(x0) + 0.5, ya);
@@ -152,12 +152,12 @@ static void draw_hypnogram(GtkDrawingArea *area, cairo_t *cr, int width, int hei
                 cairo_stroke(cr);
             }
             if (st == 2 || st == 3 || st == 4 || st == 5) {
-                mi_cairo_set_color(cr, stage_specs[lane].color, 1.0);
-                mi_rounded_rect(cr, x0, top + lane * lane_h + lane_h * 0.18, MAX(x1 - x0, 1.5), lane_h * 0.64, 4);
+                ui_cairo_set_color(cr, stage_specs[lane].color, 1.0);
+                ui_rounded_rect(cr, x0, top + lane * lane_h + lane_h * 0.18, MAX(x1 - x0, 1.5), lane_h * 0.64, 4);
             } else {
                 /* Asleep, stage unknown: span every lane so it doesn't read as light sleep. */
-                mi_cairo_set_fg(cr, w, 0.16);
-                mi_rounded_rect(cr, x0, top + 4, MAX(x1 - x0, 1.5), ph - 8, 6);
+                ui_cairo_set_fg(cr, w, 0.16);
+                ui_rounded_rect(cr, x0, top + 4, MAX(x1 - x0, 1.5), ph - 8, 6);
             }
             cairo_fill(cr);
             prev_lane = lane;
@@ -167,16 +167,16 @@ static void draw_hypnogram(GtkDrawingArea *area, cairo_t *cr, int width, int hei
     }
 
     if (dash->sleep_hover_x >= left && dash->sleep_hover_x <= left + pw) {
-        const int at = CLAMP(from + (int)((dash->sleep_hover_x - left) / pw * span), 0, MI_NIGHT_MINUTES - 1);
+        const int at = CLAMP(from + (int)((dash->sleep_hover_x - left) / pw * span), 0, UI_NIGHT_MINUTES - 1);
         if (n->stage[at] >= 0) {
-            mi_cairo_set_fg(cr, w, 0.35);
+            ui_cairo_set_fg(cr, w, 0.35);
             cairo_move_to(cr, round(HX(at)) + 0.5, top);
             cairo_line_to(cr, round(HX(at)) + 0.5, top + ph);
             cairo_stroke(cr);
             gchar c[8], tip[48];
-            mi_format_clock(MI_NIGHT_START_MIN + at, c, sizeof(c));
+            ui_format_clock(UI_NIGHT_START_MIN + at, c, sizeof(c));
             g_snprintf(tip, sizeof(tip), "%s   %s", c, stage_name(n->stage[at]));
-            mi_draw_tooltip(cr, w, tip, HX(at), top, left + pw);
+            ui_draw_tooltip(cr, w, tip, HX(at), top, left + pw);
         }
     }
 #undef HX
@@ -185,14 +185,14 @@ static void draw_hypnogram(GtkDrawingArea *area, cairo_t *cr, int width, int hei
 static void on_hypno_motion(GtkEventControllerMotion *m, double x, double y, gpointer user_data) {
     (void)m;
     (void)y;
-    MiwearDashboardUi *dash = user_data;
+    SalusDashboardUi *dash = user_data;
     dash->sleep_hover_x = x;
     gtk_widget_queue_draw(dash->sleep_hypnogram);
 }
 
 static void on_hypno_leave(GtkEventControllerMotion *m, gpointer user_data) {
     (void)m;
-    MiwearDashboardUi *dash = user_data;
+    SalusDashboardUi *dash = user_data;
     dash->sleep_hover_x = -1;
     gtk_widget_queue_draw(dash->sleep_hypnogram);
 }
@@ -204,7 +204,7 @@ static void on_hypno_leave(GtkEventControllerMotion *m, gpointer user_data) {
 
 static void draw_week(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
     AppState *state = user_data;
-    MiwearDashboardUi *dash = state->dash_ui;
+    SalusDashboardUi *dash = state->dash_ui;
     GtkWidget *w = GTK_WIDGET(area);
     const double left = WEEK_LEFT, top = 6, bottom = WEEK_BOTTOM;
     const double pw = width - left, ph = height - top - bottom;
@@ -215,20 +215,20 @@ static void draw_week(GtkDrawingArea *area, cairo_t *cr, int width, int height, 
     const int hi_h = (max_min + 59) / 60;
     for (int hh = 0; hh <= hi_h; hh += (hi_h > 10 ? 4 : 2)) {
         const double y = top + ph * (1.0 - (double)hh * 60 / (hi_h * 60));
-        mi_cairo_set_fg(cr, w, hh == 0 ? 0.18 : 0.07);
+        ui_cairo_set_fg(cr, w, hh == 0 ? 0.18 : 0.07);
         cairo_set_line_width(cr, 1.0);
         cairo_move_to(cr, left, round(y) + 0.5);
         cairo_line_to(cr, left + pw, round(y) + 0.5);
         cairo_stroke(cr);
         gchar t[8];
         g_snprintf(t, sizeof(t), "%dh", hh);
-        mi_draw_text(cr, w, t, left - 6, y + 3.5, 10.5, 0.55, 1.0);
+        ui_draw_text(cr, w, t, left - 6, y + 3.5, 10.5, 0.55, 1.0);
     }
     /* Goal line */
     const double gy = top + ph * (1.0 - (double)SLEEP_GOAL_MIN / (hi_h * 60));
     const double dashes[] = {4, 4};
     cairo_set_dash(cr, dashes, 2, 0);
-    mi_cairo_set_color(cr, MI_COLOR_SLEEP, 0.6);
+    ui_cairo_set_color(cr, UI_COLOR_SLEEP, 0.6);
     cairo_move_to(cr, left, round(gy) + 0.5);
     cairo_line_to(cr, left + pw, round(gy) + 0.5);
     cairo_stroke(cr);
@@ -236,19 +236,19 @@ static void draw_week(GtkDrawingArea *area, cairo_t *cr, int width, int height, 
 
     const double slot = pw / 7.0;
     const double bw = MIN(slot * 0.56, 34);
-    GDate d = *mi_view_date(state);
+    GDate d = *ui_view_date(state);
     g_date_subtract_days(&d, 6);
     for (int i = 0; i < 7; i++) {
         const double cx = left + slot * (i + 0.5);
         const int mins = dash->week_minutes[i];
         if (mins > 0) {
             const double bh = ph * (double)mins / (hi_h * 60);
-            mi_cairo_set_color(cr, MI_COLOR_SLEEP, i == 6 ? 1.0 : 0.45);
-            mi_rounded_rect(cr, cx - bw / 2, top + ph - bh, bw, bh, MIN(8, bw / 2));
+            ui_cairo_set_color(cr, UI_COLOR_SLEEP, i == 6 ? 1.0 : 0.45);
+            ui_rounded_rect(cr, cx - bw / 2, top + ph - bh, bw, bh, MIN(8, bw / 2));
             cairo_fill(cr);
         }
         static const char *wd[] = {"", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"};
-        mi_draw_text(cr, w, wd[g_date_get_weekday(&d)], cx, top + ph + 17, 10.5, i == 6 ? 0.9 : 0.55, 0.5);
+        ui_draw_text(cr, w, wd[g_date_get_weekday(&d)], cx, top + ph + 17, 10.5, i == 6 ? 0.9 : 0.55, 0.5);
         g_date_add_days(&d, 1);
     }
 }
@@ -266,9 +266,9 @@ static void on_week_click(GtkGestureClick *g, int n_press, double x, double y, g
     if (i == 6) {
         return;
     }
-    GDate d = *mi_view_date(state);
+    GDate d = *ui_view_date(state);
     g_date_subtract_days(&d, 6 - i);
-    mi_set_view_date(state, &d);
+    ui_set_view_date(state, &d);
 }
 
 /* ---- Page --------------------------------------------------------------------------------- */
@@ -279,14 +279,14 @@ static GtkWidget *sleep_hr_value, *sleep_spo2_value;
 static GtkWidget *sleep_summary_sub;
 static GtkWidget *sleep_stages_sub;
 
-GtkWidget *mi_sleep_page_new(AppState *state, MiwearDashboardUi *dash) {
+GtkWidget *mi_sleep_page_new(AppState *state, SalusDashboardUi *dash) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-    gtk_widget_add_css_class(box, "mi-page");
-    gtk_box_append(GTK_BOX(box), mi_date_nav_new(state, dash));
+    gtk_widget_add_css_class(box, "salus-page");
+    gtk_box_append(GTK_BOX(box), ui_date_nav_new(state, dash));
 
     /* Empty state */
     dash->sleep_empty = adw_status_page_new();
-    adw_status_page_set_icon_name(ADW_STATUS_PAGE(dash->sleep_empty), "miwear-moon-symbolic");
+    adw_status_page_set_icon_name(ADW_STATUS_PAGE(dash->sleep_empty), "salus-moon-symbolic");
     adw_status_page_set_title(ADW_STATUS_PAGE(dash->sleep_empty), "No Sleep Recorded");
     adw_status_page_set_description(ADW_STATUS_PAGE(dash->sleep_empty),
                                     "Wear the band overnight and sync in the morning to see your sleep stages.");
@@ -297,31 +297,31 @@ GtkWidget *mi_sleep_page_new(AppState *state, MiwearDashboardUi *dash) {
 
     /* Summary */
     GtkWidget *inner = NULL;
-    GtkWidget *card = mi_card_new(&inner, 14);
+    GtkWidget *card = ui_card_new(&inner, 14);
     GtkWidget *hero = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    GtkWidget *icon = mi_icon("miwear-moon-symbolic", MI_COLOR_SLEEP, 22);
-    gtk_widget_add_css_class(icon, "mi-bubble");
+    GtkWidget *icon = ui_icon("salus-moon-symbolic", UI_COLOR_SLEEP, 22);
+    gtk_widget_add_css_class(icon, "salus-bubble");
     gtk_widget_set_valign(icon, GTK_ALIGN_CENTER);
     GtkWidget *hero_text = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    dash->sleep_total = mi_label("—", "mi-hero-value numeric", 0.0f);
-    sleep_summary_sub = mi_label("Asleep", "dimmed", 0.0f);
+    dash->sleep_total = ui_label("—", "salus-hero-value numeric", 0.0f);
+    sleep_summary_sub = ui_label("Asleep", "dimmed", 0.0f);
     gtk_box_append(GTK_BOX(hero_text), dash->sleep_total);
     gtk_box_append(GTK_BOX(hero_text), sleep_summary_sub);
     gtk_box_append(GTK_BOX(hero), icon);
     gtk_box_append(GTK_BOX(hero), hero_text);
     gtk_box_append(GTK_BOX(inner), hero);
 
-    GtkWidget *times = mi_stat_flow_new();
+    GtkWidget *times = ui_stat_flow_new();
     gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(times), 3);
-    mi_stat_flow_append(times, mi_stat_new("Fell asleep", &sleep_bed_value));
-    mi_stat_flow_append(times, mi_stat_new("Woke up", &sleep_wake_value));
-    mi_stat_flow_append(times, mi_stat_new("Time in bed", &sleep_inbed_value));
+    ui_stat_flow_append(times, ui_stat_new("Fell asleep", &sleep_bed_value));
+    ui_stat_flow_append(times, ui_stat_new("Woke up", &sleep_wake_value));
+    ui_stat_flow_append(times, ui_stat_new("Time in bed", &sleep_inbed_value));
     gtk_box_append(GTK_BOX(inner), times);
 
-    GtkWidget *vitals = mi_stat_flow_new();
+    GtkWidget *vitals = ui_stat_flow_new();
     gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(vitals), 3);
-    mi_stat_flow_append(vitals, mi_stat_new("Avg heart rate", &sleep_hr_value));
-    mi_stat_flow_append(vitals, mi_stat_new("Avg SpO₂", &sleep_spo2_value));
+    ui_stat_flow_append(vitals, ui_stat_new("Avg heart rate", &sleep_hr_value));
+    ui_stat_flow_append(vitals, ui_stat_new("Avg SpO₂", &sleep_spo2_value));
     gtk_box_append(GTK_BOX(inner), vitals);
 
     dash->sleep_bar = gtk_drawing_area_new();
@@ -329,17 +329,17 @@ GtkWidget *mi_sleep_page_new(AppState *state, MiwearDashboardUi *dash) {
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(dash->sleep_bar), draw_stage_bar, dash, NULL);
     gtk_box_append(GTK_BOX(inner), dash->sleep_bar);
 
-    dash->sleep_legend = mi_stat_flow_new();
+    dash->sleep_legend = ui_stat_flow_new();
     for (int i = 3; i >= 0; i--) {
-        mi_stat_flow_append(dash->sleep_legend,
+        ui_stat_flow_append(dash->sleep_legend,
                             legend_item(stage_specs[i].color, stage_specs[i].name, &legend_values[i]));
     }
     gtk_box_append(GTK_BOX(inner), dash->sleep_legend);
     gtk_box_append(GTK_BOX(dash->sleep_content), card);
 
     /* Hypnogram */
-    card = mi_card_new(&inner, 12);
-    gtk_box_append(GTK_BOX(inner), mi_card_header("Sleep Stages", &sleep_stages_sub, NULL));
+    card = ui_card_new(&inner, 12);
+    gtk_box_append(GTK_BOX(inner), ui_card_header("Sleep Stages", &sleep_stages_sub, NULL));
     dash->sleep_hypnogram = gtk_drawing_area_new();
     gtk_widget_set_size_request(dash->sleep_hypnogram, -1, 190);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(dash->sleep_hypnogram), draw_hypnogram, dash, NULL);
@@ -353,8 +353,8 @@ GtkWidget *mi_sleep_page_new(AppState *state, MiwearDashboardUi *dash) {
 
     /* Last 7 nights (shown even when this night is empty) */
     GtkWidget *week_sub = NULL;
-    card = mi_card_new(&inner, 12);
-    gtk_box_append(GTK_BOX(inner), mi_card_header("Last 7 Nights", &week_sub, NULL));
+    card = ui_card_new(&inner, 12);
+    gtk_box_append(GTK_BOX(inner), ui_card_header("Last 7 Nights", &week_sub, NULL));
     gtk_label_set_text(GTK_LABEL(week_sub), "Dashed line: 8 h goal · click a night to open it");
     dash->sleep_week = gtk_drawing_area_new();
     gtk_widget_set_size_request(dash->sleep_week, -1, 150);
@@ -365,13 +365,13 @@ GtkWidget *mi_sleep_page_new(AppState *state, MiwearDashboardUi *dash) {
     gtk_box_append(GTK_BOX(inner), dash->sleep_week);
     gtk_box_append(GTK_BOX(box), card);
 
-    GtkWidget *scroll = mi_page_scroll(box, 960);
+    GtkWidget *scroll = ui_page_scroll(box, 960);
     return scroll;
 }
 
 static void set_legend(int idx, int minutes, int total) {
     gchar d[32];
-    mi_format_minutes(minutes, d, sizeof(d));
+    ui_format_minutes(minutes, d, sizeof(d));
     gchar *m = g_markup_printf_escaped("%s<span weight=\"normal\" alpha=\"55%%\" size=\"small\">  %d%%</span>", d,
                                        total > 0 ? (int)lround(100.0 * minutes / total) : 0);
     gtk_label_set_markup(GTK_LABEL(legend_values[idx]), m);
@@ -379,26 +379,26 @@ static void set_legend(int idx, int minutes, int total) {
 }
 
 void mi_sleep_refresh(AppState *state) {
-    MiwearDashboardUi *dash = state->dash_ui;
+    SalusDashboardUi *dash = state->dash_ui;
     if (dash == NULL || dash->sleep_content == NULL) {
         return;
     }
-    MiNight *n = dash->night;
-    mi_night_collect(state, mi_view_date(state), n);
+    UiNight *n = dash->night;
+    ui_night_collect(state, ui_view_date(state), n);
     const gboolean has = n->total_asleep > 0 || n->first >= 0;
     gtk_widget_set_visible(dash->sleep_content, has);
     gtk_widget_set_visible(dash->sleep_empty, !has);
 
-    GDate d = *mi_view_date(state);
+    GDate d = *ui_view_date(state);
     g_date_subtract_days(&d, 6);
-    MiNight *tmp = g_new(MiNight, 1);
+    UiNight *tmp = g_new(UiNight, 1);
     for (int i = 0; i < 7; i++) {
-        mi_night_collect(state, &d, tmp);
+        ui_night_collect(state, &d, tmp);
         dash->week_minutes[i] = tmp->total_asleep;
         g_date_add_days(&d, 1);
     }
     g_free(tmp);
-    mi_night_collect(state, mi_view_date(state), n); /* the shared buffer holds the viewed night */
+    ui_night_collect(state, ui_view_date(state), n); /* the shared buffer holds the viewed night */
     gtk_widget_queue_draw(dash->sleep_week);
     if (!has) {
         return;
@@ -412,11 +412,11 @@ void mi_sleep_refresh(AppState *state) {
     g_snprintf(sub, sizeof(sub), "Asleep · %d%% of the 8 h goal", pct_goal);
     gtk_label_set_text(GTK_LABEL(sleep_summary_sub), sub);
     if (n->first >= 0) {
-        mi_format_clock(MI_NIGHT_START_MIN + n->first, buf, sizeof(buf));
+        ui_format_clock(UI_NIGHT_START_MIN + n->first, buf, sizeof(buf));
         gtk_label_set_text(GTK_LABEL(sleep_bed_value), buf);
-        mi_format_clock(MI_NIGHT_START_MIN + n->last + 1, buf, sizeof(buf));
+        ui_format_clock(UI_NIGHT_START_MIN + n->last + 1, buf, sizeof(buf));
         gtk_label_set_text(GTK_LABEL(sleep_wake_value), buf);
-        mi_format_minutes(n->last + 1 - n->first, buf, sizeof(buf));
+        ui_format_minutes(n->last + 1 - n->first, buf, sizeof(buf));
         gtk_label_set_text(GTK_LABEL(sleep_inbed_value), buf);
     } else {
         gtk_label_set_text(GTK_LABEL(sleep_bed_value), "—");

@@ -1,7 +1,7 @@
-#include "miwear/notifications/notifications.h"
-#include "miwear/config.h"
-#include "miwear/spp/wire_internal.h"
-#include "miwear/ui/dashboard.h"
+#include "salus/notifications/notifications.h"
+#include "salus/config.h"
+#include "salus/spp/wire_internal.h"
+#include "salus/ui/dashboard.h"
 
 #include <string.h>
 
@@ -24,7 +24,7 @@ static void notif_status_update(AppState *state, const char *msg) {
     }
     g_free(state->notification_status);
     state->notification_status = g_strdup(msg);
-    miwear_dashboard_set_notification_status(state, msg);
+    salus_dashboard_set_notification_status(state, msg);
 }
 
 static void log_desktop_capture(AppState *state, const char *via, const char *app, const char *title) {
@@ -238,7 +238,7 @@ static gboolean send_notification3(AppState *state,
     cmd.notification = &n;
 
     gchar *label = g_strdup_printf("Notification → band (#%u, ts=%s)", band_id, ts);
-    const gboolean ok = miwear_wire_send_xiaomi_command(state, &cmd, label);
+    const gboolean ok = salus_wire_send_xiaomi_command(state, &cmd, label);
     g_free(label);
 
     g_free(ts);
@@ -249,7 +249,7 @@ static gboolean send_notification3(AppState *state,
     return ok;
 }
 
-static gboolean miwear_notifications_push_at(AppState *state,
+static gboolean salus_notifications_push_at(AppState *state,
                                              const char *app_name,
                                              const char *title,
                                              const char *body,
@@ -298,7 +298,7 @@ typedef struct {
 
 static gboolean notif_push_idle(gpointer user_data) {
     NotifPushIdle *ctx = user_data;
-    (void)miwear_notifications_push_at(ctx->state, ctx->app_name, ctx->title, ctx->body, ctx->when_unix_sec,
+    (void)salus_notifications_push_at(ctx->state, ctx->app_name, ctx->title, ctx->body, ctx->when_unix_sec,
                                        ctx->notify_hints);
     g_free(ctx->app_name);
     g_free(ctx->title);
@@ -479,7 +479,7 @@ static void request_screen_on_pref(AppState *state) {
     cmd.has_subtype = TRUE;
     cmd.subtype = NOTIF_SUBTYPE_SCREEN_ON_GET;
     cmd.notification = &n;
-    (void)miwear_wire_send_xiaomi_command(state, &cmd, "Notification prefs (screen on)");
+    (void)salus_wire_send_xiaomi_command(state, &cmd, "Notification prefs (screen on)");
 }
 
 static void ensure_dbus_listener(AppState *state) {
@@ -535,7 +535,7 @@ static void stop_dbus_listener(AppState *state) {
     state->notification_bus = NULL;
 }
 
-void miwear_notifications_on_connect(AppState *state) {
+void salus_notifications_on_connect(AppState *state) {
     if (state == NULL || !state->notifications_enabled) {
         return;
     }
@@ -543,21 +543,21 @@ void miwear_notifications_on_connect(AppState *state) {
     request_screen_on_pref(state);
 }
 
-void miwear_notifications_on_disconnect(AppState *state) {
+void salus_notifications_on_disconnect(AppState *state) {
     if (state == NULL) {
         return;
     }
     state->notification_last_sent_ms = 0;
 }
 
-void miwear_notifications_shutdown(AppState *state) {
+void salus_notifications_shutdown(AppState *state) {
     if (state == NULL) {
         return;
     }
     stop_dbus_listener(state);
 }
 
-void miwear_notifications_handle_command(AppState *state, const Xiaomi__Command *cmd) {
+void salus_notifications_handle_command(AppState *state, const Xiaomi__Command *cmd) {
     if (state == NULL || cmd == NULL || cmd->type != NOTIF_CMD_TYPE) {
         return;
     }
@@ -567,7 +567,7 @@ void miwear_notifications_handle_command(AppState *state, const Xiaomi__Command 
     }
 }
 
-void miwear_notifications_set_enabled(AppState *state, gboolean enabled) {
+void salus_notifications_set_enabled(AppState *state, gboolean enabled) {
     if (state == NULL) {
         return;
     }
@@ -581,10 +581,10 @@ void miwear_notifications_set_enabled(AppState *state, gboolean enabled) {
         stop_dbus_listener(state);
         notif_status_update(state, "Desktop notification sync disabled");
     }
-    (void)miwear_config_save(state, NULL);
+    (void)salus_config_save(state, NULL);
 }
 
-void miwear_notifications_send_test(AppState *state) {
+void salus_notifications_send_test(AppState *state) {
     if (state == NULL) {
         return;
     }

@@ -1,10 +1,10 @@
-#include "miwear/activity/mi_fitness_validity.h"
-#include "miwear/activity/mi_fitness_data.h"
+#include "salus/activity/mi_fitness_validity.h"
+#include "salus/activity/mi_fitness_data.h"
 
 /* Leaf version→validity-byte-length helpers (APK FitnessDataValidity). */
 #include "mi_fitness_validity_generated.c"
 
-static int sport_report_validity_len(const MiwearFitnessDataId *id) {
+static int sport_report_validity_len(const SalusFitnessDataId *id) {
     const int version = id->version;
     switch (id->sport_type) {
         case 1:
@@ -60,7 +60,7 @@ static int sport_report_validity_len(const MiwearFitnessDataId *id) {
     }
 }
 
-static int sport_record_validity_len(const MiwearFitnessDataId *id) {
+static int sport_record_validity_len(const SalusFitnessDataId *id) {
     const int version = id->version;
     switch (id->sport_type) {
         case 1:
@@ -113,7 +113,7 @@ static int sport_record_validity_len(const MiwearFitnessDataId *id) {
     }
 }
 
-static int sport_validity_len(const MiwearFitnessDataId *id) {
+static int sport_validity_len(const SalusFitnessDataId *id) {
     switch (id->file_type) {
         case 0:
             return sport_record_validity_len(id);
@@ -126,7 +126,7 @@ static int sport_validity_len(const MiwearFitnessDataId *id) {
     }
 }
 
-static int daily_validity_len(const MiwearFitnessDataId *id) {
+static int daily_validity_len(const SalusFitnessDataId *id) {
     const int version = id->version;
     const int daily = mi_fitness_apk_daily_type(id->daily_type);
     if (daily == 0) {
@@ -162,7 +162,7 @@ static int daily_validity_len(const MiwearFitnessDataId *id) {
     }
 }
 
-int mi_fitness_data_validity_len(const MiwearFitnessDataId *id) {
+int mi_fitness_data_validity_len(const SalusFitnessDataId *id) {
     if (id == NULL) {
         return -1;
     }

@@ -15,22 +15,22 @@ pkg_check_modules(JSON REQUIRED IMPORTED_TARGET json-glib-1.0)
 pkg_check_modules(GEOCLUE REQUIRED IMPORTED_TARGET libgeoclue-2.0)
 find_library(BLUETOOTH_LIB bluetooth REQUIRED)
 
-set(MIWEAR_SCHEMA_EXTRACT_DIR "${CMAKE_BINARY_DIR}/mi-fitness-schemas")
-set(MIWEAR_SCHEMA_STAMP "${MIWEAR_SCHEMA_EXTRACT_DIR}/.extracted")
+set(SALUS_SCHEMA_EXTRACT_DIR "${CMAKE_BINARY_DIR}/mi-fitness-schemas")
+set(SALUS_SCHEMA_STAMP "${SALUS_SCHEMA_EXTRACT_DIR}/.extracted")
 add_custom_command(
-    OUTPUT "${MIWEAR_SCHEMA_STAMP}"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${MIWEAR_SCHEMA_EXTRACT_DIR}"
+    OUTPUT "${SALUS_SCHEMA_STAMP}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${SALUS_SCHEMA_EXTRACT_DIR}"
     COMMAND unzip -qo "${CMAKE_SOURCE_DIR}/third_party/mi-fitness-schemas/schemas.zip"
-            -d "${MIWEAR_SCHEMA_EXTRACT_DIR}"
+            -d "${SALUS_SCHEMA_EXTRACT_DIR}"
     COMMAND ${CMAKE_COMMAND} -E copy
             "${CMAKE_SOURCE_DIR}/third_party/mi-fitness-schemas/index.json"
-            "${MIWEAR_SCHEMA_EXTRACT_DIR}/index.json"
-    COMMAND ${CMAKE_COMMAND} -E touch "${MIWEAR_SCHEMA_STAMP}"
+            "${SALUS_SCHEMA_EXTRACT_DIR}/index.json"
+    COMMAND ${CMAKE_COMMAND} -E touch "${SALUS_SCHEMA_STAMP}"
     DEPENDS "${CMAKE_SOURCE_DIR}/third_party/mi-fitness-schemas/schemas.zip"
             "${CMAKE_SOURCE_DIR}/third_party/mi-fitness-schemas/index.json"
     COMMENT "Extract Mi Fitness schemas.zip for schema reader"
 )
-add_custom_target(miwear_schemas DEPENDS "${MIWEAR_SCHEMA_STAMP}")
+add_custom_target(salus_schemas DEPENDS "${SALUS_SCHEMA_STAMP}")
 
 add_executable(salus
     src/main.c
@@ -100,13 +100,13 @@ target_link_libraries(salus PRIVATE
 )
 
 target_compile_definitions(salus PRIVATE
-    MIWEAR_SCHEMA_DIR="${MIWEAR_SCHEMA_EXTRACT_DIR}"
-    MIWEAR_ICONS_DIR="${CMAKE_SOURCE_DIR}/src/resources/icons"
+    SALUS_SCHEMA_DIR="${SALUS_SCHEMA_EXTRACT_DIR}"
+    SALUS_ICONS_DIR="${CMAKE_SOURCE_DIR}/src/resources/icons"
 )
 
-add_dependencies(salus miwear_schemas)
+add_dependencies(salus salus_schemas)
 
-add_executable(miwear-schema-dump tools/schema_dump.c
+add_executable(salus-schema-dump tools/schema_dump.c
     src/activity/schema_reader.c
     src/activity/mi_fitness_data.c
     src/activity/mi_fitness_validity.c
@@ -114,27 +114,27 @@ add_executable(miwear-schema-dump tools/schema_dump.c
     src/activity/workout_types.c
     src/activity/mi_fitness_report_tables.c
 )
-target_include_directories(miwear-schema-dump PRIVATE include)
-target_link_libraries(miwear-schema-dump PRIVATE PkgConfig::GLIB PkgConfig::JSON m)
-target_compile_definitions(miwear-schema-dump PRIVATE
-    MIWEAR_SCHEMA_DIR="${MIWEAR_SCHEMA_EXTRACT_DIR}"
+target_include_directories(salus-schema-dump PRIVATE include)
+target_link_libraries(salus-schema-dump PRIVATE PkgConfig::GLIB PkgConfig::JSON m)
+target_compile_definitions(salus-schema-dump PRIVATE
+    SALUS_SCHEMA_DIR="${SALUS_SCHEMA_EXTRACT_DIR}"
 )
-add_dependencies(miwear-schema-dump miwear_schemas)
+add_dependencies(salus-schema-dump salus_schemas)
 
 enable_testing()
-add_executable(miwear-parser-test
+add_executable(salus-parser-test
     test/parser_test.c
     src/activity/daily_details.c
     src/sleep/mi_sleep_packets.c
     src/sleep/mi_sleep_duration.c
     src/activity/mi_fitness_full_day_sleep.c
 )
-target_include_directories(miwear-parser-test PRIVATE include)
-target_link_libraries(miwear-parser-test PRIVATE PkgConfig::GLIB PkgConfig::GTK PkgConfig::ADW PkgConfig::PROTOBUF_C
+target_include_directories(salus-parser-test PRIVATE include)
+target_link_libraries(salus-parser-test PRIVATE PkgConfig::GLIB PkgConfig::GTK PkgConfig::ADW PkgConfig::PROTOBUF_C
     PkgConfig::SQLITE3 PkgConfig::JSON)
-add_test(NAME parsers COMMAND miwear-parser-test)
+add_test(NAME parsers COMMAND salus-parser-test)
 
-add_executable(miwear-report-test
+add_executable(salus-report-test
     test/report_test.c
     src/activity/mi_fitness_sport_report.c
     src/activity/mi_fitness_sport_record.c
@@ -147,17 +147,17 @@ add_executable(miwear-report-test
     src/activity/workout_record.c
     src/db/workout_store.c
 )
-target_include_directories(miwear-report-test PRIVATE include)
-target_link_libraries(miwear-report-test PRIVATE PkgConfig::GLIB PkgConfig::JSON m)
-target_compile_definitions(miwear-report-test PRIVATE MIWEAR_SCHEMA_DIR="${MIWEAR_SCHEMA_EXTRACT_DIR}")
-add_dependencies(miwear-report-test miwear_schemas)
-add_test(NAME reports COMMAND miwear-report-test)
-add_executable(miwear-local-time-test test/local_time_test.c src/core/local_time.c)
-target_include_directories(miwear-local-time-test PRIVATE include)
-target_link_libraries(miwear-local-time-test PRIVATE PkgConfig::GLIB)
+target_include_directories(salus-report-test PRIVATE include)
+target_link_libraries(salus-report-test PRIVATE PkgConfig::GLIB PkgConfig::JSON m)
+target_compile_definitions(salus-report-test PRIVATE SALUS_SCHEMA_DIR="${SALUS_SCHEMA_EXTRACT_DIR}")
+add_dependencies(salus-report-test salus_schemas)
+add_test(NAME reports COMMAND salus-report-test)
+add_executable(salus-local-time-test test/local_time_test.c src/core/local_time.c)
+target_include_directories(salus-local-time-test PRIVATE include)
+target_link_libraries(salus-local-time-test PRIVATE PkgConfig::GLIB)
 foreach(_tz Europe/Berlin America/New_York Australia/Lord_Howe Asia/Kolkata UTC)
     string(REPLACE "/" "_" _tz_name "${_tz}")
-    add_test(NAME local_time_${_tz_name} COMMAND miwear-local-time-test)
+    add_test(NAME local_time_${_tz_name} COMMAND salus-local-time-test)
     set_tests_properties(local_time_${_tz_name} PROPERTIES ENVIRONMENT "TZ=${_tz}")
 endforeach()
 

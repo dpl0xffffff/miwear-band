@@ -1,6 +1,6 @@
-#include "miwear/activity/mi_fitness_data.h"
-#include "miwear/activity/mi_fitness_validity.h"
-#include "miwear/util.h"
+#include "salus/activity/mi_fitness_data.h"
+#include "salus/activity/mi_fitness_validity.h"
+#include "salus/util.h"
 
 #include <string.h>
 
@@ -9,12 +9,12 @@ int mi_fitness_apk_daily_type(int wire_daily_subtype) {
     return wire_daily_subtype;
 }
 
-bool mi_fitness_data_id_from_payload(const uint8_t *payload, size_t payload_len, int file_type, MiwearFitnessDataId *out) {
+bool mi_fitness_data_id_from_payload(const uint8_t *payload, size_t payload_len, int file_type, SalusFitnessDataId *out) {
     if (payload == NULL || out == NULL || payload_len < 7) {
         return false;
     }
     memset(out, 0, sizeof(*out));
-    out->timestamp_sec = miwear_read_u32_le(payload);
+    out->timestamp_sec = salus_read_u32_le(payload);
     out->tz_15min = (int8_t)payload[4];
     out->version = payload[5];
     const uint8_t flags = payload[6];
@@ -31,14 +31,14 @@ bool mi_fitness_data_id_from_payload(const uint8_t *payload, size_t payload_len,
     return true;
 }
 
-static int server_data_id_len(const MiwearFitnessDataId *id) {
+static int server_data_id_len(const SalusFitnessDataId *id) {
     return id->data_type == 0 ? 6 : 7;
 }
 
 bool mi_fitness_split_native_payload(const uint8_t *payload,
                                      size_t payload_len,
-                                     const MiwearFitnessDataId *id,
-                                     MiwearFitnessBinarySlice *out) {
+                                     const SalusFitnessDataId *id,
+                                     SalusFitnessBinarySlice *out) {
     if (payload == NULL || id == NULL || out == NULL) {
         return false;
     }

@@ -1,11 +1,11 @@
-#ifndef MIWEAR_UI_PRIVATE_H
-#define MIWEAR_UI_PRIVATE_H
+#ifndef SALUS_UI_PRIVATE_H
+#define SALUS_UI_PRIVATE_H
 
 /* Shared between the UI translation units (dashboard, sleep, workouts, device, widgets). */
 
-#include "miwear/app.h"
-#include "miwear/ui/dashboard.h"
-#include "miwear/ui/health_data.h"
+#include "salus/app.h"
+#include "salus/ui/dashboard.h"
+#include "salus/ui/health_data.h"
 
 #include <adwaita.h>
 #include <cairo.h>
@@ -13,88 +13,88 @@
 /* ---- Palette ------------------------------------------------------------------------------ */
 
 typedef enum {
-    MI_COLOR_HR,
-    MI_COLOR_SPO2,
-    MI_COLOR_STRESS,
-    MI_COLOR_STEPS,
-    MI_COLOR_CALORIES,
-    MI_COLOR_ACTIVE,
-    MI_COLOR_SLEEP,
-    MI_COLOR_VITALITY,
-    MI_COLOR_WEIGHT,
-    MI_COLOR_CYCLES,
-    MI_COLOR_DEEP,
-    MI_COLOR_LIGHT,
-    MI_COLOR_REM,
-    MI_COLOR_AWAKE,
-    MI_COLOR_COUNT
-} MiColor;
+    UI_COLOR_HR,
+    UI_COLOR_SPO2,
+    UI_COLOR_STRESS,
+    UI_COLOR_STEPS,
+    UI_COLOR_CALORIES,
+    UI_COLOR_ACTIVE,
+    UI_COLOR_SLEEP,
+    UI_COLOR_VITALITY,
+    UI_COLOR_WEIGHT,
+    UI_COLOR_CYCLES,
+    UI_COLOR_DEEP,
+    UI_COLOR_LIGHT,
+    UI_COLOR_REM,
+    UI_COLOR_AWAKE,
+    UI_COLOR_COUNT
+} UiColor;
 
 /* CSS class carrying the colour as `color:` (for icons and accents). */
-const char *mi_color_css_class(MiColor c);
-void mi_color_rgb(MiColor c, double rgb[3]);
-void mi_cairo_set_color(cairo_t *cr, MiColor c, double alpha);
+const char *ui_color_css_class(UiColor c);
+void ui_color_rgb(UiColor c, double rgb[3]);
+void ui_cairo_set_color(cairo_t *cr, UiColor c, double alpha);
 /* Theme foreground of a widget, with alpha. */
-void mi_cairo_set_fg(cairo_t *cr, GtkWidget *widget, double alpha);
-gboolean mi_is_dark(void);
+void ui_cairo_set_fg(cairo_t *cr, GtkWidget *widget, double alpha);
+gboolean ui_is_dark(void);
 
-void mi_style_install(GdkDisplay *display);
+void ui_style_install(GdkDisplay *display);
 
 /* ---- Small widget helpers ----------------------------------------------------------------- */
 
-GtkWidget *mi_label(const char *text, const char *css_class, float xalign);
-GtkWidget *mi_icon(const char *icon_name, MiColor color, int pixel_size);
+GtkWidget *ui_label(const char *text, const char *css_class, float xalign);
+GtkWidget *ui_icon(const char *icon_name, UiColor color, int pixel_size);
 /* Card container (.card) with padding; returns the inner vertical box via `inner_out`. */
-GtkWidget *mi_card_new(GtkWidget **inner_out, int spacing);
+GtkWidget *ui_card_new(GtkWidget **inner_out, int spacing);
 /* "Title" + optional dimmed subtitle header row for a card. Returns the row box. */
-GtkWidget *mi_card_header(const char *title, GtkWidget **subtitle_out, GtkWidget *end_widget);
+GtkWidget *ui_card_header(const char *title, GtkWidget **subtitle_out, GtkWidget *end_widget);
 /* Stat column: big value over a caption. */
-GtkWidget *mi_stat_new(const char *caption, GtkWidget **value_out);
+GtkWidget *ui_stat_new(const char *caption, GtkWidget **value_out);
 /* Wrapping row for stat columns: 2–4 per line depending on width. */
-GtkWidget *mi_stat_flow_new(void);
-void mi_stat_flow_append(GtkWidget *flow, GtkWidget *child);
-void mi_format_thousands(long v, gchar *buf, gsize len);
-void mi_format_minutes(int minutes, gchar *buf, gsize len); /* "7h 05m" / "42 min" */
-void mi_format_clock(int minute_of_day, gchar *buf, gsize len); /* "07:05" */
-void mi_clear_box(GtkWidget *box);
+GtkWidget *ui_stat_flow_new(void);
+void ui_stat_flow_append(GtkWidget *flow, GtkWidget *child);
+void ui_format_thousands(long v, gchar *buf, gsize len);
+void ui_format_minutes(int minutes, gchar *buf, gsize len); /* "7h 05m" / "42 min" */
+void ui_format_clock(int minute_of_day, gchar *buf, gsize len); /* "07:05" */
+void ui_clear_box(GtkWidget *box);
 /* Vertically scrolling page whose content is centred and at most @max_width wide. */
-GtkWidget *mi_page_scroll(GtkWidget *content, int max_width);
+GtkWidget *ui_page_scroll(GtkWidget *content, int max_width);
 
 /* ---- Drawing helpers ---------------------------------------------------------------------- */
 
-void mi_rounded_rect(cairo_t *cr, double x, double y, double w, double h, double r);
-void mi_draw_text(cairo_t *cr, GtkWidget *widget, const char *text, double x, double y,
+void ui_rounded_rect(cairo_t *cr, double x, double y, double w, double h, double r);
+void ui_draw_text(cairo_t *cr, GtkWidget *widget, const char *text, double x, double y,
                   double size, double alpha, double xalign);
 /* Hover bubble right of @x (left of it when it would pass @right), its top at @top. */
-void mi_draw_tooltip(cairo_t *cr, GtkWidget *widget, const char *text, double x, double top, double right);
+void ui_draw_tooltip(cairo_t *cr, GtkWidget *widget, const char *text, double x, double top, double right);
 /* Activity rings: values/goals for up to 3 rings, outermost first. */
-void mi_draw_rings(cairo_t *cr, double cx, double cy, double radius, double thickness,
-                   const double *ratios, const MiColor *colors, int n);
+void ui_draw_rings(cairo_t *cr, double cx, double cy, double radius, double thickness,
+                   const double *ratios, const UiColor *colors, int n);
 
 /* ---- Per-minute day series ---------------------------------------------------------------- */
 
-#define MI_DAY_MINUTES 1440
+#define UI_DAY_MINUTES 1440
 
 typedef enum {
-    MI_SERIES_HR,
-    MI_SERIES_SPO2,
-    MI_SERIES_STRESS,
-    MI_SERIES_STEPS,
-    MI_SERIES_COUNT
-} MiSeries;
+    UI_SERIES_HR,
+    UI_SERIES_SPO2,
+    UI_SERIES_STRESS,
+    UI_SERIES_STEPS,
+    UI_SERIES_COUNT
+} UiSeries;
 
-/* Copies the series for `day_key` into values[MI_DAY_MINUTES] (-1 = none). Returns the count. */
-guint mi_series_collect(AppState *state, const gchar *day_key, MiSeries series, int *values);
+/* Copies the series for `day_key` into values[UI_DAY_MINUTES] (-1 = none). Returns the count. */
+guint ui_series_collect(AppState *state, const gchar *day_key, UiSeries series, int *values);
 /* Sparkline drawing area for a series of the viewed day. */
-GtkWidget *mi_sparkline_new(AppState *state, MiSeries series);
+GtkWidget *ui_sparkline_new(AppState *state, UiSeries series);
 
 /* ---- Sleep night window ------------------------------------------------------------------- */
 
-#define MI_NIGHT_MINUTES 1440 /* 18:00 of the previous day → 18:00 of the wake day */
-#define MI_NIGHT_START_MIN (18 * 60)
+#define UI_NIGHT_MINUTES 1440 /* 18:00 of the previous day → 18:00 of the wake day */
+#define UI_NIGHT_START_MIN (18 * 60)
 
 typedef struct {
-    int stage[MI_NIGHT_MINUTES]; /* -1 = none, else normalised stage (2 deep … 5 awake, 1 unspec) */
+    int stage[UI_NIGHT_MINUTES]; /* -1 = none, else normalised stage (2 deep … 5 awake, 1 unspec) */
     int first;                   /* first index with a stage, -1 when no sleep */
     int last;
     int deep, light, rem, awake, other;
@@ -102,13 +102,13 @@ typedef struct {
     gboolean has_breakdown;
     gboolean has_timeline;       /* per-minute stages, not just "asleep" */
     /* Per-minute sums and sample counts, used for the night's averages. */
-    int hr_sum[MI_NIGHT_MINUTES], hr_n[MI_NIGHT_MINUTES];
-    int spo2_sum[MI_NIGHT_MINUTES], spo2_n[MI_NIGHT_MINUTES];
+    int hr_sum[UI_NIGHT_MINUTES], hr_n[UI_NIGHT_MINUTES];
+    int spo2_sum[UI_NIGHT_MINUTES], spo2_n[UI_NIGHT_MINUTES];
     int avg_hr;   /* over first … last; 0 when no samples */
     int avg_spo2; /* over first … last; 0 when no samples */
-} MiNight;
+} UiNight;
 
-void mi_night_collect(AppState *state, GDate *wake_day, MiNight *out);
+void ui_night_collect(AppState *state, GDate *wake_day, UiNight *out);
 
 /* ---- Dashboard state ---------------------------------------------------------------------- */
 
@@ -119,9 +119,9 @@ typedef struct {
     GtkWidget *unit;
     GtkWidget *sub;
     GtkWidget *spark;
-} MiTile;
+} UiTile;
 
-struct MiwearDashboardUi {
+struct SalusDashboardUi {
     AppState *state;
     GtkWidget *nav_view;      /* AdwNavigationView: main page + pushed workout details */
     GtkWidget *header;
@@ -149,8 +149,8 @@ struct MiwearDashboardUi {
     GtkWidget *ring_active;
     GtkWidget *ring_badge;
     double ring_ratio[3];
-    MiTile tile_hr, tile_spo2, tile_stress, tile_sleep, tile_vitality, tile_weight, tile_cycles;
-    AdwNavigationPage *metric_page; /* chart of one MiSeries, pushed from a tile */
+    UiTile tile_hr, tile_spo2, tile_stress, tile_sleep, tile_vitality, tile_weight, tile_cycles;
+    AdwNavigationPage *metric_page; /* chart of one UiSeries, pushed from a tile */
     GtkWidget *trend_area;
     GtkWidget *trend_subtitle;
     GtkWidget *trend_stat_value[4];
@@ -166,7 +166,7 @@ struct MiwearDashboardUi {
     GtkWidget *sleep_week;
     GtkWidget *sleep_content;
     GtkWidget *sleep_empty;
-    MiNight *night;
+    UiNight *night;
     int week_minutes[7];
     double sleep_hover_x;
 
@@ -174,7 +174,7 @@ struct MiwearDashboardUi {
     GtkWidget *sport_list_box;
     GtkWidget *sport_empty;
     GtkWidget *sport_summary;
-    MiwearSportEntry *sport_detail_entry;
+    SalusSportEntry *sport_detail_entry;
     GtkWidget *sport_detail_page;
 
     /* Device */
@@ -197,33 +197,33 @@ struct MiwearDashboardUi {
 };
 
 /* Pages */
-GtkWidget *mi_today_page_new(AppState *state, MiwearDashboardUi *dash);
-void mi_today_refresh(AppState *state);
-void mi_today_redraw(AppState *state);
-GtkWidget *mi_sleep_page_new(AppState *state, MiwearDashboardUi *dash);
+GtkWidget *ui_today_page_new(AppState *state, SalusDashboardUi *dash);
+void ui_today_refresh(AppState *state);
+void ui_today_redraw(AppState *state);
+GtkWidget *mi_sleep_page_new(AppState *state, SalusDashboardUi *dash);
 void mi_sleep_refresh(AppState *state);
-GtkWidget *mi_workouts_page_new(AppState *state, MiwearDashboardUi *dash);
-void mi_workouts_refresh_training(AppState *state);
-GtkWidget *mi_device_page_new(AppState *state, MiwearDashboardUi *dash);
-void mi_device_refresh(AppState *state);
+GtkWidget *ui_workouts_page_new(AppState *state, SalusDashboardUi *dash);
+void ui_workouts_refresh_training(AppState *state);
+GtkWidget *ui_device_page_new(AppState *state, SalusDashboardUi *dash);
+void ui_device_refresh(AppState *state);
 
 /* Date navigation shared by Today and Sleep. */
-GtkWidget *mi_date_nav_new(AppState *state, MiwearDashboardUi *dash);
-GDate *mi_view_date(AppState *state);
-gchar *mi_day_key(GDate *d);
-gboolean mi_viewing_today(AppState *state);
-void mi_set_view_date(AppState *state, GDate *d);
+GtkWidget *ui_date_nav_new(AppState *state, SalusDashboardUi *dash);
+GDate *ui_view_date(AppState *state);
+gchar *ui_day_key(GDate *d);
+gboolean ui_viewing_today(AppState *state);
+void ui_set_view_date(AppState *state, GDate *d);
 
 /* Shell helpers */
-void mi_toast(AppState *state, const char *text);
-gboolean mi_is_connected(AppState *state);
-void mi_connect_saved(AppState *state);
-void mi_show_log_dialog(AppState *state);
-void mi_show_weight_dialog(AppState *state);
-void mi_show_page(AppState *state, const char *name);
+void ui_toast(AppState *state, const char *text);
+gboolean ui_is_connected(AppState *state);
+void ui_connect_saved(AppState *state);
+void ui_show_log_dialog(AppState *state);
+void ui_show_weight_dialog(AppState *state);
+void ui_show_page(AppState *state, const char *name);
 
 /* Implemented in ui.c */
-void miwear_ui_show_setup(AppState *state);
-gboolean miwear_ui_has_saved_device(AppState *state);
+void salus_ui_show_setup(AppState *state);
+gboolean salus_ui_has_saved_device(AppState *state);
 
 #endif

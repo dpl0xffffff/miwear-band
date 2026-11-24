@@ -1,9 +1,9 @@
-#include "miwear/activity/mi_fitness_sport_report.h"
+#include "salus/activity/mi_fitness_sport_report.h"
 
-#include "miwear/activity/mi_fitness_data.h"
-#include "miwear/activity/mi_fitness_report_tables.h"
-#include "miwear/activity/mi_fitness_validity.h"
-#include "miwear/activity/schema_reader.h"
+#include "salus/activity/mi_fitness_data.h"
+#include "salus/activity/mi_fitness_report_tables.h"
+#include "salus/activity/mi_fitness_validity.h"
+#include "salus/activity/schema_reader.h"
 
 #include <glib.h>
 #include <json-glib/json-glib.h>
@@ -91,7 +91,7 @@ static int ambiguous_field_id(const char *name, int sport_type) {
 
 static SchemaTable *schema_table_build(const char *schema_path, int sport_type) {
     JsonNode *root = NULL;
-    if (!miwear_schema_load_root(schema_path, &root)) {
+    if (!salus_schema_load_root(schema_path, &root)) {
         return NULL;
     }
     SchemaTable *t = NULL;
@@ -180,7 +180,7 @@ out:
 
 static const SchemaTable *schema_table_for(int sport_type, int version) {
     static GHashTable *cache; /* rel path → SchemaTable (NULL value = unusable schema) */
-    gchar *rel = miwear_schema_resolve_sport(sport_type, 1, version);
+    gchar *rel = salus_schema_resolve_sport(sport_type, 1, version);
     if (rel == NULL) {
         return NULL;
     }
@@ -192,7 +192,7 @@ static const SchemaTable *schema_table_for(int sport_type, int version) {
         g_free(rel);
         return t;
     }
-    gchar *path = g_build_filename(miwear_schema_dir(), rel, NULL);
+    gchar *path = g_build_filename(salus_schema_dir(), rel, NULL);
     t = schema_table_build(path, sport_type);
     g_free(path);
     g_hash_table_insert(cache, rel, t);
@@ -228,7 +228,7 @@ bool mi_fitness_sport_report_decode(const uint8_t *payload,
         source = "schema";
     } else {
         fields = mi_fitness_report_fields(sport_type, &count, &source);
-        MiwearFitnessDataId id = {0};
+        SalusFitnessDataId id = {0};
         id.data_type = 1;
         id.file_type = 1;
         id.sport_type = (uint8_t)sport_type;
@@ -267,11 +267,11 @@ static gboolean keep_as_metric(int id) {
 void mi_fitness_sport_report_apply(int sport_type,
                                    const MiFitnessFieldValue *values,
                                    size_t value_count,
-                                   MiwearWorkoutSummary *out) {
+                                   SalusWorkoutSummary *out) {
     const gboolean swim = sport_type == 9 || sport_type == 10;
     int active_kcal = -1, total_kcal = -1, duration = -1, valid_duration = -1;
     if (out->metrics == NULL) {
-        out->metrics = g_array_new(FALSE, FALSE, sizeof(MiwearWorkoutMetric));
+        out->metrics = g_array_new(FALSE, FALSE, sizeof(SalusWorkoutMetric));
     }
     for (size_t i = 0; i < value_count; i++) {
         const MiFitnessFieldValue *v = &values[i];
@@ -332,7 +332,7 @@ void mi_fitness_sport_report_apply(int sport_type,
             default: break;
         }
         if (keep_as_metric(v->type)) {
-            const MiwearWorkoutMetric m = {v->type, d};
+            const SalusWorkoutMetric m = {v->type, d};
             g_array_append_val(out->metrics, m);
         }
     }
@@ -354,7 +354,7 @@ bool mi_fitness_parse_sport_report(const uint8_t *payload,
                                    size_t payload_len,
                                    int sport_type,
                                    int version,
-                                   MiwearWorkoutSummary *out) {
+                                   SalusWorkoutSummary *out) {
     MiFitnessFieldValue values[MI_FITNESS_FIELD_VALUE_MAX];
     size_t n = 0;
     if (out == NULL || !mi_fitness_sport_report_decode(payload, payload_len, sport_type, version, values, &n, NULL) ||

@@ -1,4 +1,4 @@
-#include "miwear/app.h"
+#include "salus/app.h"
 
 #include <string.h>
 

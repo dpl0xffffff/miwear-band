@@ -1,8 +1,8 @@
-#include "miwear/activity/mi_fitness_sport_record.h"
+#include "salus/activity/mi_fitness_sport_record.h"
 
-#include "miwear/activity/mi_fitness_report_tables.h"
-#include "miwear/activity/mi_fitness_validity.h"
-#include "miwear/util.h"
+#include "salus/activity/mi_fitness_report_tables.h"
+#include "salus/activity/mi_fitness_validity.h"
+#include "salus/util.h"
 
 #include <math.h>
 #include <string.h>
@@ -49,11 +49,11 @@ static int32_t read_item(const uint8_t *p, int size, bool is_unsigned) {
         case 1:
             return is_unsigned ? (int32_t)p[0] : (int32_t)(int8_t)p[0];
         case 2: {
-            const uint16_t v = miwear_read_u16_le(p);
+            const uint16_t v = salus_read_u16_le(p);
             return is_unsigned ? (int32_t)v : (int32_t)(int16_t)v;
         }
         default:
-            return (int32_t)miwear_read_u32_le(p);
+            return (int32_t)salus_read_u32_le(p);
     }
 }
 
@@ -216,8 +216,8 @@ static void parse_segments(Ctx *c, GArray *segments) {
             off + 8 > c->body_len) {
             return;
         }
-        const uint32_t count = miwear_read_u32_le(c->body + off);
-        const uint32_t start = miwear_read_u32_le(c->body + off + 4);
+        const uint32_t count = salus_read_u32_le(c->body + off);
+        const uint32_t start = salus_read_u32_le(c->body + off + 4);
         off += 8;
         if (!one_parse_header(p->it_summary, p->it_summary_count, c->version, c->body, c->body_len, &off, it, &nit)) {
             return;
@@ -233,10 +233,10 @@ static void parse_group_segments(Ctx *c, GArray *segments) {
     uint16_t seg = 0;
     uint64_t done = 0; /* records of the current group so far */
     while (off + 13 <= c->body_len) {
-        const uint32_t count = miwear_read_u32_le(c->body + off);
-        const uint32_t start = miwear_read_u32_le(c->body + off + 4);
+        const uint32_t count = salus_read_u32_le(c->body + off);
+        const uint32_t start = salus_read_u32_le(c->body + off + 4);
         const bool is_group = c->body[off + 8] > 0;
-        const uint32_t group_count = miwear_read_u32_le(c->body + off + 9);
+        const uint32_t group_count = salus_read_u32_le(c->body + off + 9);
         off += 13;
         segment_add(segments, start, count, NULL, 0);
         parse_records(c, &off, start, count, seg++);
@@ -267,7 +267,7 @@ bool mi_fitness_sport_record_decode(const uint8_t *payload,
     if (l == NULL) {
         return false;
     }
-    MiwearFitnessDataId id = {.data_type = 1, .file_type = 0, .sport_type = (uint8_t)sport_type, .version = (uint8_t)version};
+    SalusFitnessDataId id = {.data_type = 1, .file_type = 0, .sport_type = (uint8_t)sport_type, .version = (uint8_t)version};
     const int valid_len = mi_fitness_data_validity_len(&id);
     const size_t wire_len = payload_len - 4; /* trailing CRC32 */
     if (valid_len < 0 || wire_len < 8 + (size_t)valid_len) {
@@ -319,11 +319,11 @@ bool mi_fitness_record_get(const MiFitnessRecord *r, int type, int64_t *value) {
 
 /* ---- Interpretation (setSportRecordItemValue) ---------------------------------------------- */
 
-static void set(MiwearWorkoutSample *s, MiwearRecordSeries k, double v) {
+static void set(SalusWorkoutSample *s, SalusRecordSeries k, double v) {
     s->v[k] = (float)v;
 }
 
-void mi_fitness_sport_record_apply(int sport_type, const GArray *records, const GArray *segments, MiwearWorkoutSummary *out) {
+void mi_fitness_sport_record_apply(int sport_type, const GArray *records, const GArray *segments, SalusWorkoutSummary *out) {
     if (records == NULL || out == NULL || records->len == 0) {
         return;
     }
@@ -331,8 +331,8 @@ void mi_fitness_sport_record_apply(int sport_type, const GArray *records, const 
     const double dist_div = p != NULL && p->distance_times > 0 ? p->distance_times : 10;
     const uint32_t t0 = g_array_index(records, MiFitnessRecord, 0).start_sec;
 
-    miwear_workout_summary_free_series(out);
-    out->record_samples = g_array_sized_new(FALSE, FALSE, sizeof(MiwearWorkoutSample), records->len);
+    salus_workout_summary_free_series(out);
+    out->record_samples = g_array_sized_new(FALSE, FALSE, sizeof(SalusWorkoutSample), records->len);
     int seg = -1;
     double height = NAN; /* SportRecord.height: running altitude of the segment */
     for (guint i = 0; i < records->len; i++) {
@@ -349,7 +349,7 @@ void mi_fitness_sport_record_apply(int sport_type, const GArray *records, const 
         }
         /* Lap records (swimming) are placed at their end; one-second records at their start. */
         const uint32_t at = r->end_sec > r->start_sec + 1 ? r->end_sec : r->start_sec;
-        MiwearWorkoutSample s = miwear_workout_sample_init(at >= t0 ? at - t0 : 0);
+        SalusWorkoutSample s = salus_workout_sample_init(at >= t0 ? at - t0 : 0);
         int64_t v = 0;
         if (mi_fitness_record_get(r, 5, &v) && v > 0 && v < 256) {
             s.hr = (uint8_t)v;
@@ -358,58 +358,58 @@ void mi_fitness_sport_record_apply(int sport_type, const GArray *records, const 
             s.steps_delta = (uint16_t)MIN(v, 65535);
         }
         if (mi_fitness_record_get(r, 2, &v)) {
-            set(&s, MIWEAR_SERIES_CALORIES, (double)v);
+            set(&s, SALUS_SERIES_CALORIES, (double)v);
         }
         if (mi_fitness_record_get(r, 9, &v) || mi_fitness_record_get(r, 88, &v)) {
-            set(&s, MIWEAR_SERIES_DISTANCE, (double)v / dist_div);
+            set(&s, SALUS_SERIES_DISTANCE, (double)v / dist_div);
         }
         if (mi_fitness_record_get(r, 12, &v) && v > 0) {
-            set(&s, MIWEAR_SERIES_PACE, (double)v);
+            set(&s, SALUS_SERIES_PACE, (double)v);
         }
         if (mi_fitness_record_get(r, 51, &v)) {
-            set(&s, MIWEAR_SERIES_SPEED, (double)v / 10.0);
+            set(&s, SALUS_SERIES_SPEED, (double)v / 10.0);
         }
         int64_t dir = 0;
         if (mi_fitness_record_get(r, 74, &v)) { /* diving vertical speed; 73: 1 = up, 0 = down, else 0 */
             const bool has_dir = mi_fitness_record_get(r, 73, &dir);
             const double sign = !has_dir ? 0.0 : dir == 1 ? 1.0 : dir == 0 ? -1.0 : 0.0;
-            set(&s, MIWEAR_SERIES_SPEED, sign * (double)v / 10.0);
+            set(&s, SALUS_SERIES_SPEED, sign * (double)v / 10.0);
         }
         static const int cadence_ids[] = {49, 50, 52, 53};
         for (size_t k = 0; k < G_N_ELEMENTS(cadence_ids); k++) {
             if (mi_fitness_record_get(r, cadence_ids[k], &v)) {
-                set(&s, MIWEAR_SERIES_CADENCE, (double)v);
+                set(&s, SALUS_SERIES_CADENCE, (double)v);
             }
         }
         if (mi_fitness_record_get(r, 47, &v) || mi_fitness_record_get(r, 57, &v)) {
-            set(&s, MIWEAR_SERIES_POWER, (double)v);
+            set(&s, SALUS_SERIES_POWER, (double)v);
         }
         if (mi_fitness_record_get(r, 40, &v)) {
-            set(&s, MIWEAR_SERIES_STRIDE, (double)v);
+            set(&s, SALUS_SERIES_STRIDE, (double)v);
         }
         if (mi_fitness_record_get(r, 38, &v) && v > 0) {
-            set(&s, MIWEAR_SERIES_SPO2, (double)v);
+            set(&s, SALUS_SERIES_SPO2, (double)v);
         }
         if (mi_fitness_record_get(r, 39, &v) && v > 0) {
-            set(&s, MIWEAR_SERIES_STRESS, (double)v);
+            set(&s, SALUS_SERIES_STRESS, (double)v);
         }
         if (mi_fitness_record_get(r, 13, &v) && v > 0) {
-            set(&s, MIWEAR_SERIES_SWOLF, (double)v);
+            set(&s, SALUS_SERIES_SWOLF, (double)v);
         }
         if (mi_fitness_record_get(r, 17, &v) && v > 0) {
-            set(&s, MIWEAR_SERIES_STROKE_RATE, (double)v);
+            set(&s, SALUS_SERIES_STROKE_RATE, (double)v);
         }
         if (mi_fitness_record_get(r, 45, &v) && v > 0) {
-            set(&s, MIWEAR_SERIES_GROUND_CONTACT, (double)v);
+            set(&s, SALUS_SERIES_GROUND_CONTACT, (double)v);
         }
         if (mi_fitness_record_get(r, 80, &v) && v > 0) {
-            set(&s, MIWEAR_SERIES_VERTICAL_OSC, (double)v / 10.0);
+            set(&s, SALUS_SERIES_VERTICAL_OSC, (double)v / 10.0);
         }
         if (mi_fitness_record_get(r, 71, &v)) {
-            set(&s, MIWEAR_SERIES_DEPTH, (double)v / 10.0);
+            set(&s, SALUS_SERIES_DEPTH, (double)v / 10.0);
         }
         if (mi_fitness_record_get(r, 72, &v)) {
-            set(&s, MIWEAR_SERIES_WATER_TEMP, (double)v / 10.0);
+            set(&s, SALUS_SERIES_WATER_TEMP, (double)v / 10.0);
         }
         /* Altitude: 87 is absolute (dm, 65535 = unknown); 8 is a change (dm) from the running
          * altitude, climbing when 7 is non-zero. Key 7 alone does nothing (in the bytecode it jumps
@@ -419,17 +419,17 @@ void mi_fitness_sport_record_apply(int sport_type, const GArray *records, const 
                 height = (double)v / 10.0;
             }
             if (!isnan(height)) {
-                set(&s, MIWEAR_SERIES_ALTITUDE, height);
+                set(&s, SALUS_SERIES_ALTITUDE, height);
             }
         } else if (!isnan(height) && mi_fitness_record_get(r, 8, &v) && mi_fitness_record_get(r, 7, &dir)) {
             height += (dir != 0 ? 1.0 : -1.0) * (double)v / 10.0;
-            set(&s, MIWEAR_SERIES_ALTITUDE, height);
+            set(&s, SALUS_SERIES_ALTITUDE, height);
         }
         g_array_append_val(out->record_samples, s);
     }
 
     /* Typical spacing between samples (1 s, or the average lap time for swimming). */
-    const MiwearWorkoutSample *last = &g_array_index(out->record_samples, MiwearWorkoutSample, out->record_samples->len - 1);
+    const SalusWorkoutSample *last = &g_array_index(out->record_samples, SalusWorkoutSample, out->record_samples->len - 1);
     out->record_interval_sec = out->record_samples->len > 1
                                    ? MAX(1, (int)(last->offset_sec / (out->record_samples->len - 1)))
                                    : 1;

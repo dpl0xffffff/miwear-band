@@ -26,7 +26,7 @@
 
 | Directory | Contents |
 |-----------|----------|
-| `include/miwear/` | `app.h`, `util.h`, module headers |
+| `include/salus/` | `app.h`, `util.h`, module headers |
 | `src/spp/` | Transport, auth, Mi Fitness sync orchestration |
 | `src/activity/` | Activity file parsers |
 | `src/ui/` | GTK4 UI |

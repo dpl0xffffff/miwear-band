@@ -55,7 +55,7 @@ FitnessDataParser.parse(dataId, bytes)
    validity length from `FitnessDataValidity`.
 3. The body is read by `mi_fitness_oneden.c` (`OneDimenDataParser`), and every value is applied by
    its global report field id (`SportReportBaseParser.ReportType`, e.g. 16 avg HR, 110 training load).
-   Values without a dedicated summary field are kept in `MiwearWorkoutSummary.metrics`.
+   Values without a dedicated summary field are kept in `SalusWorkoutSummary.metrics`.
 
 All tables are generated from the app — see `tools/mi-fitness-extract/README.md`. Where Mi Fitness
 has both a schema and a native table they agree field-for-field (checked by `test/report_test.c`),
@@ -180,21 +180,21 @@ python3 scripts/mi_schema_lookup.py --sport 22 --detail 0 --version 5
 
 ## Schema reader + test harness (in-repo)
 
-CMake extracts `schemas.zip` into `build/mi-fitness-schemas/` and defines `MIWEAR_SCHEMA_DIR`.
+CMake extracts `schemas.zip` into `build/mi-fitness-schemas/` and defines `SALUS_SCHEMA_DIR`.
 
 | Tool | Purpose |
 |------|---------|
-| `build/miwear-schema-dump` | C decoder → JSON (`--bin`, `--sport`, `--detail`, `--version`, optional `--summary`) |
+| `build/salus-schema-dump` | C decoder → JSON (`--bin`, `--sport`, `--detail`, `--version`, optional `--summary`) |
 | `scripts/schema_binary_dump.py` | Same layout in Python (reference + CI); reads JSON directly from `schemas.zip` |
 | `scripts/mi_schema_lookup.py` | Resolve 7-byte id → schema path + Java parser class |
 
 **Capture payloads from sync** (no extra walks needed for regression):
 
 ```bash
-export MIWEAR_CAPTURE_DIR="$HOME/.local/share/salus/captures"
+export SALUS_CAPTURE_DIR="$HOME/.local/share/salus/captures"
 ./build/salus   # sync workouts; writes sport_22_detail1_v6_<ts>.bin + .json
-python3 scripts/schema_binary_dump.py --sport 22 --detail 1 --version 6 --bin "$MIWEAR_CAPTURE_DIR/sport_22_detail1_v6_....bin"
-./build/miwear-schema-dump --bin ... --sport 22 --detail 1 --version 8   # when schema version matches index
+python3 scripts/schema_binary_dump.py --sport 22 --detail 1 --version 6 --bin "$SALUS_CAPTURE_DIR/sport_22_detail1_v6_....bin"
+./build/salus-schema-dump --bin ... --sport 22 --detail 1 --version 8   # when schema version matches index
 ```
 
 The app tries **schema decode first** when `index.json` has an exact wire version, then falls back to Gadgetbridge-style parsers in `workout_summary.c`.

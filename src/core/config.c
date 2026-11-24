@@ -1,5 +1,5 @@
-#include "miwear/config.h"
-#include "miwear/migrate.h"
+#include "salus/config.h"
+#include "salus/migrate.h"
 
 #include <glib.h>
 #include <glib/gstdio.h>
@@ -11,7 +11,7 @@ static const char *NOTIF_GROUP = "notifications";
 static const char *LOCATION_GROUP = "location";
 static const char *PROFILE_GROUP = "profile";
 
-const char *miwear_config_default_path(void) {
+const char *salus_config_default_path(void) {
     /* Computed once: callers treat the result as borrowed (it was leaked on every load/save). */
     static gsize once;
     static gchar *path;
@@ -22,8 +22,8 @@ const char *miwear_config_default_path(void) {
     return path;
 }
 
-gboolean miwear_config_load(AppState *state, const char *path) {
-    const char *cfg_path = path != NULL ? path : miwear_config_default_path();
+gboolean salus_config_load(AppState *state, const char *path) {
+    const char *cfg_path = path != NULL ? path : salus_config_default_path();
     GKeyFile *kf = g_key_file_new();
     GError *err = NULL;
 
@@ -119,8 +119,8 @@ gboolean miwear_config_load(AppState *state, const char *path) {
     return TRUE;
 }
 
-gboolean miwear_config_save(const AppState *state, const char *path) {
-    const char *cfg_path = path != NULL ? path : miwear_config_default_path();
+gboolean salus_config_save(const AppState *state, const char *path) {
+    const char *cfg_path = path != NULL ? path : salus_config_default_path();
     gchar *dir = g_path_get_dirname(cfg_path);
 
     if (g_mkdir_with_parents(dir, 0700) < 0) {

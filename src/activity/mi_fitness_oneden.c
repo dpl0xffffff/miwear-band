@@ -1,5 +1,5 @@
-#include "miwear/activity/mi_fitness_oneden.h"
-#include "miwear/util.h"
+#include "salus/activity/mi_fitness_oneden.h"
+#include "salus/util.h"
 
 #include <string.h>
 
@@ -80,22 +80,22 @@ static bool read_value(const MiFitnessOneDimenField *f,
             out->i64 = f->is_unsigned ? p[0] : (int8_t)p[0];
             break;
         case 2: {
-            const uint16_t v = miwear_read_u16_le(p);
+            const uint16_t v = salus_read_u16_le(p);
             out->i64 = f->is_unsigned ? v : (int16_t)v;
             break;
         }
         case 4:
             if (f->is_float) {
-                uint32_t raw = miwear_read_u32_le(p);
+                uint32_t raw = salus_read_u32_le(p);
                 memcpy(&out->f32, &raw, sizeof(float));
                 out->is_float = true;
             } else {
-                const uint32_t v = miwear_read_u32_le(p);
+                const uint32_t v = salus_read_u32_le(p);
                 out->i64 = f->is_unsigned ? (int64_t)v : (int64_t)(int32_t)v;
             }
             break;
         case 8: {
-            const uint64_t v = (uint64_t)miwear_read_u32_le(p) | ((uint64_t)miwear_read_u32_le(p + 4) << 32);
+            const uint64_t v = (uint64_t)salus_read_u32_le(p) | ((uint64_t)salus_read_u32_le(p + 4) << 32);
             out->i64 = (int64_t)v;
             break;
         }

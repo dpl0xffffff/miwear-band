@@ -78,8 +78,8 @@ You can also set MAC and auth key in the UI before connecting.
 
 | Variable | Effect |
 |----------|--------|
-| `MIWEAR_VERBOSE_WIRE_LOG=1` | Hex RX + protobuf field dump |
-| `MIWEAR_FETCH_DEBUG=1` | Activity fetch queue tracing |
+| `SALUS_VERBOSE_WIRE_LOG=1` | Hex RX + protobuf field dump |
+| `SALUS_FETCH_DEBUG=1` | Activity fetch queue tracing |
 
 ## Project layout
 

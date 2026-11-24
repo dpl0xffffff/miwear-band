@@ -1,8 +1,8 @@
 /* Decoder tests against synthetic payloads built from the Gadgetbridge layouts. */
 
-#include "miwear/activity/daily_details.h"
-#include "miwear/activity/mi_fitness_full_day_sleep.h"
-#include "miwear/sleep/mi_sleep_packets.h"
+#include "salus/activity/daily_details.h"
+#include "salus/activity/mi_fitness_full_day_sleep.h"
+#include "salus/sleep/mi_sleep_packets.h"
 
 #include <glib.h>
 #include <string.h>
@@ -73,10 +73,10 @@ static void test_daily_details_v4(void) {
     dd_v4_record(&w, 0, FALSE, 0, 0, 58, 0, 12);
     dd_end(&w);
 
-    GArray *m = miwear_daily_details_decode(4, w.b->data, w.b->len, NULL);
+    GArray *m = salus_daily_details_decode(4, w.b->data, w.b->len, NULL);
     g_assert_nonnull(m);
     g_assert_cmpuint(m->len, ==, 3);
-    const MiwearDailyDetailsMinute *r = (const MiwearDailyDetailsMinute *)m->data;
+    const SalusDailyDetailsMinute *r = (const SalusDailyDetailsMinute *)m->data;
     g_assert_cmpint(r[0].steps, ==, 87);
     g_assert_cmpint(r[0].active_calories, ==, 3);
     g_assert_cmpint(r[0].distance_cm, ==, 6400);
@@ -100,10 +100,10 @@ static void test_daily_details_intensity(void) {
     dd_v4_record_ex(&w, 0, FALSE, 1 /* still */, 1, 7 /* unknown */, 31, 0, 60, 99, 10);
     dd_end(&w);
 
-    GArray *m = miwear_daily_details_decode(4, w.b->data, w.b->len, NULL);
+    GArray *m = salus_daily_details_decode(4, w.b->data, w.b->len, NULL);
     g_assert_nonnull(m);
     g_assert_cmpuint(m->len, ==, 3);
-    const MiwearDailyDetailsMinute *r = (const MiwearDailyDetailsMinute *)m->data;
+    const SalusDailyDetailsMinute *r = (const SalusDailyDetailsMinute *)m->data;
     g_assert_cmpint(r[0].active_type, ==, 2);
     g_assert_cmpint(r[0].active_calories, ==, 63);
     g_assert_cmpint(r[0].intensity, ==, 3);
@@ -132,10 +132,10 @@ static void test_daily_details_absent_groups(void) {
         put8(&w, 20 + i);
     }
     dd_end(&w);
-    GArray *m = miwear_daily_details_decode(3, w.b->data, w.b->len, NULL);
+    GArray *m = salus_daily_details_decode(3, w.b->data, w.b->len, NULL);
     g_assert_nonnull(m);
     g_assert_cmpuint(m->len, ==, 4);
-    const MiwearDailyDetailsMinute *r = (const MiwearDailyDetailsMinute *)m->data;
+    const SalusDailyDetailsMinute *r = (const SalusDailyDetailsMinute *)m->data;
     for (int i = 0; i < 4; i++) {
         g_assert_cmpint(r[i].steps, ==, 10 + i);
         g_assert_cmpint(r[i].heart_rate, ==, 60 + i);
@@ -161,10 +161,10 @@ static void test_daily_details_trailing_bytes_keep_layout(void) {
     put8(&w, 0x20); /* start of a truncated record */
     put8(&w, 0x07);
     dd_end(&w);
-    GArray *m = miwear_daily_details_decode(4, w.b->data, w.b->len, NULL);
+    GArray *m = salus_daily_details_decode(4, w.b->data, w.b->len, NULL);
     g_assert_nonnull(m);
     g_assert_cmpuint(m->len, ==, 30); /* truncated record dropped, nothing re-interpreted */
-    const MiwearDailyDetailsMinute *r = (const MiwearDailyDetailsMinute *)m->data;
+    const SalusDailyDetailsMinute *r = (const SalusDailyDetailsMinute *)m->data;
     for (guint i = 0; i < m->len; i++) {
         g_assert_cmpint(r[i].steps, <, 300);
         g_assert_cmpint(r[i].heart_rate, ==, 60 + (int)i);
@@ -176,14 +176,14 @@ static void test_daily_details_trailing_bytes_keep_layout(void) {
 static void test_daily_details_bad_input(void) {
     const char *err = NULL;
     guint8 tiny[10] = {0};
-    g_assert_null(miwear_daily_details_decode(7, tiny, sizeof(tiny), &err));
+    g_assert_null(salus_daily_details_decode(7, tiny, sizeof(tiny), &err));
     g_assert_nonnull(err);
     err = NULL;
-    g_assert_null(miwear_daily_details_decode(4, tiny, sizeof(tiny), &err));
+    g_assert_null(salus_daily_details_decode(4, tiny, sizeof(tiny), &err));
     g_assert_nonnull(err);
-    g_assert_cmpint(miwear_daily_details_header_size(1), ==, 4);
-    g_assert_cmpint(miwear_daily_details_header_size(3), ==, 5);
-    g_assert_cmpint(miwear_daily_details_header_size(4), ==, 6);
+    g_assert_cmpint(salus_daily_details_header_size(1), ==, 4);
+    g_assert_cmpint(salus_daily_details_header_size(3), ==, 5);
+    g_assert_cmpint(salus_daily_details_header_size(4), ==, 6);
 }
 
 /* ---- Sleep packets ------------------------------------------------------------------------ */
@@ -222,9 +222,9 @@ static void test_sleep_summary_big_endian(void) {
     Buf w = {g_byte_array_new()};
     sleep_packet(&w, T0, 16, d.b->data, (int)d.b->len);
 
-    MiwearSleepStageRow *rows = NULL;
+    SalusSleepStageRow *rows = NULL;
     size_t n = 0;
-    MiwearSleepStageDurations dur = {0};
+    SalusSleepStageDurations dur = {0};
     g_assert_true(mi_sleep_try_embedded_stage_packets(w.b->data, w.b->len, T0, T0 + 504 * 60, &rows, &n, &dur));
     g_assert_cmpint(dur.total_min, ==, 502);
     g_assert_cmpint(dur.awake_min, ==, 6);
@@ -249,18 +249,18 @@ static void test_sleep_stage_codes(void) {
     /* A second stage packet whose timestamp is unreadable must be skipped, not appended. */
     sleep_packet(&w, 7, 17, d.b->data, (int)d.b->len);
 
-    MiwearSleepStageRow *rows = NULL;
+    SalusSleepStageRow *rows = NULL;
     size_t n = 0;
-    MiwearSleepStageDurations dur = {0};
+    SalusSleepStageDurations dur = {0};
     g_assert_true(mi_sleep_try_embedded_stage_packets(w.b->data, w.b->len, T0, T0 + 3600, &rows, &n, &dur));
     g_assert_cmpuint(n, ==, G_N_ELEMENTS(raw));
     for (size_t i = 0; i < n; i++) {
         g_assert_cmpint(rows[i].stage, ==, want[i]);
         g_assert_cmpint(rows[i].timestamp_ms, ==, ((gint64)T0 + (gint64)i * 600) * 1000);
     }
-    g_assert_cmpint(miwear_normalize_sleep_stage(0), ==, -1); /* not asleep is not painted */
-    g_assert_cmpint(miwear_normalize_sleep_stage(4), ==, 4);
-    g_assert_cmpint(miwear_normalize_sleep_stage(1), ==, 1);
+    g_assert_cmpint(salus_normalize_sleep_stage(0), ==, -1); /* not asleep is not painted */
+    g_assert_cmpint(salus_normalize_sleep_stage(4), ==, 4);
+    g_assert_cmpint(salus_normalize_sleep_stage(1), ==, 1);
     g_free(rows);
     g_byte_array_unref(d.b);
     g_byte_array_unref(w.b);
@@ -311,8 +311,8 @@ static void test_full_day_sleep_v6_layout(void) {
     sleep_packet(&w, T0, 16, d.b->data, (int)d.b->len);
     put32le(&w, 0); /* CRC (not checked here) */
 
-    MiwearFullDaySleepLayout l;
-    g_assert_true(miwear_full_day_sleep_layout(w.b->data, w.b->len, 6, &l));
+    SalusFullDaySleepLayout l;
+    g_assert_true(salus_full_day_sleep_layout(w.b->data, w.b->len, 6, &l));
     g_assert_cmpuint(l.go_bed_time, ==, T0 - 600);
     g_assert_cmpuint(l.live_bed_time, ==, T0 + 481 * 60);
     g_assert_cmpuint(l.heart_rate.count, ==, 3);
@@ -327,16 +327,16 @@ static void test_full_day_sleep_v6_layout(void) {
     const uint8_t *feature = NULL;
     size_t feature_len = 0;
     g_assert_true(mi_fitness_full_day_sleep_feature_tail(w.b->data, w.b->len, 6, &feature, &feature_len));
-    MiwearSleepStageRow *rows = NULL;
+    SalusSleepStageRow *rows = NULL;
     size_t n = 0;
-    MiwearSleepStageDurations dur = {0};
+    SalusSleepStageDurations dur = {0};
     g_assert_true(mi_sleep_try_embedded_stage_packets(feature, feature_len, T0, T0 + 480 * 60, &rows, &n, &dur));
     g_assert_cmpint(dur.deep_min, ==, 104);
     g_assert_cmpint(dur.light_min, ==, 366);
     g_free(rows);
 
     /* The same bytes read as v5 (HR at bit 8) must not reach the featureData. */
-    g_assert_cmpuint(miwear_full_day_sleep_structured_end(w.b->data, w.b->len, 5), !=, feature_at);
+    g_assert_cmpuint(salus_full_day_sleep_structured_end(w.b->data, w.b->len, 5), !=, feature_at);
     g_byte_array_unref(d.b);
     g_byte_array_unref(w.b);
 }

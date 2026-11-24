@@ -1,5 +1,5 @@
-#include "miwear/activity/mi_fitness_full_day_sleep.h"
-#include "miwear/util.h"
+#include "salus/activity/mi_fitness_full_day_sleep.h"
+#include "salus/util.h"
 
 #include <string.h>
 
@@ -7,7 +7,7 @@ static size_t full_day_sleep_crc_end(size_t payload_len) {
     return payload_len >= 4 ? payload_len - 4 : payload_len;
 }
 
-gboolean miwear_full_day_sleep_valid_bit(const uint8_t *vf, size_t vf_len, int field_index) {
+gboolean salus_full_day_sleep_valid_bit(const uint8_t *vf, size_t vf_len, int field_index) {
     if (vf == NULL || vf_len == 0 || field_index < 0 || (size_t)field_index >= vf_len * 8u) {
         return FALSE;
     }
@@ -57,16 +57,16 @@ static gboolean cur_take(Cursor *c, size_t n) {
 
 static uint32_t cur_u32(Cursor *c) {
     const size_t at = c->off;
-    return cur_take(c, 4) ? miwear_read_u32_le(c->p + at) : 0;
+    return cur_take(c, 4) ? salus_read_u32_le(c->p + at) : 0;
 }
 
 static uint16_t cur_u16(Cursor *c) {
     const size_t at = c->off;
-    return cur_take(c, 2) ? miwear_read_u16_le(c->p + at) : 0;
+    return cur_take(c, 2) ? salus_read_u16_le(c->p + at) : 0;
 }
 
 /* interval (u16), count (u16), firstTime (u32, only when count > 0), values. */
-static void cur_series(Cursor *c, gboolean valid, size_t value_size, MiwearFullDaySleepSeries *s) {
+static void cur_series(Cursor *c, gboolean valid, size_t value_size, SalusFullDaySleepSeries *s) {
     memset(s, 0, sizeof(*s));
     if (!valid || !c->ok) {
         return;
@@ -81,10 +81,10 @@ static void cur_series(Cursor *c, gboolean valid, size_t value_size, MiwearFullD
     (void)cur_take(c, (size_t)s->count * value_size);
 }
 
-gboolean miwear_full_day_sleep_layout(const uint8_t *payload,
+gboolean salus_full_day_sleep_layout(const uint8_t *payload,
                                       size_t payload_len,
                                       int version,
-                                      MiwearFullDaySleepLayout *out) {
+                                      SalusFullDaySleepLayout *out) {
     if (payload == NULL || out == NULL) {
         return FALSE;
     }
@@ -99,7 +99,7 @@ gboolean miwear_full_day_sleep_layout(const uint8_t *payload,
     if (!cur_take(&c, bits.vf_len)) {
         return FALSE;
     }
-#define VALID(i) miwear_full_day_sleep_valid_bit(vf, bits.vf_len, (i))
+#define VALID(i) salus_full_day_sleep_valid_bit(vf, bits.vf_len, (i))
     if (cur_take(&c, 1)) {
         out->sleep_full = payload[c.off - 1];
     }
@@ -132,9 +132,9 @@ gboolean miwear_full_day_sleep_layout(const uint8_t *payload,
     return c.ok;
 }
 
-size_t miwear_full_day_sleep_structured_end(const uint8_t *payload, size_t payload_len, int version) {
-    MiwearFullDaySleepLayout l;
-    return miwear_full_day_sleep_layout(payload, payload_len, version, &l) ? l.feature_off : 0;
+size_t salus_full_day_sleep_structured_end(const uint8_t *payload, size_t payload_len, int version) {
+    SalusFullDaySleepLayout l;
+    return salus_full_day_sleep_layout(payload, payload_len, version, &l) ? l.feature_off : 0;
 }
 
 gboolean mi_fitness_full_day_sleep_bed_wake(const uint8_t *payload,
@@ -147,8 +147,8 @@ gboolean mi_fitness_full_day_sleep_bed_wake(const uint8_t *payload,
     }
     *bed_sec_out = 0;
     *wake_sec_out = 0;
-    MiwearFullDaySleepLayout l;
-    (void)miwear_full_day_sleep_layout(payload, payload_len, version, &l); /* the times precede any series */
+    SalusFullDaySleepLayout l;
+    (void)salus_full_day_sleep_layout(payload, payload_len, version, &l); /* the times precede any series */
     *bed_sec_out = l.go_bed_time != 0 ? l.go_bed_time : l.start_time;
     *wake_sec_out = l.live_bed_time != 0 ? l.live_bed_time : l.end_time;
     return *bed_sec_out != 0 && *wake_sec_out != 0 && *wake_sec_out > *bed_sec_out;
@@ -164,8 +164,8 @@ gboolean mi_fitness_full_day_sleep_feature_tail(const uint8_t *payload,
     }
     *feature_out = NULL;
     *feature_len_out = 0;
-    MiwearFullDaySleepLayout l;
-    if (!miwear_full_day_sleep_layout(payload, payload_len, version, &l) || l.feature_off >= l.crc_end) {
+    SalusFullDaySleepLayout l;
+    if (!salus_full_day_sleep_layout(payload, payload_len, version, &l) || l.feature_off >= l.crc_end) {
         return FALSE;
     }
     *feature_out = payload + l.feature_off;

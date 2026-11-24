@@ -1,6 +1,6 @@
-#include "miwear/spp/workout_gps.h"
+#include "salus/spp/workout_gps.h"
 
-#include "miwear/spp/wire_internal.h"
+#include "salus/spp/wire_internal.h"
 
 #include <geoclue.h>
 #include <math.h>
@@ -45,7 +45,7 @@ static void send_open_reply(AppState *state, gboolean have_location) {
     cmd.has_subtype = TRUE;
     cmd.subtype = CMD_WORKOUT_WATCH_OPEN;
     cmd.health = &health;
-    (void)miwear_wire_send_xiaomi_command(state, &cmd,
+    (void)salus_wire_send_xiaomi_command(state, &cmd,
                                           have_location ? "Workout GPS: replied with computer location available"
                                                         : "Workout GPS: replied without computer location");
 }
@@ -122,7 +122,7 @@ static void send_location(WorkoutGps *g, GClueLocation *loc) {
     cmd.has_subtype = TRUE;
     cmd.subtype = CMD_WORKOUT_LOCATION;
     cmd.health = &health;
-    const gboolean ok = miwear_wire_send_xiaomi_command(g->state, &cmd, NULL);
+    const gboolean ok = salus_wire_send_xiaomi_command(g->state, &cmd, NULL);
     /* Log the first fix and then every 30th, so a long walk doesn't flood the log. */
     if (!ok || g->sent == 0 || g->sent % 30 == 0) {
         gchar *line = g_strdup_printf("Workout GPS: %s location #%u (%.5f, %.5f ±%.0f m)",
@@ -150,7 +150,7 @@ static void on_simple_ready(GObject *source, GAsyncResult *res, gpointer user_da
         const gboolean cancelled = g_error_matches(err, G_IO_ERROR, G_IO_ERROR_CANCELLED);
         if (!cancelled) {
             reply_unavailable(g->state, err != NULL ? err->message : "GeoClue error");
-            miwear_workout_gps_stop(g->state, NULL);
+            salus_workout_gps_stop(g->state, NULL);
         }
         g_clear_error(&err);
         return; /* when cancelled, @g was already freed by stop() */
@@ -162,7 +162,7 @@ static void on_simple_ready(GObject *source, GAsyncResult *res, gpointer user_da
                                    : g_strdup("no fix");
         reply_unavailable(g->state, why);
         g_free(why);
-        miwear_workout_gps_stop(g->state, NULL);
+        salus_workout_gps_stop(g->state, NULL);
         return;
     }
     send_open_reply(g->state, TRUE);
@@ -195,7 +195,7 @@ static void start(AppState *state, uint32_t sport) {
                                      on_simple_ready, g);
 }
 
-void miwear_workout_gps_stop(AppState *state, const char *reason) {
+void salus_workout_gps_stop(AppState *state, const char *reason) {
     WorkoutGps *g = s_gps;
     if (g == NULL) {
         return;
@@ -217,7 +217,7 @@ void miwear_workout_gps_stop(AppState *state, const char *reason) {
     g_free(g);
 }
 
-void miwear_workout_gps_handle_command(AppState *state, const struct Xiaomi__Command *cmd) {
+void salus_workout_gps_handle_command(AppState *state, const struct Xiaomi__Command *cmd) {
     if (state == NULL || cmd == NULL || cmd->type != HEALTH_CMD_TYPE || !cmd->has_subtype || cmd->health == NULL) {
         return;
     }
@@ -232,7 +232,7 @@ void miwear_workout_gps_handle_command(AppState *state, const struct Xiaomi__Com
         append_log(state, line);
         g_free(line);
         if (w->has_status && w->status == WORKOUT_STATUS_FINISHED) {
-            miwear_workout_gps_stop(state, "workout finished");
+            salus_workout_gps_stop(state, "workout finished");
         }
     }
 }

@@ -1,6 +1,6 @@
-#include "miwear/activity/activity.h"
-#include "miwear/app.h"
-#include "miwear/sleep/mi_sleep_duration.h"
+#include "salus/activity/activity.h"
+#include "salus/app.h"
+#include "salus/sleep/mi_sleep_duration.h"
 
 #include <gio/gio.h>
 #include <glib/gstdio.h>
@@ -46,14 +46,14 @@ static gboolean parse_algo_json(const char *json_text,
         *total_min = (int)json_object_get_int_member(obj, "sleepDuration");
     }
     if (deep_min != NULL || light_min != NULL || rem_min != NULL || awake_min != NULL || total_min != NULL) {
-        MiwearSleepStageDurations nd = {
+        SalusSleepStageDurations nd = {
             .deep_min = deep_min != NULL ? *deep_min : -1,
             .light_min = light_min != NULL ? *light_min : -1,
             .rem_min = rem_min != NULL ? *rem_min : -1,
             .awake_min = awake_min != NULL ? *awake_min : -1,
             .total_min = total_min != NULL ? *total_min : -1,
         };
-        miwear_sleep_normalize_stage_durations(&nd);
+        salus_sleep_normalize_stage_durations(&nd);
         if (deep_min != NULL) {
             *deep_min = nd.deep_min;
         }
@@ -92,14 +92,14 @@ static gboolean parse_algo_json(const char *json_text,
         if (start_ms <= 0) {
             continue;
         }
-        MiwearSleepStageRow row = {start_ms, miwear_normalize_sleep_stage(state)};
+        SalusSleepStageRow row = {start_ms, salus_normalize_sleep_stage(state)};
         g_array_append_val(stage_rows, row);
     }
     g_object_unref(parser);
     return stage_rows->len > 0;
 }
 
-gboolean miwear_sleep_run_external_algo_cmd(AppState *state,
+gboolean salus_sleep_run_external_algo_cmd(AppState *state,
                                             const uint8_t *sleep_src,
                                             size_t sleep_src_len,
                                             GArray *stage_rows,
@@ -110,12 +110,12 @@ gboolean miwear_sleep_run_external_algo_cmd(AppState *state,
                                             int *total_min,
                                             uint32_t bed_sec,
                                             uint32_t wake_sec) {
-    const char *cmd_template = g_getenv("MIWEAR_MI_SLEEP_ALGO_CMD");
+    const char *cmd_template = g_getenv("SALUS_MI_SLEEP_ALGO_CMD");
     if (cmd_template == NULL || cmd_template[0] == '\0') {
         return FALSE;
     }
 
-    gchar *path = g_build_filename(g_get_user_runtime_dir(), "miwear-sleep-src.bin", NULL);
+    gchar *path = g_build_filename(g_get_user_runtime_dir(), "salus-sleep-src.bin", NULL);
     if (!g_file_set_contents(path, (const char *)sleep_src, (gssize)sleep_src_len, NULL)) {
         g_free(path);
         return FALSE;
@@ -128,12 +128,12 @@ gboolean miwear_sleep_run_external_algo_cmd(AppState *state,
     if (bed_sec > 0) {
         gchar bed_env[32];
         (void)g_snprintf(bed_env, sizeof(bed_env), "%u", bed_sec);
-        envp = g_environ_setenv(envp, "MIWEAR_SLEEP_BED_SEC", bed_env, TRUE);
+        envp = g_environ_setenv(envp, "SALUS_SLEEP_BED_SEC", bed_env, TRUE);
     }
     if (wake_sec > 0) {
         gchar wake_env[32];
         (void)g_snprintf(wake_env, sizeof(wake_env), "%u", wake_sec);
-        envp = g_environ_setenv(envp, "MIWEAR_SLEEP_WAKE_SEC", wake_env, TRUE);
+        envp = g_environ_setenv(envp, "SALUS_SLEEP_WAKE_SEC", wake_env, TRUE);
     }
 
     gchar *cmd = g_strdup_printf(cmd_template, path);

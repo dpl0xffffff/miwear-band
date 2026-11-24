@@ -1,6 +1,6 @@
-#include "miwear/activity/activity.h"
-#include "miwear/sleep/mi_sleep_packets.h"
-#include "miwear/util.h"
+#include "salus/activity/activity.h"
+#include "salus/sleep/mi_sleep_packets.h"
+#include "salus/util.h"
 
 #include <glib.h>
 #include <stddef.h>
@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-int miwear_sleep_decode_raw_stage(int raw_stage) {
+int salus_sleep_decode_raw_stage(int raw_stage) {
     /* Gadgetbridge SleepDetailsParser.decodeStage() */
     switch (raw_stage) {
         case 0: return 5; /* awake */
@@ -20,14 +20,14 @@ int miwear_sleep_decode_raw_stage(int raw_stage) {
     }
 }
 
-int miwear_normalize_sleep_stage(int stage) {
+int salus_normalize_sleep_stage(int stage) {
     if (stage >= 2 && stage <= 5) {
         return stage;
     }
-    return stage == MIWEAR_SLEEP_STAGE_ASLEEP_UNKNOWN ? stage : -1; /* 0 = not asleep, other = invalid */
+    return stage == SALUS_SLEEP_STAGE_ASLEEP_UNKNOWN ? stage : -1; /* 0 = not asleep, other = invalid */
 }
 
-int64_t miwear_sleep_packet_timestamp_ms(uint64_t ts_raw) {
+int64_t salus_sleep_packet_timestamp_ms(uint64_t ts_raw) {
     if (ts_raw == 0) {
         return 0;
     }
@@ -40,7 +40,7 @@ int64_t miwear_sleep_packet_timestamp_ms(uint64_t ts_raw) {
     return 0;
 }
 
-gboolean miwear_sleep_timestamp_plausible(int64_t ts_ms) {
+gboolean salus_sleep_timestamp_plausible(int64_t ts_ms) {
     if (ts_ms <= 0) {
         return FALSE;
     }
@@ -60,9 +60,9 @@ static gboolean read_sleep_stage_packet_header(const uint8_t *buf, size_t len, s
     return FALSE;
 }
 
-gboolean miwear_sleep_foreach_packet(const uint8_t *payload,
+gboolean salus_sleep_foreach_packet(const uint8_t *payload,
                                      size_t len,
-                                     MiwearSleepPacketFn fn,
+                                     SalusSleepPacketFn fn,
                                      void *user_data) {
     if (payload == NULL || fn == NULL) {
         return FALSE;
@@ -86,7 +86,7 @@ gboolean miwear_sleep_foreach_packet(const uint8_t *payload,
         if (pos + data_len > len) {
             break;
         }
-        MiwearSleepPacketView view = {
+        SalusSleepPacketView view = {
             .ts_raw = ts_raw,
             .type = type,
             .data = payload + pos,
@@ -102,26 +102,26 @@ gboolean miwear_sleep_foreach_packet(const uint8_t *payload,
 }
 
 typedef struct EmbeddedStageCtx {
-    MiwearSleepStageRow *rows;
+    SalusSleepStageRow *rows;
     size_t count;
     size_t cap;
-    MiwearSleepStageDurations durations;
+    SalusSleepStageDurations durations;
     uint32_t bed_sec;
     uint32_t wake_sec;
 } EmbeddedStageCtx;
 
-static gboolean collect_embedded_stage_packet(const MiwearSleepPacketView *pkt, void *user_data) {
+static gboolean collect_embedded_stage_packet(const SalusSleepPacketView *pkt, void *user_data) {
     EmbeddedStageCtx *ctx = user_data;
     if (ctx == NULL) {
         return TRUE;
     }
     if (pkt->type == 16 && pkt->data_len >= 11) {
         /* Big-endian: total, awake, light, REM, deep (Gadgetbridge SleepDetailsParser type 16). */
-        const uint16_t sleep_duration = miwear_read_u16_be(pkt->data + 1);
-        const uint16_t wake_duration = miwear_read_u16_be(pkt->data + 3);
-        const uint16_t light_duration = miwear_read_u16_be(pkt->data + 5);
-        const uint16_t rem_duration = miwear_read_u16_be(pkt->data + 7);
-        const uint16_t deep_duration = miwear_read_u16_be(pkt->data + 9);
+        const uint16_t sleep_duration = salus_read_u16_be(pkt->data + 1);
+        const uint16_t wake_duration = salus_read_u16_be(pkt->data + 3);
+        const uint16_t light_duration = salus_read_u16_be(pkt->data + 5);
+        const uint16_t rem_duration = salus_read_u16_be(pkt->data + 7);
+        const uint16_t deep_duration = salus_read_u16_be(pkt->data + 9);
         ctx->durations.total_min = sleep_duration > 0 ? (int)sleep_duration : ctx->durations.total_min;
         ctx->durations.awake_min = wake_duration > 0 ? (int)wake_duration : ctx->durations.awake_min;
         ctx->durations.light_min = light_duration > 0 ? (int)light_duration : ctx->durations.light_min;
@@ -132,13 +132,13 @@ static gboolean collect_embedded_stage_packet(const MiwearSleepPacketView *pkt, 
     if (pkt->type != 17) {
         return TRUE;
     }
-    int64_t current_ms = miwear_sleep_packet_timestamp_ms(pkt->ts_raw);
-    if (!miwear_sleep_timestamp_plausible(current_ms)) {
+    int64_t current_ms = salus_sleep_packet_timestamp_ms(pkt->ts_raw);
+    if (!salus_sleep_timestamp_plausible(current_ms)) {
         return TRUE; /* each packet is anchored at its own timestamp; never chain an unreadable one */
     }
     for (uint16_t i = 0; i + 1 < pkt->data_len; i += 2) {
         const uint16_t val = ((uint16_t)pkt->data[i] << 8) | pkt->data[i + 1];
-        const int stage = miwear_sleep_decode_raw_stage((val >> 12) & 0x0F);
+        const int stage = salus_sleep_decode_raw_stage((val >> 12) & 0x0F);
         int offset_min = (int)(val & 0x0FFF);
         if (offset_min < 0 || offset_min > 720) {
             continue;
@@ -148,7 +148,7 @@ static gboolean collect_embedded_stage_packet(const MiwearSleepPacketView *pkt, 
         }
         if (ctx->count >= ctx->cap) {
             size_t new_cap = ctx->cap == 0 ? 64 : ctx->cap * 2;
-            MiwearSleepStageRow *nrows = g_realloc(ctx->rows, new_cap * sizeof(MiwearSleepStageRow));
+            SalusSleepStageRow *nrows = g_realloc(ctx->rows, new_cap * sizeof(SalusSleepStageRow));
             if (nrows == NULL) {
                 return FALSE;
             }
@@ -167,9 +167,9 @@ gboolean mi_sleep_try_embedded_stage_packets(const uint8_t *sleep_src,
                                              size_t sleep_src_len,
                                              uint32_t bed_sec,
                                              uint32_t wake_sec,
-                                             MiwearSleepStageRow **rows_out,
+                                             SalusSleepStageRow **rows_out,
                                              size_t *count_out,
-                                             MiwearSleepStageDurations *durations_out) {
+                                             SalusSleepStageDurations *durations_out) {
     if (sleep_src == NULL || rows_out == NULL || count_out == NULL) {
         return FALSE;
     }
@@ -178,7 +178,7 @@ gboolean mi_sleep_try_embedded_stage_packets(const uint8_t *sleep_src,
     EmbeddedStageCtx ctx = {0};
     ctx.bed_sec = bed_sec;
     ctx.wake_sec = wake_sec;
-    if (!miwear_sleep_foreach_packet(sleep_src, sleep_src_len, collect_embedded_stage_packet, &ctx)) {
+    if (!salus_sleep_foreach_packet(sleep_src, sleep_src_len, collect_embedded_stage_packet, &ctx)) {
         g_free(ctx.rows);
         return FALSE;
     }
@@ -190,7 +190,7 @@ gboolean mi_sleep_try_embedded_stage_packets(const uint8_t *sleep_src,
     *count_out = ctx.count;
     if (durations_out != NULL) {
         *durations_out = ctx.durations;
-        miwear_sleep_normalize_stage_durations(durations_out);
+        salus_sleep_normalize_stage_durations(durations_out);
     }
     return ctx.count > 0 || ctx.durations.deep_min > 0;
 }

@@ -1,11 +1,11 @@
-#include "miwear/activity/workout_summary.h"
-#include "miwear/activity/workout_record.h"
-#include "miwear/activity/mi_fitness_sport_report.h"
-#include "miwear/activity/mi_fitness_dispatch.h"
-#include "miwear/activity/schema_reader.h"
-#include "miwear/ui/dashboard.h"
-#include "miwear/app.h"
-#include "miwear/util.h"
+#include "salus/activity/workout_summary.h"
+#include "salus/activity/workout_record.h"
+#include "salus/activity/mi_fitness_sport_report.h"
+#include "salus/activity/mi_fitness_dispatch.h"
+#include "salus/activity/schema_reader.h"
+#include "salus/ui/dashboard.h"
+#include "salus/app.h"
+#include "salus/util.h"
 
 #include <string.h>
 
@@ -31,7 +31,7 @@ static gboolean mi_u16(MiReader *r, uint16_t *v) {
     if (!mi_need(r, 2)) {
         return FALSE;
     }
-    *v = (uint16_t)miwear_read_u16_le(r->buf + r->off);
+    *v = (uint16_t)salus_read_u16_le(r->buf + r->off);
     r->off += 2;
     return TRUE;
 }
@@ -40,7 +40,7 @@ static gboolean mi_u32(MiReader *r, uint32_t *v) {
     if (!mi_need(r, 4)) {
         return FALSE;
     }
-    *v = miwear_read_u32_le(r->buf + r->off);
+    *v = salus_read_u32_le(r->buf + r->off);
     r->off += 4;
     return TRUE;
 }
@@ -49,7 +49,7 @@ static gboolean mi_f32(MiReader *r, float *v) {
     if (!mi_need(r, 4)) {
         return FALSE;
     }
-    uint32_t raw = miwear_read_u32_le(r->buf + r->off);
+    uint32_t raw = salus_read_u32_le(r->buf + r->off);
     memcpy(v, &raw, sizeof(float));
     r->off += 4;
     return TRUE;
@@ -84,7 +84,7 @@ static gboolean mi_reader_init(MiReader *r, const uint8_t *payload, size_t paylo
     return TRUE;
 }
 
-static void fill_core(MiwearWorkoutSummary *out,
+static void fill_core(SalusWorkoutSummary *out,
                       uint32_t start,
                       uint32_t end,
                       uint32_t active_sec,
@@ -106,7 +106,7 @@ static void fill_core(MiwearWorkoutSummary *out,
     out->hr_min = hr_min;
 }
 
-static gboolean summary_values_sane(const MiwearWorkoutSummary *s) {
+static gboolean summary_values_sane(const SalusWorkoutSummary *s) {
     if (s->start_sec == 0 || s->end_sec == 0 || s->end_sec <= s->start_sec) {
         return FALSE;
     }
@@ -136,7 +136,7 @@ static gboolean summary_values_sane(const MiwearWorkoutSummary *s) {
     return TRUE;
 }
 
-static void finalize_walk_summary(int subtype, MiwearWorkoutSummary *out) {
+static void finalize_walk_summary(int subtype, SalusWorkoutSummary *out) {
     if (out == NULL || (subtype != 0x16 && subtype != 2)) {
         return;
     }
@@ -152,14 +152,14 @@ static void finalize_walk_summary(int subtype, MiwearWorkoutSummary *out) {
 static gboolean heuristic_walk_summary(const uint8_t *payload,
                                        size_t payload_len,
                                        uint32_t file_ts_sec,
-                                       MiwearWorkoutSummary *out) {
+                                       SalusWorkoutSummary *out) {
     const size_t body_end = payload_len >= 4 ? payload_len - 4 : 0;
     const size_t base = workout_data_start(payload, payload_len);
 
     for (size_t off = base; off + 28 <= body_end; off++) {
-        const uint32_t start = miwear_read_u32_le(payload + off);
-        const uint32_t end = miwear_read_u32_le(payload + off + 4);
-        const uint32_t active = miwear_read_u32_le(payload + off + 8);
+        const uint32_t start = salus_read_u32_le(payload + off);
+        const uint32_t end = salus_read_u32_le(payload + off + 4);
+        const uint32_t active = salus_read_u32_le(payload + off + 8);
         if (end <= start || end - start > 8u * 3600u) {
             continue;
         }
@@ -169,10 +169,10 @@ static gboolean heuristic_walk_summary(const uint8_t *payload,
         if (file_ts_sec != 0 && (start > file_ts_sec + 7200u || start + 7200u < file_ts_sec)) {
             continue;
         }
-        const uint32_t dist = miwear_read_u32_le(payload + off + 16);
+        const uint32_t dist = salus_read_u32_le(payload + off + 16);
         /* Gadgetbridge outdoor walk v2: total @+20, active burnt @+22 (after start u32). */
-        const uint16_t kcal_total = (uint16_t)miwear_read_u16_le(payload + off + 20);
-        const uint16_t kcal_burnt = (uint16_t)miwear_read_u16_le(payload + off + 22);
+        const uint16_t kcal_total = (uint16_t)salus_read_u16_le(payload + off + 20);
+        const uint16_t kcal_burnt = (uint16_t)salus_read_u16_le(payload + off + 22);
         uint16_t kcal = kcal_burnt > 0 ? kcal_burnt : kcal_total;
         if (dist > 100000u || kcal > 5000u) {
             continue;
@@ -191,7 +191,7 @@ static gboolean heuristic_walk_summary(const uint8_t *payload,
     return FALSE;
 }
 
-static gboolean parse_freestyle(MiReader *r, int version, MiwearWorkoutSummary *out) {
+static gboolean parse_freestyle(MiReader *r, int version, SalusWorkoutSummary *out) {
     uint32_t start = 0, end = 0, active = 0;
     uint16_t kcal = 0;
     uint8_t hr_avg = 0, hr_max = 0, hr_min = 0;
@@ -244,7 +244,7 @@ static gboolean parse_freestyle(MiReader *r, int version, MiwearWorkoutSummary *
     return TRUE;
 }
 
-static gboolean parse_outdoor_run_v1(MiReader *r, MiwearWorkoutSummary *out) {
+static gboolean parse_outdoor_run_v1(MiReader *r, SalusWorkoutSummary *out) {
     uint32_t start = 0, end = 0, active = 0, dist = 0, kcal = 0, steps = 0;
     uint8_t hr_avg = 0, hr_max = 0, hr_min = 0;
     float recovery = 0;
@@ -280,7 +280,7 @@ static gboolean parse_outdoor_run_v1(MiReader *r, MiwearWorkoutSummary *out) {
     return TRUE;
 }
 
-static gboolean parse_outdoor_walk_v2(MiReader *r, int version, MiwearWorkoutSummary *out) {
+static gboolean parse_outdoor_walk_v2(MiReader *r, int version, SalusWorkoutSummary *out) {
     uint16_t workout_type = 0;
     uint32_t start = 0, end = 0, active = 0, dist = 0, steps = 0;
     uint32_t pace_avg = 0, pace_max = 0, pace_min = 0;
@@ -361,7 +361,7 @@ static gboolean parse_outdoor_walk_v2(MiReader *r, int version, MiwearWorkoutSum
     return TRUE;
 }
 
-static gboolean parse_hiit(MiReader *r, MiwearWorkoutSummary *out) {
+static gboolean parse_hiit(MiReader *r, SalusWorkoutSummary *out) {
     uint32_t start = 0, end = 0, active = 0;
     uint16_t kcal = 0;
     uint8_t hr_avg = 0, hr_max = 0, hr_min = 0;
@@ -381,7 +381,7 @@ static gboolean parse_hiit(MiReader *r, MiwearWorkoutSummary *out) {
     return TRUE;
 }
 
-static gboolean parse_elliptical(MiReader *r, int version, MiwearWorkoutSummary *out) {
+static gboolean parse_elliptical(MiReader *r, int version, SalusWorkoutSummary *out) {
     uint32_t start = 0, end = 0, active = 0, steps = 0;
     uint16_t kcal = 0, cadence_max = 0;
     uint8_t hr_avg = 0, hr_max = 0, hr_min = 0;
@@ -463,7 +463,7 @@ static gboolean parse_with_header(const uint8_t *payload,
                                   int subtype,
                                   int version,
                                   int header_size,
-                                  MiwearWorkoutSummary *out) {
+                                  SalusWorkoutSummary *out) {
     MiReader r;
     if (!mi_reader_init(&r, payload, payload_len, (size_t)header_size)) {
         return FALSE;
@@ -484,34 +484,34 @@ static gboolean parse_with_header(const uint8_t *payload,
     }
 }
 
-gboolean miwear_parse_workout_summary(const uint8_t *payload,
+gboolean salus_parse_workout_summary(const uint8_t *payload,
                                       size_t payload_len,
                                       int subtype,
                                       int version,
                                       uint32_t file_ts_sec,
-                                      MiwearWorkoutSummary *out) {
+                                      SalusWorkoutSummary *out) {
     if (payload == NULL || out == NULL || payload_len < 13) {
         return FALSE;
     }
 
-    miwear_workout_summary_clear(out);
+    salus_workout_summary_clear(out);
 
     out->sport_subtype = subtype;
     out->version = version;
 
     /* Mi Fitness's own decoding (field tables / schemas extracted from the app) for every sport. */
     {
-        MiwearWorkoutSummary trial = {0};
+        SalusWorkoutSummary trial = {0};
         trial.sport_subtype = subtype;
         trial.version = version;
         if (mi_fitness_parse_sport_report(payload, payload_len, subtype, version, &trial) &&
             summary_values_sane(&trial)) {
             const int shown = trial.sub_sport_type > 0 ? trial.sub_sport_type : subtype;
-            trial.sport_name = g_strdup(miwear_sport_subtype_name(shown));
+            trial.sport_name = g_strdup(salus_sport_subtype_name(shown));
             *out = trial;
             return TRUE;
         }
-        miwear_workout_summary_clear(&trial);
+        salus_workout_summary_clear(&trial);
     }
 
     /* Versions Mi Fitness itself cannot read: older Gadgetbridge-style layouts. */
@@ -529,12 +529,12 @@ gboolean miwear_parse_workout_summary(const uint8_t *payload,
     }
 
     for (size_t i = 0; i < n_headers; i++) {
-        MiwearWorkoutSummary trial = {0};
+        SalusWorkoutSummary trial = {0};
         trial.sport_subtype = subtype;
         trial.version = version;
-        trial.sport_name = g_strdup(miwear_sport_subtype_name(subtype));
+        trial.sport_name = g_strdup(salus_sport_subtype_name(subtype));
         if (!parse_with_header(payload, payload_len, subtype, version, headers[i], &trial)) {
-            miwear_workout_summary_clear(&trial);
+            salus_workout_summary_clear(&trial);
             continue;
         }
         if (summary_values_sane(&trial)) {
@@ -542,13 +542,13 @@ gboolean miwear_parse_workout_summary(const uint8_t *payload,
             *out = trial;
             return TRUE;
         }
-        miwear_workout_summary_clear(&trial);
+        salus_workout_summary_clear(&trial);
     }
 
     if (subtype == 0x16 && heuristic_walk_summary(payload, payload_len, file_ts_sec, out)) {
         out->sport_subtype = subtype;
         out->version = version;
-        out->sport_name = g_strdup(miwear_sport_subtype_name(subtype));
+        out->sport_name = g_strdup(salus_sport_subtype_name(subtype));
         finalize_walk_summary(subtype, out);
         return TRUE;
     }
@@ -556,12 +556,12 @@ gboolean miwear_parse_workout_summary(const uint8_t *payload,
     return FALSE;
 }
 
-static void log_walk_summary(AppState *state, const MiwearWorkoutSummary *sum, int version) {
+static void log_walk_summary(AppState *state, const SalusWorkoutSummary *sum, int version) {
     if (sum == NULL || !sum->has_walk_detail) {
         return;
     }
     gchar pace[32];
-    miwear_format_walk_pace(sum->walk_avg_pace_sec_per_km, pace, sizeof(pace));
+    salus_format_walk_pace(sum->walk_avg_pace_sec_per_km, pace, sizeof(pace));
     gchar *line = g_strdup_printf(
         "Outdoor walk v%d: %d min, %d m, %d kcal, %d steps, pace %s/km, cadence %d, HR %d/%d/%d",
         version,
@@ -578,18 +578,18 @@ static void log_walk_summary(AppState *state, const MiwearWorkoutSummary *sum, i
     g_free(line);
 }
 
-static void log_swim_summary(AppState *state, const MiwearWorkoutSummary *sum, int version) {
+static void log_swim_summary(AppState *state, const SalusWorkoutSummary *sum, int version) {
     if (sum == NULL || !sum->has_swim_detail) {
         return;
     }
     gchar pace[32];
-    miwear_format_swim_pace(sum->swim_avg_pace_sec_per_100m, pace, sizeof(pace));
+    salus_format_swim_pace(sum->swim_avg_pace_sec_per_100m, pace, sizeof(pace));
     gchar *line = g_strdup_printf(
         "Pool swim v%d: %d kcal, %d lengths, %s, pace %s/100m, SWOLF %d, strokes %d, SPM %d, load %d, recovery %d min, vitality +%d, HR %d/%d/%d",
         version,
         sum->calories,
         sum->swim_lengths,
-        miwear_swim_stroke_name(sum->swim_main_stroke),
+        salus_swim_stroke_name(sum->swim_main_stroke),
         pace,
         sum->swim_avg_swolf,
         sum->swim_total_strokes,
@@ -604,7 +604,7 @@ static void log_swim_summary(AppState *state, const MiwearWorkoutSummary *sum, i
     g_free(line);
 }
 
-void miwear_apply_workout_file(AppState *state,
+void salus_apply_workout_file(AppState *state,
                                uint32_t file_ts,
                                int subtype,
                                int detail,
@@ -615,12 +615,12 @@ void miwear_apply_workout_file(AppState *state,
         return;
     }
 
-    miwear_schema_maybe_capture(payload, payload_len, subtype, detail, version, file_ts);
+    salus_schema_maybe_capture(payload, payload_len, subtype, detail, version, file_ts);
 
     if (detail == 2) {
-        MiwearWorkoutSummary patch = {0};
-        if (miwear_parse_workout_gps(payload, payload_len, subtype, version, &patch)) {
-            miwear_sport_merge_attachment(state, file_ts, subtype, &patch);
+        SalusWorkoutSummary patch = {0};
+        if (salus_parse_workout_gps(payload, payload_len, subtype, version, &patch)) {
+            salus_sport_merge_attachment(state, file_ts, subtype, &patch);
             gchar *line = g_strdup_printf("Workout GPS: %u track point(s)",
                                           patch.gps_track != NULL ? patch.gps_track->len : 0u);
             append_log(state, line);
@@ -633,14 +633,14 @@ void miwear_apply_workout_file(AppState *state,
             append_log(state, line);
             g_free(line);
         }
-        miwear_workout_summary_clear(&patch);
+        salus_workout_summary_clear(&patch);
         return;
     }
     if (detail == 0) {
-        MiwearWorkoutSummary patch = {0};
-        const gboolean ok = miwear_parse_workout_record(payload, payload_len, subtype, version, &patch);
+        SalusWorkoutSummary patch = {0};
+        const gboolean ok = salus_parse_workout_record(payload, payload_len, subtype, version, &patch);
         if (ok) {
-            miwear_sport_merge_attachment(state, file_ts, subtype, &patch);
+            salus_sport_merge_attachment(state, file_ts, subtype, &patch);
             gchar *line = g_strdup_printf("Workout record (%s v%d): %u sample(s), interval ~%d s",
                                           mi_fitness_sport_record_parser_name(subtype),
                                           version,
@@ -655,9 +655,9 @@ void miwear_apply_workout_file(AppState *state,
                                           payload_len);
             append_log(state, line);
             g_free(line);
-            miwear_sport_add_entry(state, file_ts, 1, subtype, NULL);
+            salus_sport_add_entry(state, file_ts, 1, subtype, NULL);
         }
-        miwear_workout_summary_clear(&patch);
+        salus_workout_summary_clear(&patch);
         return;
     }
     if (detail == 3) {
@@ -665,19 +665,19 @@ void miwear_apply_workout_file(AppState *state,
         return;
     }
 
-    MiwearWorkoutSummary sum = {0};
+    SalusWorkoutSummary sum = {0};
     sum.file_ts_sec = file_ts;
     sum.sport_subtype = subtype;
     sum.version = version;
-    if (miwear_parse_workout_summary(payload, payload_len, subtype, version, file_ts, &sum)) {
+    if (salus_parse_workout_summary(payload, payload_len, subtype, version, file_ts, &sum)) {
         sum.file_ts_sec = file_ts;
         sum.sport_subtype = subtype;
         sum.version = version;
         if (sum.sport_name == NULL) {
-            sum.sport_name = g_strdup(miwear_sport_subtype_name(subtype));
+            sum.sport_name = g_strdup(salus_sport_subtype_name(subtype));
         }
-        miwear_sport_add_entry(state, file_ts, 1, subtype, &sum);
-        miwear_dashboard_schedule_refresh(state);
+        salus_sport_add_entry(state, file_ts, 1, subtype, &sum);
+        salus_dashboard_schedule_refresh(state);
         if (sum.has_swim_detail) {
             log_swim_summary(state, &sum, version);
         } else if (sum.has_walk_detail) {
@@ -698,12 +698,12 @@ void miwear_apply_workout_file(AppState *state,
         }
     } else {
         gchar *line = g_strdup_printf("Workout summary: %s v%d — parser not ported yet (%zu bytes)",
-                                      miwear_sport_subtype_name(subtype),
+                                      salus_sport_subtype_name(subtype),
                                       version,
                                       payload_len);
         append_log(state, line);
         g_free(line);
-        miwear_sport_add_entry(state, file_ts, 1, subtype, NULL);
+        salus_sport_add_entry(state, file_ts, 1, subtype, NULL);
     }
-    miwear_workout_summary_clear(&sum);
+    salus_workout_summary_clear(&sum);
 }

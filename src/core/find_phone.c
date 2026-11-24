@@ -1,6 +1,6 @@
-#include "miwear/find_phone.h"
-#include "miwear/spp/wire_internal.h"
-#include "miwear/ui/dashboard.h"
+#include "salus/find_phone.h"
+#include "salus/spp/wire_internal.h"
+#include "salus/ui/dashboard.h"
 
 #include <gio/gio.h>
 #include <glib.h>
@@ -94,11 +94,11 @@ static void stop_beep(AppState *state) {
     state->find_phone_active = FALSE;
 }
 
-void miwear_find_phone_shutdown(AppState *state) {
+void salus_find_phone_shutdown(AppState *state) {
     stop_beep(state);
 }
 
-void miwear_find_phone_on_band_request(AppState *state, guint find_device) {
+void salus_find_phone_on_band_request(AppState *state, guint find_device) {
     if (state == NULL) {
         return;
     }
@@ -109,26 +109,26 @@ void miwear_find_phone_on_band_request(AppState *state, guint find_device) {
         state->find_phone_active = TRUE;
         start_ring_audio(state);
         set_status(state, "Find phone: ringing — use Stop on Device tab or dismiss on band.");
-        miwear_dashboard_schedule_refresh(state);
+        salus_dashboard_schedule_refresh(state);
     } else {
         append_log(state, "Find phone: band stopped ring.");
         stop_beep(state);
         set_status(state, "Find phone stopped.");
-        miwear_dashboard_schedule_refresh(state);
+        salus_dashboard_schedule_refresh(state);
     }
 }
 
-void miwear_find_phone_dismiss(AppState *state) {
+void salus_find_phone_dismiss(AppState *state) {
     if (state == NULL || !state->find_phone_active) {
         return;
     }
     stop_beep(state);
-    (void)miwear_wire_send_find_device(state, 17, 1, "Find phone ack (stop on band)");
+    (void)salus_wire_send_find_device(state, 17, 1, "Find phone ack (stop on band)");
     append_log(state, "Find phone: stopped from Linux app.");
     set_status(state, "Find phone stopped.");
-    miwear_dashboard_schedule_refresh(state);
+    salus_dashboard_schedule_refresh(state);
 }
 
-gboolean miwear_find_phone_is_active(const AppState *state) {
+gboolean salus_find_phone_is_active(const AppState *state) {
     return state != NULL && state->find_phone_active;
 }

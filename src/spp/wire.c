@@ -1,14 +1,14 @@
-#include "miwear/app.h"
-#include "miwear/find_phone.h"
-#include "miwear/profile.h"
-#include "miwear/ui/health_data.h"
-#include "miwear/weight_log.h"
-#include "miwear/spp/fitness_sync.h"
-#include "miwear/notifications/notifications.h"
-#include "miwear/spp/workout_gps.h"
-#include "miwear/spp/weather.h"
-#include "miwear/spp/wire.h"
-#include "miwear/spp/wire_internal.h"
+#include "salus/app.h"
+#include "salus/find_phone.h"
+#include "salus/profile.h"
+#include "salus/ui/health_data.h"
+#include "salus/weight_log.h"
+#include "salus/spp/fitness_sync.h"
+#include "salus/notifications/notifications.h"
+#include "salus/spp/workout_gps.h"
+#include "salus/spp/weather.h"
+#include "salus/spp/wire.h"
+#include "salus/spp/wire_internal.h"
 
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/rfcomm.h>
@@ -258,39 +258,39 @@ static void log_decoded_command_proto(AppState *state, const uint8_t *plain, siz
     }
 
     if (cmd->type == 2 && cmd->has_subtype && cmd->subtype == 17 && cmd->system && cmd->system->has_finddevice) {
-        miwear_find_phone_on_band_request(state, cmd->system->finddevice);
+        salus_find_phone_on_band_request(state, cmd->system->finddevice);
     }
 
     if (cmd->health && cmd->health->realtimestats) {
         const Xiaomi__RealTimeStats *rt = cmd->health->realtimestats;
         /* The live stats carry neither the band's active calories nor its active minutes, so
          * only steps and heart rate are used from them. */
-        miwear_live_metrics_update(state, &(MiwearLiveMetrics){.has_hr = rt->has_heartrate,
+        salus_live_metrics_update(state, &(SalusLiveMetrics){.has_hr = rt->has_heartrate,
                                                                .hr = rt->heartrate,
                                                                .has_steps = rt->has_steps,
                                                                .steps = rt->steps});
     }
 
     if (cmd->type == 10) {
-        miwear_weather_handle_command(state, cmd);
+        salus_weather_handle_command(state, cmd);
     }
     if (cmd->type == 7) {
-        miwear_notifications_handle_command(state, cmd);
+        salus_notifications_handle_command(state, cmd);
     }
     if (cmd->type == 8) {
-        miwear_workout_gps_handle_command(state, cmd);
+        salus_workout_gps_handle_command(state, cmd);
     }
 
     if (cmd->system && cmd->system->power && cmd->system->power->battery) {
         const Xiaomi__Battery *bat = cmd->system->power->battery;
         if (bat->has_level) {
-            miwear_live_metrics_update(state, &(MiwearLiveMetrics){.has_battery = TRUE, .battery = bat->level});
+            salus_live_metrics_update(state, &(SalusLiveMetrics){.has_battery = TRUE, .battery = bat->level});
         }
     }
 
     if (cmd->system && cmd->system->basicdevicestate && cmd->system->basicdevicestate->has_batterylevel) {
-        miwear_live_metrics_update(
-            state, &(MiwearLiveMetrics){.has_battery = TRUE, .battery = cmd->system->basicdevicestate->batterylevel});
+        salus_live_metrics_update(
+            state, &(SalusLiveMetrics){.has_battery = TRUE, .battery = cmd->system->basicdevicestate->batterylevel});
     }
 
     if (cmd->system && cmd->system->basicdevicestate) {
@@ -363,7 +363,7 @@ static void log_decoded_command_proto(AppState *state, const uint8_t *plain, siz
             guint n_other = 0;
             for (size_t off = 0; off + 7 <= len; off += 7) {
                 const uint8_t *p = ids + off;
-                const uint32_t ts = miwear_read_u32_le(p);
+                const uint32_t ts = salus_read_u32_le(p);
                 int8_t tz = (int8_t)p[4];
                 uint8_t ver = p[5];
                 uint8_t flags = p[6];
@@ -799,7 +799,7 @@ static gchar *activity_file_id_key(const uint8_t *id7) {
     return out;
 }
 
-void miwear_log_fetch_transition(AppState *state, const char *event, const uint8_t *file_id7) {
+void salus_log_fetch_transition(AppState *state, const char *event, const uint8_t *file_id7) {
     if (state == NULL || !state->verbose_fetch_log) {
         return;
     }
@@ -862,7 +862,7 @@ static gboolean activity_fetch_timeout_cb(gpointer user_data) {
         g_hash_table_remove(state->activity_fetch_seen, key);
         g_free(key);
     }
-    miwear_log_fetch_transition(state, "timeout", state->activity_fetch_current_id);
+    salus_log_fetch_transition(state, "timeout", state->activity_fetch_current_id);
 
     state->activity_fetch_inflight = FALSE;
     memset(state->activity_fetch_current_id, 0, sizeof(state->activity_fetch_current_id));
@@ -920,8 +920,8 @@ static gint activity_file_id_compare(gconstpointer a, gconstpointer b, gpointer 
     const uint8_t *aa = a;
     const uint8_t *bb = b;
 
-    const uint32_t ts_a = miwear_read_u32_le(aa);
-    const uint32_t ts_b = miwear_read_u32_le(bb);
+    const uint32_t ts_a = salus_read_u32_le(aa);
+    const uint32_t ts_b = salus_read_u32_le(bb);
     if (ts_a != ts_b) return (ts_a < ts_b) ? -1 : 1;
 
     const int tz_a = (int8_t)aa[4];
@@ -965,7 +965,7 @@ void reset_activity_fetch_state(AppState *state) {
     if (state->activity_fetch_seen != NULL) {
         g_hash_table_remove_all(state->activity_fetch_seen);
     }
-    miwear_log_fetch_transition(state, "reset", NULL);
+    salus_log_fetch_transition(state, "reset", NULL);
 }
 
 static void resync_activity_fetch_state(AppState *state) {
@@ -976,7 +976,7 @@ static void resync_activity_fetch_state(AppState *state) {
     if (state->activity_fetch_seen != NULL) {
         g_hash_table_remove_all(state->activity_fetch_seen);
     }
-    miwear_log_fetch_transition(state, "resync-pause", NULL);
+    salus_log_fetch_transition(state, "resync-pause", NULL);
 }
 
 /* Logs once per connection when the band lists no sleep file. (Guessing sleep file IDs used to be
@@ -1132,7 +1132,7 @@ static void enqueue_activity_file_ids(AppState *state, const uint8_t *ids, size_
     guint added = 0;
     for (size_t off = 0; off + 7 <= len; off += 7) {
         const uint8_t *id = ids + off;
-        const uint32_t ts = miwear_read_u32_le(id);
+        const uint32_t ts = salus_read_u32_le(id);
         const uint8_t ver = id[5];
         if (ts == 0 && ver == 0) {
             continue;
@@ -1151,7 +1151,7 @@ static void enqueue_activity_file_ids(AppState *state, const uint8_t *ids, size_
     }
     if (added > 0) {
         gchar *event = g_strdup_printf("enqueue+%u", added);
-        miwear_log_fetch_transition(state, event, NULL);
+        salus_log_fetch_transition(state, event, NULL);
         g_free(event);
     }
 }
@@ -1187,14 +1187,14 @@ void trigger_next_activity_fetch(AppState *state) {
         state->activity_fetch_inflight = TRUE;
         memcpy(state->activity_fetch_current_id, next_id, 7);
         schedule_activity_fetch_timeout(state);
-        miwear_log_fetch_transition(state, "request-sent", next_id);
+        salus_log_fetch_transition(state, "request-sent", next_id);
     } else {
         gchar *key = activity_file_id_key(next_id);
         if (state->activity_fetch_seen != NULL) {
             g_hash_table_remove(state->activity_fetch_seen, key);
         }
         g_free(key);
-        miwear_log_fetch_transition(state, "request-failed", next_id);
+        salus_log_fetch_transition(state, "request-failed", next_id);
     }
 
     g_free(next_id);
@@ -1375,7 +1375,7 @@ static gboolean auto_history_followup_cb(gpointer user_data) {
     return G_SOURCE_CONTINUE;
 }
 
-gboolean miwear_wire_send_find_device(AppState *state, uint32_t subtype, uint32_t find_device, const char *label) {
+gboolean salus_wire_send_find_device(AppState *state, uint32_t subtype, uint32_t find_device, const char *label) {
     if (state == NULL || !state->auth_initialized) {
         return FALSE;
     }
@@ -1388,7 +1388,7 @@ gboolean miwear_wire_send_find_device(AppState *state, uint32_t subtype, uint32_
     cmd.has_subtype = TRUE;
     cmd.subtype = subtype;
     cmd.system = &sys;
-    return miwear_wire_send_xiaomi_command(state, &cmd, label);
+    return salus_wire_send_xiaomi_command(state, &cmd, label);
 }
 
 static gboolean find_band_auto_stop_cb(gpointer user_data) {
@@ -1397,12 +1397,12 @@ static gboolean find_band_auto_stop_cb(gpointer user_data) {
         return G_SOURCE_REMOVE;
     }
     state->find_band_stop_source = 0;
-    (void)miwear_wire_send_find_device(state, 18, 1, "Find band auto-stop");
+    (void)salus_wire_send_find_device(state, 18, 1, "Find band auto-stop");
     append_log(state, "Find band: auto-stopped after timeout.");
     return G_SOURCE_REMOVE;
 }
 
-gboolean miwear_wire_find_band(AppState *state, gboolean start) {
+gboolean salus_wire_find_band(AppState *state, gboolean start) {
     if (state == NULL) {
         return FALSE;
     }
@@ -1410,7 +1410,7 @@ gboolean miwear_wire_find_band(AppState *state, gboolean start) {
         g_source_remove(state->find_band_stop_source);
         state->find_band_stop_source = 0;
     }
-    const gboolean ok = miwear_wire_send_find_device(
+    const gboolean ok = salus_wire_send_find_device(
         state, 18, start ? 0u : 1u, start ? "Find band (start)" : "Find band (stop)");
     if (ok && start) {
         state->find_band_stop_source = g_timeout_add_seconds(45, find_band_auto_stop_cb, state);
@@ -1418,7 +1418,7 @@ gboolean miwear_wire_find_band(AppState *state, gboolean start) {
     return ok;
 }
 
-gboolean miwear_wire_send_xiaomi_command(AppState *state, Xiaomi__Command *cmd, const char *label) {
+gboolean salus_wire_send_xiaomi_command(AppState *state, Xiaomi__Command *cmd, const char *label) {
     if (state == NULL || cmd == NULL || !state->auth_initialized) {
         return FALSE;
     }
@@ -1489,7 +1489,7 @@ static gboolean send_gb_set_current_time(AppState *state) {
     cmd.subtype = 3;
     cmd.system = &sys;
 
-    const gboolean ok = miwear_wire_send_xiaomi_command(state, &cmd, NULL);
+    const gboolean ok = salus_wire_send_xiaomi_command(state, &cmd, NULL);
     g_date_time_unref(now);
     append_log(state, ok ? "Sent clock/time (GB setCurrentTime)." : "Failed to send clock/time.");
     return ok;
@@ -1498,15 +1498,15 @@ static gboolean send_gb_set_current_time(AppState *state) {
 /* XiaomiHealthService.setUserInfo(): type 8, subtype 0, Health.userInfo */
 static gboolean send_gb_user_info(AppState *state) {
     Xiaomi__UserInfo ui = XIAOMI__USER_INFO__INIT;
-    miwear_profile_apply_defaults(state);
+    salus_profile_apply_defaults(state);
     ui.has_height = TRUE;
     ui.height = state->profile_height_cm;
     ui.has_weight = TRUE;
-    ui.weight = miwear_weight_log_band_user_kg(state);
+    ui.weight = salus_weight_log_band_user_kg(state);
     ui.has_birthday = TRUE;
     ui.birthday = state->profile_birthday_yyyymmdd;
     ui.has_gender = TRUE;
-    ui.gender = miwear_gender_config_to_proto(state->profile_gender);
+    ui.gender = salus_gender_config_to_proto(state->profile_gender);
     ui.has_maxheartrate = TRUE;
     ui.maxheartrate = state->profile_max_hr;
     ui.has_goalcalories = TRUE;
@@ -1539,7 +1539,7 @@ static gboolean send_gb_user_info(AppState *state) {
     return ok;
 }
 
-void miwear_wire_send_device_bootstrap(AppState *state) {
+void salus_wire_send_device_bootstrap(AppState *state) {
     (void)send_gb_set_current_time(state);
     (void)send_gb_user_info(state);
     (void)send_encrypted_simple_command(state, 8, 8, "Requested SpO2 config");
@@ -1554,10 +1554,10 @@ void miwear_wire_send_device_bootstrap(AppState *state) {
     (void)send_realtime_stats_start(state);
     (void)send_encrypted_simple_command(state, 2, 1, "Requested battery state");
     (void)send_encrypted_simple_command(state, 2, 78, "Requested device state");
-    miwear_weather_initialize(state);
+    salus_weather_initialize(state);
 }
 
-void miwear_wire_begin_file_sync(AppState *state, const char *today_label) {
+void salus_wire_begin_file_sync(AppState *state, const char *today_label) {
     reset_activity_fetch_state(state);
     send_activity_fetch_today_channels(state, today_label != NULL ? today_label : "Today file IDs");
     /* Mi Fitness requests history after today list is dispatched (FitnessWearSender.requestData). */
@@ -1571,7 +1571,7 @@ void miwear_wire_begin_file_sync(AppState *state, const char *today_label) {
     start_activity_live_poll(state);
 }
 
-void miwear_wire_resync_file_lists(AppState *state, const char *today_label) {
+void salus_wire_resync_file_lists(AppState *state, const char *today_label) {
     resync_activity_fetch_state(state);
     state->manual_stress_probe_done = FALSE;
     state->manual_listed_file_id_valid = FALSE;
@@ -1623,7 +1623,7 @@ static void handle_command_payload(AppState *state, const uint8_t *payload, size
             schedule_switch_to_dashboard(state);
             set_connect_busy(state, FALSE);
             if (state->auth_initialized) {
-                miwear_fitness_sync_on_auth_async(state);
+                salus_fitness_sync_on_auth_async(state);
             }
         } else {
             append_log(state, "Auth failed.");
@@ -1695,8 +1695,8 @@ static gboolean process_v2_packet(AppState *state, const uint8_t *packet, size_t
                 size_t plain_len = 0;
                 if (aes_ctr_crypt(state->decryption_key, state->decryption_key, data, data_len, &plain, &plain_len)) {
                     if (plain_len >= 4) {
-                        const uint16_t total = miwear_read_u16_le(plain);
-                        const uint16_t num = miwear_read_u16_le(plain + 2);
+                        const uint16_t total = salus_read_u16_le(plain);
+                        const uint16_t num = salus_read_u16_le(plain + 2);
                         if (state->verbose_fetch_log) {
                             gchar *line = g_strdup_printf("ACT chunk %u/%u (%zu bytes)", num, total, plain_len);
                             append_log(state, line);
@@ -1979,8 +1979,8 @@ void disconnect_socket(AppState *state) {
     state->spp_v2_seq = 0;
     state->has_live_steps = FALSE;
     state->has_live_hr = FALSE;
-    miwear_notifications_on_disconnect(state);
-    miwear_workout_gps_stop(state, "band disconnected");
+    salus_notifications_on_disconnect(state);
+    salus_workout_gps_stop(state, "band disconnected");
 }
 
 typedef struct {

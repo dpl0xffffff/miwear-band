@@ -13,7 +13,7 @@ How the app gets each value today (connected, viewing today):
   steps aren't recorded. The raw `rt steps` value is still kept, since `rt3` ÷ steps checks the
   distance theory.
 - **Calories**: RealTimeStats field 2, used as is (`src/ui/dashboard.c:1252`).
-- **Active minutes**: worked out from `rt3` and `rt5` by `miwear_activity_time_from_realtime()`
+- **Active minutes**: worked out from `rt3` and `rt5` by `salus_activity_time_from_realtime()`
   (`src/ui/health_data.c:362`). `rt3` up to 180 counts as minutes; above that it is divided by
   92 and rounded. `rt5` (≤ 600) counts as minutes. The rule for choosing between them was guessed.
 

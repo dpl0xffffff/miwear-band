@@ -1,9 +1,9 @@
 #include "ui_private.h"
 
-#include "miwear/profile.h"
-#include "miwear/spp/fitness_sync.h"
-#include "miwear/spp/wire.h"
-#include "miwear/weight_log.h"
+#include "salus/profile.h"
+#include "salus/spp/fitness_sync.h"
+#include "salus/spp/wire.h"
+#include "salus/weight_log.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -16,7 +16,7 @@
 /* Readings further apart than this are drawn as separate line segments (off-wrist, gaps). */
 #define TREND_MAX_GAP_MIN 60
 #define TREND_STEP_BUCKET_MIN 30
-#define TREND_BUCKETS (MI_DAY_MINUTES / TREND_STEP_BUCKET_MIN)
+#define TREND_BUCKETS (UI_DAY_MINUTES / TREND_STEP_BUCKET_MIN)
 
 static void dashboard_update_date_navs(AppState *state);
 
@@ -24,8 +24,8 @@ static void dashboard_update_date_navs(AppState *state);
 /* Lifecycle                                                                                */
 /* ======================================================================================== */
 
-MiwearDashboardUi *miwear_dashboard_ui_new(void) {
-    MiwearDashboardUi *dash = g_new0(MiwearDashboardUi, 1);
+SalusDashboardUi *salus_dashboard_ui_new(void) {
+    SalusDashboardUi *dash = g_new0(SalusDashboardUi, 1);
     dash->battery = -1;
     dash->trend_hover_x = -1.0;
     dash->sleep_hover_x = -1.0;
@@ -33,11 +33,11 @@ MiwearDashboardUi *miwear_dashboard_ui_new(void) {
     dash->date_next = g_ptr_array_new();
     dash->date_today = g_ptr_array_new();
     dash->calendars = g_ptr_array_new();
-    dash->night = g_new0(MiNight, 1);
+    dash->night = g_new0(UiNight, 1);
     return dash;
 }
 
-void miwear_dashboard_ui_free(MiwearDashboardUi *dash) {
+void salus_dashboard_ui_free(SalusDashboardUi *dash) {
     if (dash == NULL) {
         return;
     }
@@ -64,60 +64,60 @@ static GDate *today_date(void) {
     return d;
 }
 
-GDate *mi_view_date(AppState *state) {
+GDate *ui_view_date(AppState *state) {
     if (state->health_view_date == NULL) {
         state->health_view_date = today_date();
     }
     return state->health_view_date;
 }
 
-gchar *mi_day_key(GDate *d) {
+gchar *ui_day_key(GDate *d) {
     return g_strdup_printf("%04u-%02u-%02u", (guint)g_date_get_year(d), (guint)g_date_get_month(d),
                            (guint)g_date_get_day(d));
 }
 
-gboolean mi_viewing_today(AppState *state) {
+gboolean ui_viewing_today(AppState *state) {
     GDate *today = today_date();
-    const gboolean same = g_date_compare(today, mi_view_date(state)) == 0;
+    const gboolean same = g_date_compare(today, ui_view_date(state)) == 0;
     g_date_free(today);
     return same;
 }
 
-void mi_set_view_date(AppState *state, GDate *d) {
+void ui_set_view_date(AppState *state, GDate *d) {
     GDate *today = today_date();
-    GDate *vd = mi_view_date(state);
+    GDate *vd = ui_view_date(state);
     *vd = g_date_compare(d, today) > 0 ? *today : *d; /* no future days */
     g_date_free(today);
-    miwear_dashboard_refresh(state);
+    salus_dashboard_refresh(state);
 }
 
 static void on_date_prev(GtkButton *b, gpointer user_data) {
     (void)b;
     AppState *state = user_data;
-    GDate d = *mi_view_date(state);
+    GDate d = *ui_view_date(state);
     g_date_subtract_days(&d, 1);
-    mi_set_view_date(state, &d);
+    ui_set_view_date(state, &d);
 }
 
 static void on_date_next(GtkButton *b, gpointer user_data) {
     (void)b;
     AppState *state = user_data;
-    GDate d = *mi_view_date(state);
+    GDate d = *ui_view_date(state);
     g_date_add_days(&d, 1);
-    mi_set_view_date(state, &d);
+    ui_set_view_date(state, &d);
 }
 
 static void on_date_today(GtkButton *b, gpointer user_data) {
     (void)b;
     AppState *state = user_data;
     GDate *t = today_date();
-    mi_set_view_date(state, t);
+    ui_set_view_date(state, t);
     g_date_free(t);
 }
 
 static void on_calendar_day_selected(GtkCalendar *cal, gpointer user_data) {
     AppState *state = user_data;
-    if (g_object_get_data(G_OBJECT(cal), "mi-syncing") != NULL) {
+    if (g_object_get_data(G_OBJECT(cal), "salus-syncing") != NULL) {
         return;
     }
     GDateTime *dt = gtk_calendar_get_date(cal);
@@ -128,11 +128,11 @@ static void on_calendar_day_selected(GtkCalendar *cal, gpointer user_data) {
     if (popover != NULL) {
         gtk_popover_popdown(GTK_POPOVER(popover));
     }
-    mi_set_view_date(state, d);
+    ui_set_view_date(state, d);
     g_date_free(d);
 }
 
-GtkWidget *mi_date_nav_new(AppState *state, MiwearDashboardUi *dash) {
+GtkWidget *ui_date_nav_new(AppState *state, SalusDashboardUi *dash) {
     GtkWidget *bar = gtk_center_box_new();
 
     GtkWidget *prev = gtk_button_new_from_icon_name("go-previous-symbolic");
@@ -141,7 +141,7 @@ GtkWidget *mi_date_nav_new(AppState *state, MiwearDashboardUi *dash) {
     gtk_widget_set_tooltip_text(prev, "Previous day");
     g_signal_connect(prev, "clicked", G_CALLBACK(on_date_prev), state);
 
-    GtkWidget *title = mi_label("Today", "mi-date-title", 0.5f);
+    GtkWidget *title = ui_label("Today", "salus-date-title", 0.5f);
     GtkWidget *title_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_box_append(GTK_BOX(title_box), title);
     gtk_box_append(GTK_BOX(title_box), gtk_image_new_from_icon_name("pan-down-symbolic"));
@@ -180,8 +180,8 @@ GtkWidget *mi_date_nav_new(AppState *state, MiwearDashboardUi *dash) {
 }
 
 static void dashboard_update_date_navs(AppState *state) {
-    MiwearDashboardUi *dash = state->dash_ui;
-    GDate *vd = mi_view_date(state);
+    SalusDashboardUi *dash = state->dash_ui;
+    GDate *vd = ui_view_date(state);
     GDate *today = today_date();
     const int delta = g_date_days_between(vd, today);
     gchar *title = NULL;
@@ -199,9 +199,9 @@ static void dashboard_update_date_navs(AppState *state) {
         gtk_widget_set_sensitive(GTK_WIDGET(g_ptr_array_index(dash->date_next, i)), delta > 0);
         gtk_widget_set_visible(GTK_WIDGET(g_ptr_array_index(dash->date_today, i)), delta > 0);
         GObject *cal = g_ptr_array_index(dash->calendars, i);
-        g_object_set_data(cal, "mi-syncing", GINT_TO_POINTER(1));
+        g_object_set_data(cal, "salus-syncing", GINT_TO_POINTER(1));
         gtk_calendar_set_date(GTK_CALENDAR(cal), sel);
-        g_object_set_data(cal, "mi-syncing", NULL);
+        g_object_set_data(cal, "salus-syncing", NULL);
     }
     g_date_time_unref(sel);
     g_free(title);
@@ -212,12 +212,12 @@ static void dashboard_update_date_navs(AppState *state) {
 /* Shell: connection state, toasts, dialogs                                                 */
 /* ======================================================================================== */
 
-gboolean mi_is_connected(AppState *state) {
+gboolean ui_is_connected(AppState *state) {
     return state->sock_fd >= 0 && (state->dash_ui == NULL || !state->dash_ui->busy);
 }
 
-void mi_toast(AppState *state, const char *text) {
-    MiwearDashboardUi *dash = state->dash_ui;
+void ui_toast(AppState *state, const char *text) {
+    SalusDashboardUi *dash = state->dash_ui;
     if (dash == NULL || dash->toast_overlay == NULL || text == NULL) {
         return;
     }
@@ -226,9 +226,9 @@ void mi_toast(AppState *state, const char *text) {
     adw_toast_overlay_add_toast(ADW_TOAST_OVERLAY(dash->toast_overlay), toast);
 }
 
-void mi_connect_saved(AppState *state) {
-    if (!miwear_ui_has_saved_device(state)) {
-        miwear_ui_show_setup(state);
+void ui_connect_saved(AppState *state) {
+    if (!salus_ui_has_saved_device(state)) {
+        salus_ui_show_setup(state);
         return;
     }
     gchar *addr = g_strdup(state->selected_address);
@@ -236,8 +236,8 @@ void mi_connect_saved(AppState *state) {
     g_free(addr);
 }
 
-void mi_show_page(AppState *state, const char *name) {
-    MiwearDashboardUi *dash = state->dash_ui;
+void ui_show_page(AppState *state, const char *name) {
+    SalusDashboardUi *dash = state->dash_ui;
     if (dash != NULL && dash->view_stack != NULL) {
         adw_view_stack_set_visible_child_name(ADW_VIEW_STACK(dash->view_stack), name);
     }
@@ -248,12 +248,12 @@ static gboolean status_is_error(const char *s) {
                          strstr(s, "error") != NULL);
 }
 
-void miwear_dashboard_update_connection(AppState *state) {
-    MiwearDashboardUi *dash = state->dash_ui;
+void salus_dashboard_update_connection(AppState *state) {
+    SalusDashboardUi *dash = state->dash_ui;
     if (dash == NULL || dash->banner == NULL) {
         return;
     }
-    const gboolean connected = mi_is_connected(state);
+    const gboolean connected = ui_is_connected(state);
     const char *icon = connected ? "bluetooth-active-symbolic"
                        : dash->busy ? "bluetooth-acquiring-symbolic"
                                     : "bluetooth-disconnected-symbolic";
@@ -281,58 +281,58 @@ void miwear_dashboard_update_connection(AppState *state) {
         adw_banner_set_title(ADW_BANNER(dash->banner), title);
         g_free(title);
         adw_banner_set_button_label(ADW_BANNER(dash->banner),
-                                    miwear_ui_has_saved_device(state) ? "Connect" : "Set Up");
+                                    salus_ui_has_saved_device(state) ? "Connect" : "Set Up");
         adw_banner_set_revealed(ADW_BANNER(dash->banner), TRUE);
     }
-    mi_device_refresh(state);
+    ui_device_refresh(state);
 }
 
-void miwear_dashboard_set_busy(AppState *state, gboolean busy) {
+void salus_dashboard_set_busy(AppState *state, gboolean busy) {
     if (state->dash_ui != NULL) {
         state->dash_ui->busy = busy;
-        miwear_dashboard_update_connection(state);
+        salus_dashboard_update_connection(state);
     }
 }
 
-void miwear_dashboard_set_status(AppState *state, const char *text) {
-    MiwearDashboardUi *dash = state->dash_ui;
+void salus_dashboard_set_status(AppState *state, const char *text) {
+    SalusDashboardUi *dash = state->dash_ui;
     if (dash == NULL) {
         return;
     }
     g_free(dash->status_text);
     dash->status_text = g_strdup(text);
-    miwear_dashboard_update_connection(state);
+    salus_dashboard_update_connection(state);
 }
 
-void miwear_dashboard_toast(AppState *state, const char *text) {
-    mi_toast(state, text);
+void salus_dashboard_toast(AppState *state, const char *text) {
+    ui_toast(state, text);
 }
 
-void miwear_dashboard_set_toast_overlay(MiwearDashboardUi *dash, GtkWidget *overlay) {
+void salus_dashboard_set_toast_overlay(SalusDashboardUi *dash, GtkWidget *overlay) {
     dash->toast_overlay = overlay;
 }
 
 static void on_banner_button(AdwBanner *banner, gpointer user_data) {
     (void)banner;
-    mi_connect_saved(user_data);
+    ui_connect_saved(user_data);
 }
 
 static void on_conn_button(GtkButton *b, gpointer user_data) {
     (void)b;
     AppState *state = user_data;
-    if (mi_is_connected(state)) {
-        mi_show_page(state, "device");
+    if (ui_is_connected(state)) {
+        ui_show_page(state, "device");
     } else {
-        mi_connect_saved(state);
+        ui_connect_saved(state);
     }
 }
 
 static void on_sync_button(GtkButton *b, gpointer user_data) {
     (void)b;
     AppState *state = user_data;
-    if (mi_is_connected(state)) {
-        miwear_fitness_sync_resync(state);
-        mi_toast(state, "Syncing health data…");
+    if (ui_is_connected(state)) {
+        salus_fitness_sync_resync(state);
+        ui_toast(state, "Syncing health data…");
     }
 }
 
@@ -345,7 +345,7 @@ static void on_log_copy(GtkButton *b, gpointer user_data) {
     gchar *text = gtk_text_buffer_get_text(state->log_buffer, &s, &e, FALSE);
     gdk_clipboard_set_text(gtk_widget_get_clipboard(GTK_WIDGET(b)), text);
     g_free(text);
-    mi_toast(state, "Log copied");
+    ui_toast(state, "Log copied");
 }
 
 static gboolean scroll_log_to_end(gpointer data) {
@@ -357,7 +357,7 @@ static gboolean scroll_log_to_end(gpointer data) {
     return G_SOURCE_REMOVE;
 }
 
-void mi_show_log_dialog(AppState *state) {
+void ui_show_log_dialog(AppState *state) {
     if (state->log_buffer == NULL || state->window == NULL) {
         return;
     }
@@ -374,7 +374,7 @@ void mi_show_log_dialog(AppState *state) {
     gtk_text_view_set_right_margin(GTK_TEXT_VIEW(tv), 12);
     gtk_text_view_set_top_margin(GTK_TEXT_VIEW(tv), 8);
     gtk_text_view_set_bottom_margin(GTK_TEXT_VIEW(tv), 8);
-    gtk_widget_add_css_class(tv, "mi-log");
+    gtk_widget_add_css_class(tv, "salus-log");
     GtkWidget *scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), tv);
     gtk_widget_set_vexpand(scroll, TRUE);
@@ -400,19 +400,19 @@ static void on_weight_response(AdwAlertDialog *dialog, const char *response, gpo
     if (g_strcmp0(response, "save") != 0) {
         return;
     }
-    GtkWidget *spin = g_object_get_data(G_OBJECT(dialog), "mi-spin");
+    GtkWidget *spin = g_object_get_data(G_OBJECT(dialog), "salus-spin");
     const double kg = gtk_spin_button_get_value(GTK_SPIN_BUTTON(spin));
-    if (miwear_weight_log_add_today(state, (float)kg)) {
-        mi_toast(state, "Weight saved");
-        miwear_dashboard_refresh(state);
+    if (salus_weight_log_add_today(state, (float)kg)) {
+        ui_toast(state, "Weight saved");
+        salus_dashboard_refresh(state);
     }
 }
 
-void mi_show_weight_dialog(AppState *state) {
+void ui_show_weight_dialog(AppState *state) {
     AdwDialog *dialog = adw_alert_dialog_new("Log Weight", "Today's weight in kilograms.");
     GtkAdjustment *adj = gtk_adjustment_new(70.0, 30.0, 300.0, 0.1, 1.0, 0.0);
     guint last_date = 0;
-    const float last_kg = miwear_weight_log_latest_kg(state, &last_date);
+    const float last_kg = salus_weight_log_latest_kg(state, &last_date);
     if (last_kg > 0.0f) {
         gtk_adjustment_set_value(adj, last_kg);
     }
@@ -420,7 +420,7 @@ void mi_show_weight_dialog(AppState *state) {
     gtk_spin_button_set_numeric(GTK_SPIN_BUTTON(spin), TRUE);
     gtk_widget_set_halign(spin, GTK_ALIGN_CENTER);
     adw_alert_dialog_set_extra_child(ADW_ALERT_DIALOG(dialog), spin);
-    g_object_set_data(G_OBJECT(dialog), "mi-spin", spin);
+    g_object_set_data(G_OBJECT(dialog), "salus-spin", spin);
     adw_alert_dialog_add_responses(ADW_ALERT_DIALOG(dialog), "cancel", "_Cancel", "save", "_Save", NULL);
     adw_alert_dialog_set_response_appearance(ADW_ALERT_DIALOG(dialog), "save", ADW_RESPONSE_SUGGESTED);
     adw_alert_dialog_set_default_response(ADW_ALERT_DIALOG(dialog), "save");
@@ -439,13 +439,13 @@ static void act_sync(GSimpleAction *a, GVariant *p, gpointer user_data) {
 static void act_log(GSimpleAction *a, GVariant *p, gpointer user_data) {
     (void)a;
     (void)p;
-    mi_show_log_dialog(user_data);
+    ui_show_log_dialog(user_data);
 }
 
 static void act_change_device(GSimpleAction *a, GVariant *p, gpointer user_data) {
     (void)a;
     (void)p;
-    miwear_ui_show_setup(user_data);
+    salus_ui_show_setup(user_data);
 }
 
 static void act_about(GSimpleAction *a, GVariant *p, gpointer user_data) {
@@ -454,7 +454,7 @@ static void act_about(GSimpleAction *a, GVariant *p, gpointer user_data) {
     AppState *state = user_data;
     AdwDialog *about = adw_about_dialog_new();
     adw_about_dialog_set_application_name(ADW_ABOUT_DIALOG(about), "Salus");
-    adw_about_dialog_set_application_icon(ADW_ABOUT_DIALOG(about), "miwear-watch-symbolic");
+    adw_about_dialog_set_application_icon(ADW_ABOUT_DIALOG(about), "salus-watch-symbolic");
     adw_about_dialog_set_comments(ADW_ABOUT_DIALOG(about),
                                   "Health data from your smart band or watch on Linux: sync measurements, "
                                   "sleep and workouts, forward notifications and browse your history offline.");
@@ -467,19 +467,19 @@ static void act_about(GSimpleAction *a, GVariant *p, gpointer user_data) {
 /* Shell                                                                                    */
 /* ======================================================================================== */
 
-GtkWidget *miwear_dashboard_build(AppState *state, MiwearDashboardUi *dash) {
+GtkWidget *salus_dashboard_build(AppState *state, SalusDashboardUi *dash) {
     state->dash_ui = dash;
     dash->state = state;
 
     dash->view_stack = adw_view_stack_new();
-    adw_view_stack_add_titled_with_icon(ADW_VIEW_STACK(dash->view_stack), mi_today_page_new(state, dash), "today",
-                                        "Health", "miwear-heart-symbolic");
+    adw_view_stack_add_titled_with_icon(ADW_VIEW_STACK(dash->view_stack), ui_today_page_new(state, dash), "today",
+                                        "Health", "salus-heart-symbolic");
     adw_view_stack_add_titled_with_icon(ADW_VIEW_STACK(dash->view_stack), mi_sleep_page_new(state, dash), "sleep",
-                                        "Sleep", "miwear-moon-symbolic");
-    adw_view_stack_add_titled_with_icon(ADW_VIEW_STACK(dash->view_stack), mi_workouts_page_new(state, dash),
-                                        "workouts", "Workouts", "miwear-run-symbolic");
-    adw_view_stack_add_titled_with_icon(ADW_VIEW_STACK(dash->view_stack), mi_device_page_new(state, dash), "device",
-                                        "Device", "miwear-watch-symbolic");
+                                        "Sleep", "salus-moon-symbolic");
+    adw_view_stack_add_titled_with_icon(ADW_VIEW_STACK(dash->view_stack), ui_workouts_page_new(state, dash),
+                                        "workouts", "Workouts", "salus-run-symbolic");
+    adw_view_stack_add_titled_with_icon(ADW_VIEW_STACK(dash->view_stack), ui_device_page_new(state, dash), "device",
+                                        "Device", "salus-watch-symbolic");
 
     dash->header = adw_header_bar_new();
     GtkWidget *switcher = adw_view_switcher_new();
@@ -547,7 +547,7 @@ GtkWidget *miwear_dashboard_build(AppState *state, MiwearDashboardUi *dash) {
     return dash->nav_view;
 }
 
-void miwear_dashboard_add_breakpoints(GtkWidget *window, MiwearDashboardUi *dash) {
+void salus_dashboard_add_breakpoints(GtkWidget *window, SalusDashboardUi *dash) {
     AdwBreakpoint *bp = adw_breakpoint_new(adw_breakpoint_condition_parse("max-width: 640sp"));
     GValue v_true = G_VALUE_INIT;
     g_value_init(&v_true, G_TYPE_BOOLEAN);
@@ -570,36 +570,36 @@ typedef struct {
     const char *name;
     const char *label;
     const char *empty;
-    MiSeries series;
-    MiColor color;
+    UiSeries series;
+    UiColor color;
 } TrendSpec;
 
-static const TrendSpec trend_specs[MI_SERIES_COUNT] = {
-    {"hr", "Heart Rate", "No heart-rate readings for this day", MI_SERIES_HR, MI_COLOR_HR},
-    {"spo2", "SpO₂", "No SpO₂ readings for this day", MI_SERIES_SPO2, MI_COLOR_SPO2},
-    {"stress", "Stress", "No stress readings for this day", MI_SERIES_STRESS, MI_COLOR_STRESS},
-    {"steps", "Steps", "No steps recorded for this day", MI_SERIES_STEPS, MI_COLOR_STEPS},
+static const TrendSpec trend_specs[UI_SERIES_COUNT] = {
+    {"hr", "Heart Rate", "No heart-rate readings for this day", UI_SERIES_HR, UI_COLOR_HR},
+    {"spo2", "SpO₂", "No SpO₂ readings for this day", UI_SERIES_SPO2, UI_COLOR_SPO2},
+    {"stress", "Stress", "No stress readings for this day", UI_SERIES_STRESS, UI_COLOR_STRESS},
+    {"steps", "Steps", "No steps recorded for this day", UI_SERIES_STEPS, UI_COLOR_STEPS},
 };
 
 /* ---- Activity rings ------------------------------------------------------------------- */
 
 static void draw_rings_cb(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user_data) {
     (void)area;
-    MiwearDashboardUi *dash = user_data;
-    static const MiColor colors[3] = {MI_COLOR_STEPS, MI_COLOR_CALORIES, MI_COLOR_ACTIVE};
+    SalusDashboardUi *dash = user_data;
+    static const UiColor colors[3] = {UI_COLOR_STEPS, UI_COLOR_CALORIES, UI_COLOR_ACTIVE};
     const double size = MIN(w, h);
-    mi_draw_rings(cr, w / 2.0, h / 2.0, size / 2.0 - 2.0, size * 0.11, dash->ring_ratio, colors, 3);
+    ui_draw_rings(cr, w / 2.0, h / 2.0, size / 2.0 - 2.0, size * 0.11, dash->ring_ratio, colors, 3);
 }
 
-static GtkWidget *ring_legend_row(MiColor color, const char *title, GtkWidget **value_out) {
+static GtkWidget *ring_legend_row(UiColor color, const char *title, GtkWidget **value_out) {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
     GtkWidget *dot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_add_css_class(dot, "mi-dot");
-    gtk_widget_add_css_class(dot, mi_color_css_class(color));
+    gtk_widget_add_css_class(dot, "salus-dot");
+    gtk_widget_add_css_class(dot, ui_color_css_class(color));
     gtk_widget_set_valign(dot, GTK_ALIGN_CENTER);
     GtkWidget *texts = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_append(GTK_BOX(texts), mi_label(title, "caption dimmed mi-ring-label", 0.0f));
-    GtkWidget *value = mi_label("—", "mi-ring-value numeric", 0.0f);
+    gtk_box_append(GTK_BOX(texts), ui_label(title, "caption dimmed salus-ring-label", 0.0f));
+    GtkWidget *value = ui_label("—", "salus-ring-value numeric", 0.0f);
     gtk_label_set_use_markup(GTK_LABEL(value), TRUE);
     gtk_box_append(GTK_BOX(texts), value);
     gtk_box_append(GTK_BOX(row), dot);
@@ -610,16 +610,16 @@ static GtkWidget *ring_legend_row(MiColor color, const char *title, GtkWidget **
 
 static void on_tile_clicked(GtkButton *b, gpointer user_data);
 
-static GtkWidget *build_activity_card(AppState *state, MiwearDashboardUi *dash) {
+static GtkWidget *build_activity_card(AppState *state, SalusDashboardUi *dash) {
     GtkWidget *inner = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    dash->ring_badge = mi_label("LIVE", "mi-live", 0.5f);
+    dash->ring_badge = ui_label("LIVE", "salus-live", 0.5f);
     gtk_widget_set_visible(dash->ring_badge, FALSE);
     GtkWidget *end = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_append(GTK_BOX(end), dash->ring_badge);
     GtkWidget *chev = gtk_image_new_from_icon_name("go-next-symbolic");
     gtk_widget_add_css_class(chev, "dimmed");
     gtk_box_append(GTK_BOX(end), chev);
-    gtk_box_append(GTK_BOX(inner), mi_card_header("Activity", NULL, end));
+    gtk_box_append(GTK_BOX(inner), ui_card_header("Activity", NULL, end));
 
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 22);
     dash->rings = gtk_drawing_area_new();
@@ -628,9 +628,9 @@ static GtkWidget *build_activity_card(AppState *state, MiwearDashboardUi *dash) 
     GtkWidget *legend = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
     gtk_widget_set_valign(legend, GTK_ALIGN_CENTER);
     gtk_widget_set_hexpand(legend, TRUE);
-    gtk_box_append(GTK_BOX(legend), ring_legend_row(MI_COLOR_STEPS, "Steps", &dash->ring_steps));
-    gtk_box_append(GTK_BOX(legend), ring_legend_row(MI_COLOR_CALORIES, "Active calories", &dash->ring_calories));
-    gtk_box_append(GTK_BOX(legend), ring_legend_row(MI_COLOR_ACTIVE, "Active minutes", &dash->ring_active));
+    gtk_box_append(GTK_BOX(legend), ring_legend_row(UI_COLOR_STEPS, "Steps", &dash->ring_steps));
+    gtk_box_append(GTK_BOX(legend), ring_legend_row(UI_COLOR_CALORIES, "Active calories", &dash->ring_calories));
+    gtk_box_append(GTK_BOX(legend), ring_legend_row(UI_COLOR_ACTIVE, "Active minutes", &dash->ring_active));
     gtk_box_append(GTK_BOX(row), dash->rings);
     gtk_box_append(GTK_BOX(row), legend);
     gtk_box_append(GTK_BOX(inner), row);
@@ -639,9 +639,9 @@ static GtkWidget *build_activity_card(AppState *state, MiwearDashboardUi *dash) 
     GtkWidget *card = gtk_button_new();
     gtk_button_set_child(GTK_BUTTON(card), inner);
     gtk_widget_add_css_class(card, "card");
-    gtk_widget_add_css_class(card, "mi-card");
+    gtk_widget_add_css_class(card, "salus-card");
     gtk_widget_set_tooltip_text(card, "Steps through the day");
-    g_object_set_data(G_OBJECT(card), "mi-tile", (gpointer) "steps");
+    g_object_set_data(G_OBJECT(card), "salus-tile", (gpointer) "steps");
     g_signal_connect(card, "clicked", G_CALLBACK(on_tile_clicked), state);
     return card;
 }
@@ -652,8 +652,8 @@ static void set_ring_value(GtkWidget *label, long value, long goal, const char *
         gtk_label_set_markup(GTK_LABEL(label), "—");
         return;
     }
-    mi_format_thousands(value, v, sizeof(v));
-    mi_format_thousands(goal, g, sizeof(g));
+    ui_format_thousands(value, v, sizeof(v));
+    ui_format_thousands(goal, g, sizeof(g));
     gchar *m = g_markup_printf_escaped("%s<span weight=\"normal\" alpha=\"55%%\" size=\"small\"> / %s%s</span>", v, g,
                                        unit);
     gtk_label_set_markup(GTK_LABEL(label), m);
@@ -662,14 +662,14 @@ static void set_ring_value(GtkWidget *label, long value, long goal, const char *
 
 /* ---- Tiles ---------------------------------------------------------------------------- */
 
-static void tile_build(MiTile *t, AppState *state, const char *id, const char *title, const char *icon,
-                       MiColor color, gboolean clickable, int spark_series) {
+static void tile_build(UiTile *t, AppState *state, const char *id, const char *title, const char *icon,
+                       UiColor color, gboolean clickable, int spark_series) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
     GtkWidget *head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    GtkWidget *bubble = mi_icon(icon, color, 16);
-    gtk_widget_add_css_class(bubble, "mi-bubble");
+    GtkWidget *bubble = ui_icon(icon, color, 16);
+    gtk_widget_add_css_class(bubble, "salus-bubble");
     gtk_box_append(GTK_BOX(head), bubble);
-    GtkWidget *tl = mi_label(title, "mi-tile-title dimmed", 0.0f);
+    GtkWidget *tl = ui_label(title, "salus-tile-title dimmed", 0.0f);
     gtk_label_set_ellipsize(GTK_LABEL(tl), PANGO_ELLIPSIZE_END);
     gtk_widget_set_hexpand(tl, TRUE);
     gtk_box_append(GTK_BOX(head), tl);
@@ -682,19 +682,19 @@ static void tile_build(MiTile *t, AppState *state, const char *id, const char *t
 
     GtkWidget *vrow = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
     gtk_widget_set_margin_top(vrow, 8);
-    t->value = mi_label("—", "mi-tile-value numeric", 0.0f);
-    t->unit = mi_label("", "mi-tile-unit", 0.0f);
+    t->value = ui_label("—", "salus-tile-value numeric", 0.0f);
+    t->unit = ui_label("", "salus-tile-unit", 0.0f);
     gtk_widget_set_valign(t->unit, GTK_ALIGN_BASELINE_FILL);
     gtk_widget_set_valign(t->value, GTK_ALIGN_BASELINE_FILL);
     gtk_box_append(GTK_BOX(vrow), t->value);
     gtk_box_append(GTK_BOX(vrow), t->unit);
     gtk_box_append(GTK_BOX(box), vrow);
 
-    t->sub = mi_label("", "caption dimmed", 0.0f);
+    t->sub = ui_label("", "caption dimmed", 0.0f);
     gtk_label_set_ellipsize(GTK_LABEL(t->sub), PANGO_ELLIPSIZE_END);
     gtk_box_append(GTK_BOX(box), t->sub);
     if (spark_series >= 0) {
-        t->spark = mi_sparkline_new(state, (MiSeries)spark_series);
+        t->spark = ui_sparkline_new(state, (UiSeries)spark_series);
         gtk_widget_set_margin_top(t->spark, 6);
         gtk_box_append(GTK_BOX(box), t->spark);
     }
@@ -702,17 +702,17 @@ static void tile_build(MiTile *t, AppState *state, const char *id, const char *t
     if (clickable) {
         t->root = gtk_button_new();
         gtk_button_set_child(GTK_BUTTON(t->root), box);
-        g_object_set_data(G_OBJECT(t->root), "mi-tile", (gpointer)id);
+        g_object_set_data(G_OBJECT(t->root), "salus-tile", (gpointer)id);
         g_signal_connect(t->root, "clicked", G_CALLBACK(on_tile_clicked), state);
     } else {
         t->root = box;
     }
     gtk_widget_add_css_class(t->root, "card");
-    gtk_widget_add_css_class(t->root, "mi-tile");
+    gtk_widget_add_css_class(t->root, "salus-tile");
     t->icon = bubble;
 }
 
-static void tile_set(MiTile *t, const char *value, const char *unit, const char *sub) {
+static void tile_set(UiTile *t, const char *value, const char *unit, const char *sub) {
     gtk_label_set_text(GTK_LABEL(t->value), value != NULL ? value : "—");
     gtk_label_set_text(GTK_LABEL(t->unit), unit != NULL ? unit : "");
     gtk_widget_set_visible(t->unit, unit != NULL && unit[0] != '\0');
@@ -746,27 +746,27 @@ static int nice_ceil(int v) {
     return ((v + 999) / 1000) * 1000;
 }
 
-static void trend_range(MiSeries s, const int *values, int bucket_max, int *lo, int *hi) {
+static void trend_range(UiSeries s, const int *values, int bucket_max, int *lo, int *hi) {
     int vmin = G_MAXINT, vmax = G_MININT;
-    for (int m = 0; m < MI_DAY_MINUTES; m++) {
+    for (int m = 0; m < UI_DAY_MINUTES; m++) {
         if (values[m] >= 0) {
             vmin = MIN(vmin, values[m]);
             vmax = MAX(vmax, values[m]);
         }
     }
     switch (s) {
-        case MI_SERIES_HR:
+        case UI_SERIES_HR:
             *lo = MAX(0, ((vmin - 5) / 10) * 10);
             *hi = ((vmax + 14) / 10) * 10;
             if (*hi - *lo < 40) {
                 *hi = *lo + 40;
             }
             break;
-        case MI_SERIES_SPO2:
+        case UI_SERIES_SPO2:
             *lo = MIN(90, ((vmin - 1) / 5) * 5);
             *hi = 100;
             break;
-        case MI_SERIES_STRESS:
+        case UI_SERIES_STRESS:
             *lo = 0;
             *hi = 100;
             break;
@@ -777,14 +777,14 @@ static void trend_range(MiSeries s, const int *values, int bucket_max, int *lo, 
     }
 }
 
-static void trend_format(MiSeries s, int v, gchar *buf, size_t len) {
+static void trend_format(UiSeries s, int v, gchar *buf, size_t len) {
     switch (s) {
-        case MI_SERIES_HR: g_snprintf(buf, len, "%d bpm", v); break;
-        case MI_SERIES_SPO2: g_snprintf(buf, len, "%d%%", v); break;
-        case MI_SERIES_STRESS: g_snprintf(buf, len, "%d · %s", v, miwear_pressure_level_label(v)); break;
+        case UI_SERIES_HR: g_snprintf(buf, len, "%d bpm", v); break;
+        case UI_SERIES_SPO2: g_snprintf(buf, len, "%d%%", v); break;
+        case UI_SERIES_STRESS: g_snprintf(buf, len, "%d · %s", v, salus_pressure_level_label(v)); break;
         default: {
             gchar t[32];
-            mi_format_thousands(v, t, sizeof(t));
+            ui_format_thousands(v, t, sizeof(t));
             g_snprintf(buf, len, "%s steps", t);
             break;
         }
@@ -793,22 +793,22 @@ static void trend_format(MiSeries s, int v, gchar *buf, size_t len) {
 
 static void draw_trend(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
     AppState *state = user_data;
-    MiwearDashboardUi *dash = state->dash_ui;
+    SalusDashboardUi *dash = state->dash_ui;
     GtkWidget *w = GTK_WIDGET(area);
     if (dash == NULL || width < 60 || height < 60) {
         return;
     }
     const TrendSpec *spec = &trend_specs[dash->trend_metric];
-    const MiSeries series = spec->series;
+    const UiSeries series = spec->series;
     double col[3];
-    mi_color_rgb(spec->color, col);
+    ui_color_rgb(spec->color, col);
 
     const double left = 34.0, right = 6.0, top = 8.0, bottom = 22.0;
     const double pw = width - left - right, ph = height - top - bottom;
 
-    int *values = g_new(int, MI_DAY_MINUTES);
-    gchar *key = mi_day_key(mi_view_date(state));
-    const guint n = mi_series_collect(state, key, series, values);
+    int *values = g_new(int, UI_DAY_MINUTES);
+    gchar *key = ui_day_key(ui_view_date(state));
+    const guint n = ui_series_collect(state, key, series, values);
     g_free(key);
 
     cairo_set_line_width(cr, 1.0);
@@ -816,45 +816,45 @@ static void draw_trend(GtkDrawingArea *area, cairo_t *cr, int width, int height,
         const double x = left + pw * hh / 24.0;
         gchar t[8];
         g_snprintf(t, sizeof(t), "%02d:00", hh % 24);
-        mi_draw_text(cr, w, t, CLAMP(x, left + 14, left + pw - 14), top + ph + 16, 10.5, 0.55, 0.5);
+        ui_draw_text(cr, w, t, CLAMP(x, left + 14, left + pw - 14), top + ph + 16, 10.5, 0.55, 0.5);
     }
     if (n == 0) {
-        mi_cairo_set_fg(cr, w, 0.18);
+        ui_cairo_set_fg(cr, w, 0.18);
         cairo_move_to(cr, left, round(top + ph) + 0.5);
         cairo_line_to(cr, left + pw, round(top + ph) + 0.5);
         cairo_stroke(cr);
-        mi_draw_text(cr, w, spec->empty, left + pw / 2, top + ph / 2, 12.5, 0.55, 0.5);
+        ui_draw_text(cr, w, spec->empty, left + pw / 2, top + ph / 2, 12.5, 0.55, 0.5);
         g_free(values);
         return;
     }
 
     int buckets[TREND_BUCKETS];
     int bucket_max = 0;
-    if (series == MI_SERIES_STEPS) {
+    if (series == UI_SERIES_STEPS) {
         trend_step_buckets(values, buckets, &bucket_max);
     }
     int lo, hi;
     trend_range(series, values, bucket_max, &lo, &hi);
     const int range = MAX(hi - lo, 1);
     const int divs = (range % 4 == 0) ? 4 : (range % 5 == 0) ? 5 : (range % 2 == 0) ? 2 : 1;
-#define TX(m) (left + pw * (double)(m) / (double)MI_DAY_MINUTES)
+#define TX(m) (left + pw * (double)(m) / (double)UI_DAY_MINUTES)
 #define TY(v) (top + ph * (1.0 - ((double)(v) - lo) / (double)range))
 
     for (int k = 0; k <= divs; k++) {
         const int v = lo + range * k / divs;
-        mi_cairo_set_fg(cr, w, k == 0 ? 0.18 : 0.08);
+        ui_cairo_set_fg(cr, w, k == 0 ? 0.18 : 0.08);
         cairo_move_to(cr, left, round(TY(v)) + 0.5);
         cairo_line_to(cr, left + pw, round(TY(v)) + 0.5);
         cairo_stroke(cr);
         gchar t[16];
-        if (series == MI_SERIES_STEPS && v >= 1000) {
+        if (series == UI_SERIES_STEPS && v >= 1000) {
             g_snprintf(t, sizeof(t), "%.*fk", v % 1000 ? 1 : 0, v / 1000.0);
         } else {
             g_snprintf(t, sizeof(t), "%d", v);
         }
-        mi_draw_text(cr, w, t, left - 6, TY(v) + 3.5, 10.5, 0.55, 1.0);
+        ui_draw_text(cr, w, t, left - 6, TY(v) + 3.5, 10.5, 0.55, 1.0);
     }
-    if (mi_viewing_today(state)) {
+    if (ui_viewing_today(state)) {
         GDateTime *now = g_date_time_new_now_local();
         const int nm = g_date_time_get_hour(now) * 60 + g_date_time_get_minute(now);
         g_date_time_unref(now);
@@ -870,7 +870,7 @@ static void draw_trend(GtkDrawingArea *area, cairo_t *cr, int width, int height,
     cairo_save(cr);
     cairo_rectangle(cr, left, top - 4, pw, ph + 4);
     cairo_clip(cr);
-    if (series == MI_SERIES_STEPS) {
+    if (series == UI_SERIES_STEPS) {
         const double bw = pw / TREND_BUCKETS;
         cairo_set_source_rgb(cr, col[0], col[1], col[2]);
         for (int b = 0; b < TREND_BUCKETS; b++) {
@@ -878,7 +878,7 @@ static void draw_trend(GtkDrawingArea *area, cairo_t *cr, int width, int height,
                 continue;
             }
             const double y = TY(buckets[b]);
-            mi_rounded_rect(cr, left + b * bw + 1.5, y, MAX(bw - 3.0, 1.0), top + ph - y + 3, 3.0);
+            ui_rounded_rect(cr, left + b * bw + 1.5, y, MAX(bw - 3.0, 1.0), top + ph - y + 3, 3.0);
             cairo_fill(cr);
         }
     } else {
@@ -887,9 +887,9 @@ static void draw_trend(GtkDrawingArea *area, cairo_t *cr, int width, int height,
         cairo_pattern_add_color_stop_rgba(grad, 0, col[0], col[1], col[2], 0.26);
         cairo_pattern_add_color_stop_rgba(grad, 1, col[0], col[1], col[2], 0.0);
         int seg_start = -1, prev = -1;
-        for (int m = 0; m <= MI_DAY_MINUTES; m++) {
-            const gboolean has = m < MI_DAY_MINUTES && values[m] >= 0;
-            if (m < MI_DAY_MINUTES && !has) {
+        for (int m = 0; m <= UI_DAY_MINUTES; m++) {
+            const gboolean has = m < UI_DAY_MINUTES && values[m] >= 0;
+            if (m < UI_DAY_MINUTES && !has) {
                 continue; /* minutes without a reading are normal between samples */
             }
             if (has && prev >= 0 && m - prev <= TREND_MAX_GAP_MIN) {
@@ -920,7 +920,7 @@ static void draw_trend(GtkDrawingArea *area, cairo_t *cr, int width, int height,
         cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
         cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
         prev = -1;
-        for (int m = 0; m < MI_DAY_MINUTES; m++) {
+        for (int m = 0; m < UI_DAY_MINUTES; m++) {
             if (values[m] < 0) {
                 continue;
             }
@@ -937,9 +937,9 @@ static void draw_trend(GtkDrawingArea *area, cairo_t *cr, int width, int height,
     cairo_restore(cr);
 
     if (dash->trend_hover_x >= left && dash->trend_hover_x <= left + pw) {
-        const int hm = CLAMP((int)((dash->trend_hover_x - left) / pw * MI_DAY_MINUTES), 0, MI_DAY_MINUTES - 1);
+        const int hm = CLAMP((int)((dash->trend_hover_x - left) / pw * UI_DAY_MINUTES), 0, UI_DAY_MINUTES - 1);
         int at = -1, v = -1, span = 1;
-        if (series == MI_SERIES_STEPS) {
+        if (series == UI_SERIES_STEPS) {
             const int b = CLAMP(hm / TREND_STEP_BUCKET_MIN, 0, TREND_BUCKETS - 1);
             if (buckets[b] > 0) {
                 at = b * TREND_STEP_BUCKET_MIN;
@@ -950,7 +950,7 @@ static void draw_trend(GtkDrawingArea *area, cairo_t *cr, int width, int height,
             for (int d = 0; d <= 30 && at < 0; d++) {
                 if (hm - d >= 0 && values[hm - d] >= 0) {
                     at = hm - d;
-                } else if (hm + d < MI_DAY_MINUTES && values[hm + d] >= 0) {
+                } else if (hm + d < UI_DAY_MINUTES && values[hm + d] >= 0) {
                     at = hm + d;
                 }
             }
@@ -960,25 +960,25 @@ static void draw_trend(GtkDrawingArea *area, cairo_t *cr, int width, int height,
         }
         if (at >= 0) {
             const double x = span > 1 ? TX(at + span / 2.0) : TX(at);
-            mi_cairo_set_fg(cr, w, 0.35);
+            ui_cairo_set_fg(cr, w, 0.35);
             cairo_move_to(cr, round(x) + 0.5, top);
             cairo_line_to(cr, round(x) + 0.5, top + ph);
             cairo_stroke(cr);
-            if (series != MI_SERIES_STEPS) {
+            if (series != UI_SERIES_STEPS) {
                 cairo_set_source_rgb(cr, col[0], col[1], col[2]);
                 cairo_arc(cr, x, TY(v), 4.5, 0, 2 * G_PI);
                 cairo_fill(cr);
             }
             gchar vt[48], c0[8], c1[8], tip[96];
             trend_format(series, v, vt, sizeof(vt));
-            mi_format_clock(at, c0, sizeof(c0));
+            ui_format_clock(at, c0, sizeof(c0));
             if (span > 1) {
-                mi_format_clock(at + span, c1, sizeof(c1));
+                ui_format_clock(at + span, c1, sizeof(c1));
                 g_snprintf(tip, sizeof(tip), "%s–%s   %s", c0, c1, vt);
             } else {
                 g_snprintf(tip, sizeof(tip), "%s   %s", c0, vt);
             }
-            mi_draw_tooltip(cr, w, tip, x, top, left + pw);
+            ui_draw_tooltip(cr, w, tip, x, top, left + pw);
         }
     }
 #undef TX
@@ -986,35 +986,35 @@ static void draw_trend(GtkDrawingArea *area, cairo_t *cr, int width, int height,
     g_free(values);
 }
 
-static void trend_set_stat(MiwearDashboardUi *dash, int i, const char *value, const char *caption) {
+static void trend_set_stat(SalusDashboardUi *dash, int i, const char *value, const char *caption) {
     gtk_label_set_text(GTK_LABEL(dash->trend_stat_value[i]), value);
     gtk_label_set_text(GTK_LABEL(dash->trend_stat_caption[i]), caption);
     gtk_widget_set_opacity(gtk_widget_get_parent(dash->trend_stat_value[i]), caption[0] != '\0' ? 1.0 : 0.0);
 }
 
-static void trend_update_stats(AppState *state, const MiwearDayHealthAgg *agg) {
-    MiwearDashboardUi *dash = state->dash_ui;
+static void trend_update_stats(AppState *state, const SalusDayHealthAgg *agg) {
+    SalusDashboardUi *dash = state->dash_ui;
     const TrendSpec *spec = &trend_specs[dash->trend_metric];
-    int *values = g_new(int, MI_DAY_MINUTES);
-    gchar *key = mi_day_key(mi_view_date(state));
-    const guint n = mi_series_collect(state, key, spec->series, values);
+    int *values = g_new(int, UI_DAY_MINUTES);
+    gchar *key = ui_day_key(ui_view_date(state));
+    const guint n = ui_series_collect(state, key, spec->series, values);
     g_free(key);
 
     long sum = 0;
     int vmin = G_MAXINT, vmax = 0;
-    for (int m = 0; m < MI_DAY_MINUTES; m++) {
+    for (int m = 0; m < UI_DAY_MINUTES; m++) {
         if (values[m] >= 0) {
             sum += values[m];
             vmin = MIN(vmin, values[m]);
             vmax = MAX(vmax, values[m]);
         }
     }
-    const MiwearDailySummaryRow *ds = agg->has_summary ? &agg->summary : NULL;
+    const SalusDailySummaryRow *ds = agg->has_summary ? &agg->summary : NULL;
     gchar a[32], b[32], c[32], d[32];
     for (int i = 0; i < 4; i++) {
         trend_set_stat(dash, i, "", "");
     }
-    if (spec->series == MI_SERIES_STEPS) {
+    if (spec->series == UI_SERIES_STEPS) {
         if (n > 0) {
             int buckets[TREND_BUCKETS], bmax = 0, best = 0;
             trend_step_buckets(values, buckets, &bmax);
@@ -1023,33 +1023,33 @@ static void trend_update_stats(AppState *state, const MiwearDayHealthAgg *agg) {
                     best = k;
                 }
             }
-            mi_format_thousands(sum, a, sizeof(a));
+            ui_format_thousands(sum, a, sizeof(a));
             trend_set_stat(dash, 0, a, "Recorded steps");
             gchar c0[8], c1[8];
-            mi_format_clock(best * TREND_STEP_BUCKET_MIN, c0, sizeof(c0));
-            mi_format_clock((best + 1) * TREND_STEP_BUCKET_MIN, c1, sizeof(c1));
+            ui_format_clock(best * TREND_STEP_BUCKET_MIN, c0, sizeof(c0));
+            ui_format_clock((best + 1) * TREND_STEP_BUCKET_MIN, c1, sizeof(c1));
             g_snprintf(b, sizeof(b), "%s–%s", c0, c1);
             trend_set_stat(dash, 1, b, "Most active");
         }
         if (ds != NULL && ds->steps > 0) {
-            mi_format_thousands(ds->steps, c, sizeof(c));
+            ui_format_thousands(ds->steps, c, sizeof(c));
             trend_set_stat(dash, 2, c, "Band daily total");
         }
         gtk_label_set_text(GTK_LABEL(dash->trend_subtitle), "Steps per half hour");
     } else if (n > 0) {
         const int avg = (int)((sum + n / 2) / n);
-        const char *unit = spec->series == MI_SERIES_HR ? " bpm" : spec->series == MI_SERIES_SPO2 ? "%" : "";
+        const char *unit = spec->series == UI_SERIES_HR ? " bpm" : spec->series == UI_SERIES_SPO2 ? "%" : "";
         g_snprintf(a, sizeof(a), "%d%s", avg, unit);
         g_snprintf(b, sizeof(b), "%d%s", vmin, unit);
         g_snprintf(c, sizeof(c), "%d%s", vmax, unit);
         trend_set_stat(dash, 0, a, "Average");
         trend_set_stat(dash, 1, b, "Lowest");
         trend_set_stat(dash, 2, c, "Highest");
-        if (spec->series == MI_SERIES_HR && ds != NULL && ds->hr_resting > 0) {
+        if (spec->series == UI_SERIES_HR && ds != NULL && ds->hr_resting > 0) {
             g_snprintf(d, sizeof(d), "%d bpm", ds->hr_resting);
             trend_set_stat(dash, 3, d, "Resting");
-        } else if (spec->series == MI_SERIES_STRESS) {
-            trend_set_stat(dash, 3, miwear_pressure_level_label(avg), "Level");
+        } else if (spec->series == UI_SERIES_STRESS) {
+            trend_set_stat(dash, 3, salus_pressure_level_label(avg), "Level");
         } else {
             g_snprintf(d, sizeof(d), "%u", n);
             trend_set_stat(dash, 3, d, "Readings");
@@ -1060,7 +1060,7 @@ static void trend_update_stats(AppState *state, const MiwearDayHealthAgg *agg) {
                            ds != NULL ? "No per-minute readings — showing the band's daily summary"
                                       : "Sync the band to fill this chart");
         if (ds != NULL) {
-            if (spec->series == MI_SERIES_HR && ds->hr_avg > 0) {
+            if (spec->series == UI_SERIES_HR && ds->hr_avg > 0) {
                 g_snprintf(a, sizeof(a), "%d bpm", ds->hr_avg);
                 g_snprintf(b, sizeof(b), "%d bpm", ds->hr_min);
                 g_snprintf(c, sizeof(c), "%d bpm", ds->hr_max);
@@ -1069,14 +1069,14 @@ static void trend_update_stats(AppState *state, const MiwearDayHealthAgg *agg) {
                 trend_set_stat(dash, 1, b, "Lowest");
                 trend_set_stat(dash, 2, c, "Highest");
                 trend_set_stat(dash, 3, d, "Resting");
-            } else if (spec->series == MI_SERIES_SPO2 && miwear_spo2_value_valid(ds->spo2_avg)) {
+            } else if (spec->series == UI_SERIES_SPO2 && salus_spo2_value_valid(ds->spo2_avg)) {
                 g_snprintf(a, sizeof(a), "%d%%", ds->spo2_avg);
                 g_snprintf(b, sizeof(b), "%d%%", ds->spo2_min);
                 g_snprintf(c, sizeof(c), "%d%%", ds->spo2_max);
                 trend_set_stat(dash, 0, a, "Average");
                 trend_set_stat(dash, 1, b, "Lowest");
                 trend_set_stat(dash, 2, c, "Highest");
-            } else if (spec->series == MI_SERIES_STRESS && miwear_stress_value_valid(ds->stress_avg)) {
+            } else if (spec->series == UI_SERIES_STRESS && salus_stress_value_valid(ds->stress_avg)) {
                 g_snprintf(a, sizeof(a), "%d", ds->stress_avg);
                 g_snprintf(b, sizeof(b), "%d", ds->stress_min);
                 g_snprintf(c, sizeof(c), "%d", ds->stress_max);
@@ -1092,22 +1092,22 @@ static void trend_update_stats(AppState *state, const MiwearDayHealthAgg *agg) {
 static void on_trend_motion(GtkEventControllerMotion *m, double x, double y, gpointer user_data) {
     (void)m;
     (void)y;
-    MiwearDashboardUi *dash = user_data;
+    SalusDashboardUi *dash = user_data;
     dash->trend_hover_x = x;
     gtk_widget_queue_draw(dash->trend_area);
 }
 
 static void on_trend_leave(GtkEventControllerMotion *m, gpointer user_data) {
     (void)m;
-    MiwearDashboardUi *dash = user_data;
+    SalusDashboardUi *dash = user_data;
     dash->trend_hover_x = -1;
     gtk_widget_queue_draw(dash->trend_area);
 }
 
-static GtkWidget *build_trend_card(AppState *state, MiwearDashboardUi *dash) {
+static GtkWidget *build_trend_card(AppState *state, SalusDashboardUi *dash) {
     GtkWidget *inner = NULL;
-    GtkWidget *card = mi_card_new(&inner, 12);
-    gtk_box_append(GTK_BOX(inner), mi_card_header("Through the Day", &dash->trend_subtitle, NULL));
+    GtkWidget *card = ui_card_new(&inner, 12);
+    gtk_box_append(GTK_BOX(inner), ui_card_header("Through the Day", &dash->trend_subtitle, NULL));
 
     dash->trend_area = gtk_drawing_area_new();
     gtk_widget_set_size_request(dash->trend_area, -1, 260);
@@ -1122,8 +1122,8 @@ static GtkWidget *build_trend_card(AppState *state, MiwearDashboardUi *dash) {
     gtk_box_set_homogeneous(GTK_BOX(stats), TRUE);
     for (int i = 0; i < 4; i++) {
         GtkWidget *col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-        dash->trend_stat_value[i] = mi_label("", "mi-stat-value numeric", 0.0f);
-        dash->trend_stat_caption[i] = mi_label("", "caption dimmed", 0.0f);
+        dash->trend_stat_value[i] = ui_label("", "salus-stat-value numeric", 0.0f);
+        dash->trend_stat_caption[i] = ui_label("", "caption dimmed", 0.0f);
         gtk_label_set_ellipsize(GTK_LABEL(dash->trend_stat_value[i]), PANGO_ELLIPSIZE_END);
         gtk_box_append(GTK_BOX(col), dash->trend_stat_value[i]);
         gtk_box_append(GTK_BOX(col), dash->trend_stat_caption[i]);
@@ -1134,13 +1134,13 @@ static GtkWidget *build_trend_card(AppState *state, MiwearDashboardUi *dash) {
 }
 
 /* One detail page, reused for every metric: pushed onto the navigation view by a tile. */
-static AdwNavigationPage *build_metric_page(AppState *state, MiwearDashboardUi *dash) {
+static AdwNavigationPage *build_metric_page(AppState *state, SalusDashboardUi *dash) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-    gtk_widget_add_css_class(box, "mi-page");
-    gtk_box_append(GTK_BOX(box), mi_date_nav_new(state, dash));
+    gtk_widget_add_css_class(box, "salus-page");
+    gtk_box_append(GTK_BOX(box), ui_date_nav_new(state, dash));
     gtk_box_append(GTK_BOX(box), build_trend_card(state, dash));
 
-    GtkWidget *scroll = mi_page_scroll(box, 960);
+    GtkWidget *scroll = ui_page_scroll(box, 960);
 
     GtkWidget *tb = adw_toolbar_view_new();
     adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(tb), adw_header_bar_new());
@@ -1149,12 +1149,12 @@ static AdwNavigationPage *build_metric_page(AppState *state, MiwearDashboardUi *
     return g_object_ref_sink(adw_navigation_page_new_with_tag(tb, trend_specs[0].label, "metric"));
 }
 
-static void show_metric_page(AppState *state, MiSeries s) {
-    MiwearDashboardUi *dash = state->dash_ui;
+static void show_metric_page(AppState *state, UiSeries s) {
+    SalusDashboardUi *dash = state->dash_ui;
     dash->trend_metric = s;
     dash->trend_hover_x = -1;
     adw_navigation_page_set_title(dash->metric_page, trend_specs[s].label);
-    mi_today_refresh(state);
+    ui_today_refresh(state);
     AdwNavigationView *nav = ADW_NAVIGATION_VIEW(dash->nav_view);
     if (adw_navigation_view_get_visible_page(nav) != dash->metric_page) {
         adw_navigation_view_pop_to_tag(nav, "main");
@@ -1164,24 +1164,24 @@ static void show_metric_page(AppState *state, MiSeries s) {
 
 static void on_tile_clicked(GtkButton *b, gpointer user_data) {
     AppState *state = user_data;
-    const char *id = g_object_get_data(G_OBJECT(b), "mi-tile");
-    for (int i = 0; i < MI_SERIES_COUNT; i++) {
+    const char *id = g_object_get_data(G_OBJECT(b), "salus-tile");
+    for (int i = 0; i < UI_SERIES_COUNT; i++) {
         if (g_strcmp0(id, trend_specs[i].name) == 0) {
             show_metric_page(state, trend_specs[i].series);
             return;
         }
     }
     if (g_strcmp0(id, "sleep") == 0) {
-        mi_show_page(state, "sleep");
+        ui_show_page(state, "sleep");
     } else if (g_strcmp0(id, "weight") == 0) {
-        mi_show_weight_dialog(state);
+        ui_show_weight_dialog(state);
     }
 }
 
-GtkWidget *mi_today_page_new(AppState *state, MiwearDashboardUi *dash) {
+GtkWidget *ui_today_page_new(AppState *state, SalusDashboardUi *dash) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-    gtk_widget_add_css_class(box, "mi-page");
-    gtk_box_append(GTK_BOX(box), mi_date_nav_new(state, dash));
+    gtk_widget_add_css_class(box, "salus-page");
+    gtk_box_append(GTK_BOX(box), ui_date_nav_new(state, dash));
     gtk_box_append(GTK_BOX(box), build_activity_card(state, dash));
 
     GtkWidget *flow = gtk_flow_box_new();
@@ -1192,17 +1192,17 @@ GtkWidget *mi_today_page_new(AppState *state, MiwearDashboardUi *dash) {
     gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(flow), 12);
     gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(flow), 12);
 
-    tile_build(&dash->tile_hr, state, "hr", "Heart Rate", "miwear-heart-symbolic", MI_COLOR_HR, TRUE, MI_SERIES_HR);
-    tile_build(&dash->tile_spo2, state, "spo2", "SpO₂", "miwear-drop-symbolic", MI_COLOR_SPO2, TRUE,
-               MI_SERIES_SPO2);
-    tile_build(&dash->tile_stress, state, "stress", "Stress", "miwear-stress-symbolic", MI_COLOR_STRESS, TRUE,
-               MI_SERIES_STRESS);
-    tile_build(&dash->tile_sleep, state, "sleep", "Sleep", "miwear-moon-symbolic", MI_COLOR_SLEEP, TRUE, -1);
-    tile_build(&dash->tile_vitality, state, "vitality", "Vitality", "miwear-bolt-symbolic", MI_COLOR_VITALITY, FALSE,
+    tile_build(&dash->tile_hr, state, "hr", "Heart Rate", "salus-heart-symbolic", UI_COLOR_HR, TRUE, UI_SERIES_HR);
+    tile_build(&dash->tile_spo2, state, "spo2", "SpO₂", "salus-drop-symbolic", UI_COLOR_SPO2, TRUE,
+               UI_SERIES_SPO2);
+    tile_build(&dash->tile_stress, state, "stress", "Stress", "salus-stress-symbolic", UI_COLOR_STRESS, TRUE,
+               UI_SERIES_STRESS);
+    tile_build(&dash->tile_sleep, state, "sleep", "Sleep", "salus-moon-symbolic", UI_COLOR_SLEEP, TRUE, -1);
+    tile_build(&dash->tile_vitality, state, "vitality", "Vitality", "salus-bolt-symbolic", UI_COLOR_VITALITY, FALSE,
                -1);
-    tile_build(&dash->tile_weight, state, "weight", "Weight", "miwear-scale-symbolic", MI_COLOR_WEIGHT, TRUE, -1);
-    tile_build(&dash->tile_cycles, state, "cycles", "Cycle", "miwear-cycle-symbolic", MI_COLOR_CYCLES, FALSE, -1);
-    MiTile *tiles[] = {&dash->tile_hr,       &dash->tile_spo2,   &dash->tile_stress, &dash->tile_sleep,
+    tile_build(&dash->tile_weight, state, "weight", "Weight", "salus-scale-symbolic", UI_COLOR_WEIGHT, TRUE, -1);
+    tile_build(&dash->tile_cycles, state, "cycles", "Cycle", "salus-cycle-symbolic", UI_COLOR_CYCLES, FALSE, -1);
+    UiTile *tiles[] = {&dash->tile_hr,       &dash->tile_spo2,   &dash->tile_stress, &dash->tile_sleep,
                        &dash->tile_vitality, &dash->tile_weight, &dash->tile_cycles};
     for (size_t i = 0; i < G_N_ELEMENTS(tiles); i++) {
         gtk_widget_set_size_request(tiles[i]->root, 150, -1);
@@ -1211,17 +1211,17 @@ GtkWidget *mi_today_page_new(AppState *state, MiwearDashboardUi *dash) {
     gtk_box_append(GTK_BOX(box), flow);
     dash->metric_page = build_metric_page(state, dash);
 
-    GtkWidget *scroll = mi_page_scroll(box, 960);
+    GtkWidget *scroll = ui_page_scroll(box, 960);
     return scroll;
 }
 
 /* The day's most recent per-minute reading of a series (synced, manual or live-merged); -1 if none. */
-static int last_reading(AppState *state, const gchar *day_key, MiSeries series, int *minute_out) {
-    int *values = g_new(int, MI_DAY_MINUTES);
+static int last_reading(AppState *state, const gchar *day_key, UiSeries series, int *minute_out) {
+    int *values = g_new(int, UI_DAY_MINUTES);
     int v = -1;
     *minute_out = -1;
-    if (mi_series_collect(state, day_key, series, values) > 0) {
-        for (int m = MI_DAY_MINUTES - 1; m >= 0; m--) {
+    if (ui_series_collect(state, day_key, series, values) > 0) {
+        for (int m = UI_DAY_MINUTES - 1; m >= 0; m--) {
             if (values[m] >= 0) {
                 v = values[m];
                 *minute_out = m;
@@ -1236,7 +1236,7 @@ static int last_reading(AppState *state, const gchar *day_key, MiSeries series, 
 /* "Measured at 14:32" (or "… · Relaxed"). */
 static void last_reading_caption(int minute, const char *extra, gchar *buf, gsize len) {
     gchar clock[8];
-    mi_format_clock(minute, clock, sizeof(clock));
+    ui_format_clock(minute, clock, sizeof(clock));
     if (extra != NULL) {
         g_snprintf(buf, len, "At %s · %s", clock, extra);
     } else {
@@ -1245,17 +1245,17 @@ static void last_reading_caption(int minute, const char *extra, gchar *buf, gsiz
 }
 
 static gboolean live_tiles(AppState *state) {
-    return mi_is_connected(state) && state->auth_initialized && mi_viewing_today(state);
+    return ui_is_connected(state) && state->auth_initialized && ui_viewing_today(state);
 }
 
-void mi_today_refresh(AppState *state) {
-    MiwearDashboardUi *dash = state->dash_ui;
+void ui_today_refresh(AppState *state) {
+    SalusDashboardUi *dash = state->dash_ui;
     if (dash == NULL || dash->rings == NULL) {
         return;
     }
-    gchar *day_key = mi_day_key(mi_view_date(state));
-    MiwearDayHealthAgg agg;
-    miwear_health_aggregate_day(state, day_key, &agg);
+    gchar *day_key = ui_day_key(ui_view_date(state));
+    SalusDayHealthAgg agg;
+    salus_health_aggregate_day(state, day_key, &agg);
     const gboolean live = live_tiles(state);
     gchar buf[64], sub[96];
 
@@ -1263,8 +1263,8 @@ void mi_today_refresh(AppState *state) {
     const long steps = (live && state->has_live_steps) ? (long)state->live_steps : agg.steps;
     /* The band's calories (totalactiveCalories) aren't in the live stats; only synced data has them. */
     const long cal = agg.calories;
-    const guint goal_active = state->goal_moving > 0 ? state->goal_moving : miwear_activity_goal_default();
-    const guint active = miwear_count_activity_minutes_from_timeline(state, day_key);
+    const guint goal_active = state->goal_moving > 0 ? state->goal_moving : salus_activity_goal_default();
+    const guint active = salus_count_activity_minutes_from_timeline(state, day_key);
     set_ring_value(dash->ring_steps, steps, GOAL_STEPS, "");
     set_ring_value(dash->ring_calories, cal, GOAL_CALORIES, " kcal");
     set_ring_value(dash->ring_active, active > 0 ? (long)active : -1, goal_active, " min");
@@ -1276,11 +1276,11 @@ void mi_today_refresh(AppState *state) {
     /* Heart rate, SpO2, stress: the live reading while connected, else the day's last one. */
     {
         int at = -1;
-        const int last = last_reading(state, day_key, MI_SERIES_HR, &at);
+        const int last = last_reading(state, day_key, UI_SERIES_HR, &at);
         if (live && state->has_live_hr) {
             g_snprintf(buf, sizeof(buf), "%u", state->live_hr);
-            const int zone = miwear_hr_zone_index((int)state->live_hr, (int)state->profile_max_hr);
-            g_snprintf(sub, sizeof(sub), "Live%s%s", zone > 0 ? " · " : "", miwear_hr_zone_label(zone));
+            const int zone = salus_hr_zone_index((int)state->live_hr, (int)state->profile_max_hr);
+            g_snprintf(sub, sizeof(sub), "Live%s%s", zone > 0 ? " · " : "", salus_hr_zone_label(zone));
             tile_set(&dash->tile_hr, buf, "bpm", sub);
         } else if (last > 0) {
             g_snprintf(buf, sizeof(buf), "%d", last);
@@ -1295,12 +1295,12 @@ void mi_today_refresh(AppState *state) {
     }
     {
         int at = -1;
-        const int last = last_reading(state, day_key, MI_SERIES_SPO2, &at);
+        const int last = last_reading(state, day_key, UI_SERIES_SPO2, &at);
         if (last > 0) {
             g_snprintf(buf, sizeof(buf), "%d", last);
             last_reading_caption(at, NULL, sub, sizeof(sub));
             tile_set(&dash->tile_spo2, buf, "%", sub);
-        } else if (agg.has_summary && miwear_spo2_value_valid(agg.summary.spo2_avg)) {
+        } else if (agg.has_summary && salus_spo2_value_valid(agg.summary.spo2_avg)) {
             g_snprintf(buf, sizeof(buf), "%d", agg.summary.spo2_avg);
             tile_set(&dash->tile_spo2, buf, "%", "Daily average");
         } else {
@@ -1309,14 +1309,14 @@ void mi_today_refresh(AppState *state) {
     }
     {
         int at = -1;
-        const int last = last_reading(state, day_key, MI_SERIES_STRESS, &at);
+        const int last = last_reading(state, day_key, UI_SERIES_STRESS, &at);
         if (last > 0) {
             g_snprintf(buf, sizeof(buf), "%d", last);
-            last_reading_caption(at, miwear_pressure_level_label(last), sub, sizeof(sub));
+            last_reading_caption(at, salus_pressure_level_label(last), sub, sizeof(sub));
             tile_set(&dash->tile_stress, buf, NULL, sub);
-        } else if (agg.has_summary && miwear_stress_value_valid(agg.summary.stress_avg)) {
+        } else if (agg.has_summary && salus_stress_value_valid(agg.summary.stress_avg)) {
             g_snprintf(buf, sizeof(buf), "%d", agg.summary.stress_avg);
-            g_snprintf(sub, sizeof(sub), "Daily avg · %s", miwear_pressure_level_label(agg.summary.stress_avg));
+            g_snprintf(sub, sizeof(sub), "Daily avg · %s", salus_pressure_level_label(agg.summary.stress_avg));
             tile_set(&dash->tile_stress, buf, NULL, sub);
         } else {
             tile_set(&dash->tile_stress, "—", NULL, "No readings");
@@ -1325,14 +1325,14 @@ void mi_today_refresh(AppState *state) {
 
     /* Sleep: the night that ended on this day */
     {
-        MiNight *n = dash->night;
-        mi_night_collect(state, mi_view_date(state), n);
+        UiNight *n = dash->night;
+        ui_night_collect(state, ui_view_date(state), n);
         if (n->total_asleep > 0) {
             g_snprintf(buf, sizeof(buf), "%dh %02dm", n->total_asleep / 60, n->total_asleep % 60);
             if (n->first >= 0) {
                 gchar c0[8], c1[8];
-                mi_format_clock(MI_NIGHT_START_MIN + n->first, c0, sizeof(c0));
-                mi_format_clock(MI_NIGHT_START_MIN + n->last + 1, c1, sizeof(c1));
+                ui_format_clock(UI_NIGHT_START_MIN + n->first, c0, sizeof(c0));
+                ui_format_clock(UI_NIGHT_START_MIN + n->last + 1, c1, sizeof(c1));
                 g_snprintf(sub, sizeof(sub), "%s – %s", c0, c1);
             } else {
                 g_snprintf(sub, sizeof(sub), "Asleep");
@@ -1355,16 +1355,16 @@ void mi_today_refresh(AppState *state) {
     /* Weight */
     {
         guint last_date = 0;
-        const float kg = miwear_weight_log_latest_kg(state, &last_date);
+        const float kg = salus_weight_log_latest_kg(state, &last_date);
         if (kg > 0.0f) {
             g_snprintf(buf, sizeof(buf), "%.1f", kg);
-            const float bmi = miwear_profile_bmi_kg_m2(kg, state->profile_height_cm);
+            const float bmi = salus_profile_bmi_kg_m2(kg, state->profile_height_cm);
             GString *s = g_string_new(NULL);
             if (bmi > 0.0f) {
                 g_string_append_printf(s, "BMI %.1f", bmi);
             }
             if (state->weight_log != NULL && state->weight_log->len > 1) {
-                const MiwearWeightEntry *prev = &g_array_index(state->weight_log, MiwearWeightEntry, 1);
+                const SalusWeightEntry *prev = &g_array_index(state->weight_log, SalusWeightEntry, 1);
                 g_string_append_printf(s, "%s%+.1f kg", s->len ? " · " : "", kg - prev->kg);
             }
             if (s->len == 0) {
@@ -1379,13 +1379,13 @@ void mi_today_refresh(AppState *state) {
 
     /* Cycles */
     GtkWidget *cycles_child = gtk_widget_get_parent(dash->tile_cycles.root);
-    if (miwear_profile_shows_cycles(state->profile_gender)) {
+    if (salus_profile_shows_cycles(state->profile_gender)) {
         gtk_widget_set_visible(cycles_child, TRUE);
-        const int day = miwear_cycle_day_of_period(mi_view_date(state), state->profile_last_period_yyyymmdd,
+        const int day = salus_cycle_day_of_period(ui_view_date(state), state->profile_last_period_yyyymmdd,
                                                    state->profile_cycle_length_days);
         if (day > 0) {
             g_snprintf(buf, sizeof(buf), "%d", day);
-            tile_set(&dash->tile_cycles, buf, NULL, miwear_cycle_phase_label(day, state->profile_cycle_length_days));
+            tile_set(&dash->tile_cycles, buf, NULL, salus_cycle_phase_label(day, state->profile_cycle_length_days));
         } else {
             tile_set(&dash->tile_cycles, "—", NULL, "Set last_period in config");
         }
@@ -1395,17 +1395,17 @@ void mi_today_refresh(AppState *state) {
 
     trend_update_stats(state, &agg);
     g_free(day_key);
-    mi_today_redraw(state);
+    ui_today_redraw(state);
 }
 
-void mi_today_redraw(AppState *state) {
-    MiwearDashboardUi *dash = state->dash_ui;
+void ui_today_redraw(AppState *state) {
+    SalusDashboardUi *dash = state->dash_ui;
     if (dash == NULL || dash->trend_area == NULL) {
         return;
     }
     gtk_widget_queue_draw(dash->trend_area);
     gtk_widget_queue_draw(dash->rings);
-    MiTile *tiles[] = {&dash->tile_hr, &dash->tile_spo2, &dash->tile_stress};
+    UiTile *tiles[] = {&dash->tile_hr, &dash->tile_spo2, &dash->tile_stress};
     for (size_t i = 0; i < G_N_ELEMENTS(tiles); i++) {
         if (tiles[i]->spark != NULL) {
             gtk_widget_queue_draw(tiles[i]->spark);
@@ -1420,11 +1420,11 @@ void mi_today_redraw(AppState *state) {
 static gboolean dashboard_refresh_idle(gpointer user_data) {
     AppState *state = user_data;
     state->dashboard_refresh_pending = FALSE;
-    miwear_dashboard_refresh(state);
+    salus_dashboard_refresh(state);
     return G_SOURCE_REMOVE;
 }
 
-void miwear_dashboard_schedule_refresh(AppState *state) {
+void salus_dashboard_schedule_refresh(AppState *state) {
     if (state == NULL || state->dash_ui == NULL || state->dashboard_refresh_pending) {
         return;
     }
@@ -1432,20 +1432,20 @@ void miwear_dashboard_schedule_refresh(AppState *state) {
     g_idle_add(dashboard_refresh_idle, state);
 }
 
-void miwear_dashboard_refresh(AppState *state) {
+void salus_dashboard_refresh(AppState *state) {
     if (state == NULL || state->dash_ui == NULL || state->dash_ui->rings == NULL) {
         return;
     }
     dashboard_update_date_navs(state);
-    mi_today_refresh(state);
+    ui_today_refresh(state);
     mi_sleep_refresh(state);
-    mi_workouts_refresh_training(state);
-    miwear_dashboard_update_connection(state);
+    ui_workouts_refresh_training(state);
+    salus_dashboard_update_connection(state);
 }
 
-void miwear_dashboard_redraw_charts(AppState *state) {
+void salus_dashboard_redraw_charts(AppState *state) {
     /* Called for every merged sample batch: coalesce into one refresh on idle. */
-    miwear_dashboard_schedule_refresh(state);
+    salus_dashboard_schedule_refresh(state);
 }
 
 static gchar *device_status_label_copy(const gchar *kind, const gchar *value) {
@@ -1463,7 +1463,7 @@ static gchar *device_status_label_copy(const gchar *kind, const gchar *value) {
     return g_strdup(value);
 }
 
-void miwear_dashboard_update_device_state(AppState *state,
+void salus_dashboard_update_device_state(AppState *state,
                                           const gchar *charging,
                                           const gchar *wearing,
                                           const gchar *sleep) {
@@ -1482,10 +1482,10 @@ void miwear_dashboard_update_device_state(AppState *state,
         g_free(state->device_status_sleep);
         state->device_status_sleep = device_status_label_copy("sleep", sleep);
     }
-    mi_device_refresh(state);
+    ui_device_refresh(state);
 }
 
-void miwear_dashboard_set_notification_status(AppState *state, const char *msg) {
+void salus_dashboard_set_notification_status(AppState *state, const char *msg) {
     if (state == NULL || state->dash_ui == NULL || state->dash_ui->dev_notif_switch == NULL) {
         return;
     }

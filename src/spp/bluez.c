@@ -1,4 +1,4 @@
-#include "miwear/app.h"
+#include "salus/app.h"
 
 #include <gio/gio.h>
 static gchar *find_bluez_device_path_by_address(GDBusConnection *system_bus, const gchar *address) {

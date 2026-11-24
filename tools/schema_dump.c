@@ -1,4 +1,4 @@
-#include "miwear/activity/schema_reader.h"
+#include "salus/activity/schema_reader.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,7 +9,7 @@ static void usage(const char *argv0) {
             "Usage:\n"
             "  %s --bin FILE (--schema REL.json | --sport N --detail D --version V)\n"
             "  %s --bin FILE --sport 22 --detail 1 --version 8 --summary\n\n"
-            "Environment: MIWEAR_SCHEMA_DIR (extracted schemas.zip)\n",
+            "Environment: SALUS_SCHEMA_DIR (extracted schemas.zip)\n",
             argv0,
             argv0);
 }
@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
             g_free(payload);
             return 1;
         }
-        rel = miwear_schema_resolve_sport(sport, detail, version);
+        rel = salus_schema_resolve_sport(sport, detail, version);
         if (rel == NULL) {
             fprintf(stderr, "No schema index entry (legacy nativeParse only).\n");
             g_free(payload);
@@ -70,12 +70,12 @@ int main(int argc, char **argv) {
         }
     }
 
-    gchar *schema_path = g_build_filename(miwear_schema_dir(), rel, NULL);
+    gchar *schema_path = g_build_filename(salus_schema_dir(), rel, NULL);
     g_free(rel);
 
     const uint8_t *payload_bytes = (const uint8_t *)payload;
 
-    GBytes *wire = miwear_schema_sport_wire_buffer(payload_bytes, len);
+    GBytes *wire = salus_schema_sport_wire_buffer(payload_bytes, len);
     if (wire == NULL) {
         fprintf(stderr, "wire buffer too short\n");
         g_free(schema_path);
@@ -83,8 +83,8 @@ int main(int argc, char **argv) {
     }
 
     JsonNode *schema = NULL;
-    if (!miwear_schema_load_root(schema_path, &schema)) {
-        fprintf(stderr, "Failed to load schema %s (extract schemas.zip to MIWEAR_SCHEMA_DIR)\n", schema_path);
+    if (!salus_schema_load_root(schema_path, &schema)) {
+        fprintf(stderr, "Failed to load schema %s (extract schemas.zip to SALUS_SCHEMA_DIR)\n", schema_path);
         g_bytes_unref(wire);
         g_free(schema_path);
         return 1;
@@ -93,7 +93,7 @@ int main(int argc, char **argv) {
     gsize wlen;
     const guint8 *wdata = g_bytes_get_data(wire, &wlen);
     JsonNode *decoded = NULL;
-    if (!miwear_schema_decode(schema, wdata, wlen, &decoded)) {
+    if (!salus_schema_decode(schema, wdata, wlen, &decoded)) {
         fprintf(stderr, "Decode failed (truncated or unsupported field)\n");
         json_node_unref(schema);
         g_bytes_unref(wire);

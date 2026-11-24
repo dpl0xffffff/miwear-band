@@ -7,10 +7,10 @@ In-process pipeline under `src/sleep/`:
 | `mi_sleep_packets.c` | Gadgetbridge-style sleep packet scan (`FB FA FC FF` …) |
 | `mi_sleep_pipeline.c` | Orchestration: stages from the band's embedded stage packets |
 | `mi_sleep_duration.c` | Normalize stage durations (minutes vs seconds) |
-| `mi_sleep_external.c` | Optional `MIWEAR_MI_SLEEP_ALGO_CMD` JSON helper override |
+| `mi_sleep_external.c` | Optional `SALUS_MI_SLEEP_ALGO_CMD` JSON helper override |
 
 Full-day sleep binary layout (v5/v6) lives in `src/activity/mi_fitness_full_day_sleep.c`
-(`miwear_full_day_sleep_layout`), following Mi Fitness's `full_day_sleep_report_v5/v6` schemas:
+(`salus_full_day_sleep_layout`), following Mi Fitness's `full_day_sleep_report_v5/v6` schemas:
 
 | | v5 | v6 |
 |---|---|---|
@@ -34,7 +34,7 @@ How a night is shown:
 - Neither → total sleep only, drawn as "stage unknown", with a note on the Sleep page.
 
 Nights whose feature blob has no embedded stage packets keep their total sleep duration but get no
-stage timeline, unless `MIWEAR_MI_SLEEP_ALGO_CMD` points at an external helper.
+stage timeline, unless `SALUS_MI_SLEEP_ALGO_CMD` points at an external helper.
 
 An in-process TensorFlow Lite attempt (`mi_stage_model_0_1_1.tflite`) was removed: the model returns
 one `[1,1,4]` prediction per call, not one per epoch, and expects Xiaomi's HRV/accelerometer feature

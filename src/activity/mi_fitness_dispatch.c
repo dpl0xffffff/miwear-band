@@ -1,9 +1,9 @@
-#include "miwear/activity/mi_fitness_dispatch.h"
-#include "miwear/activity/mi_fitness_data.h"
-#include "miwear/activity/mi_fitness_health.h"
-#include "miwear/activity/mi_fitness_sleep_stages.h"
-#include "miwear/activity/schema_reader.h"
-#include "miwear/app.h"
+#include "salus/activity/mi_fitness_dispatch.h"
+#include "salus/activity/mi_fitness_data.h"
+#include "salus/activity/mi_fitness_health.h"
+#include "salus/activity/mi_fitness_sleep_stages.h"
+#include "salus/activity/schema_reader.h"
+#include "salus/app.h"
 
 const char *mi_fitness_daily_parser_name(int daily_type, int file_type) {
     daily_type = mi_fitness_apk_daily_type(daily_type);
@@ -106,17 +106,17 @@ void mi_fitness_apply_health_payload(AppState *state,
     const int apk_daily = mi_fitness_apk_daily_type(daily_type);
     const char *parser = mi_fitness_daily_parser_name(daily_type, detail);
     gboolean schema_ok = FALSE;
-    gchar *rel = miwear_schema_resolve_daily(daily_type, detail, version);
+    gchar *rel = salus_schema_resolve_daily(daily_type, detail, version);
     if (rel != NULL) {
-        gchar *schema_path = g_build_filename(miwear_schema_dir(), rel, NULL);
+        gchar *schema_path = g_build_filename(salus_schema_dir(), rel, NULL);
         JsonNode *root = NULL;
         gboolean applied = FALSE;
-        if (miwear_schema_load_root(schema_path, &root)) {
-            GBytes *wire = miwear_schema_sport_wire_buffer(payload, payload_len);
+        if (salus_schema_load_root(schema_path, &root)) {
+            GBytes *wire = salus_schema_sport_wire_buffer(payload, payload_len);
             if (wire != NULL) {
                 const gsize wire_len = g_bytes_get_size(wire);
                 JsonNode *decoded = NULL;
-                if (miwear_schema_decode(root,
+                if (salus_schema_decode(root,
                                          g_bytes_get_data(wire, NULL),
                                          wire_len,
                                          &decoded)) {

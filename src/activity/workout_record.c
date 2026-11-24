@@ -1,7 +1,7 @@
-#include "miwear/activity/workout_record.h"
+#include "salus/activity/workout_record.h"
 
-#include "miwear/activity/mi_fitness_sport_record.h"
-#include "miwear/activity/schema_reader.h"
+#include "salus/activity/mi_fitness_sport_record.h"
+#include "salus/activity/schema_reader.h"
 
 #include <json-glib/json-glib.h>
 #include <math.h>
@@ -13,14 +13,14 @@ static gboolean decode_sport_schema(const char *schema_rel,
     if (schema_rel == NULL || out_decoded == NULL) {
         return FALSE;
     }
-    gchar *schema_path = g_build_filename(miwear_schema_dir(), schema_rel, NULL);
-    GBytes *wire = miwear_schema_sport_wire_buffer(payload, payload_len);
+    gchar *schema_path = g_build_filename(salus_schema_dir(), schema_rel, NULL);
+    GBytes *wire = salus_schema_sport_wire_buffer(payload, payload_len);
     if (wire == NULL) {
         g_free(schema_path);
         return FALSE;
     }
     JsonNode *schema = NULL;
-    if (!miwear_schema_load_root(schema_path, &schema)) {
+    if (!salus_schema_load_root(schema_path, &schema)) {
         g_bytes_unref(wire);
         g_free(schema_path);
         return FALSE;
@@ -28,7 +28,7 @@ static gboolean decode_sport_schema(const char *schema_rel,
     gsize sz;
     const guint8 *buf = g_bytes_get_data(wire, &sz);
     JsonNode *decoded = NULL;
-    const gboolean ok = miwear_schema_decode(schema, buf, sz, &decoded);
+    const gboolean ok = salus_schema_decode(schema, buf, sz, &decoded);
     json_node_unref(schema);
     g_bytes_unref(wire);
     g_free(schema_path);
@@ -39,11 +39,11 @@ static gboolean decode_sport_schema(const char *schema_rel,
     return TRUE;
 }
 
-gboolean miwear_parse_workout_record(const uint8_t *payload,
+gboolean salus_parse_workout_record(const uint8_t *payload,
                                      size_t payload_len,
                                      int sport_subtype,
                                      int version,
-                                     MiwearWorkoutSummary *summary) {
+                                     SalusWorkoutSummary *summary) {
     if (payload == NULL || summary == NULL || payload_len < 16) {
         return FALSE;
     }
@@ -85,7 +85,7 @@ static gboolean gps_number(JsonObject *obj, const char *name, double *out) {
     return TRUE;
 }
 
-static gboolean extract_gps_points(JsonNode *decoded, MiwearWorkoutSummary *summary) {
+static gboolean extract_gps_points(JsonNode *decoded, SalusWorkoutSummary *summary) {
     if (decoded == NULL || summary == NULL || json_node_get_node_type(decoded) != JSON_NODE_OBJECT) {
         return FALSE;
     }
@@ -109,7 +109,7 @@ static gboolean extract_gps_points(JsonNode *decoded, MiwearWorkoutSummary *summ
     if (summary->gps_track != NULL) {
         g_array_unref(summary->gps_track);
     }
-    summary->gps_track = g_array_new(FALSE, FALSE, sizeof(MiwearWorkoutGpsPoint));
+    summary->gps_track = g_array_new(FALSE, FALSE, sizeof(SalusWorkoutGpsPoint));
     for (guint i = 0; i < json_array_get_length(pts); i++) {
         JsonObject *pt = json_array_get_object_element(pts, i);
         if (pt == NULL) {
@@ -122,7 +122,7 @@ static gboolean extract_gps_points(JsonNode *decoded, MiwearWorkoutSummary *summ
                    JSON_NODE_HOLDS_OBJECT(json_object_get_member(pt, "location"))) {
             src = json_object_get_object_member(pt, "location");
         }
-        MiwearWorkoutGpsPoint gp = {0};
+        SalusWorkoutGpsPoint gp = {0};
         if (!gps_number(src, "latitude", &gp.lat) || !gps_number(src, "longitude", &gp.lon)) {
             continue;
         }
@@ -135,11 +135,11 @@ static gboolean extract_gps_points(JsonNode *decoded, MiwearWorkoutSummary *summ
     return summary->gps_track != NULL && summary->gps_track->len > 0;
 }
 
-gboolean miwear_parse_workout_gps(const uint8_t *payload,
+gboolean salus_parse_workout_gps(const uint8_t *payload,
                                   size_t payload_len,
                                   int sport_subtype,
                                   int version,
-                                  MiwearWorkoutSummary *summary) {
+                                  SalusWorkoutSummary *summary) {
     if (payload == NULL || summary == NULL || payload_len < 8) {
         return FALSE;
     }
@@ -153,7 +153,7 @@ gboolean miwear_parse_workout_gps(const uint8_t *payload,
         versions[nv++] = v;
     }
     for (size_t i = 0; i < nv; i++) {
-        gchar *rel = miwear_schema_resolve_sport(sport_subtype, 2, versions[i]);
+        gchar *rel = salus_schema_resolve_sport(sport_subtype, 2, versions[i]);
         if (rel == NULL) {
             continue;
         }

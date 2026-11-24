@@ -1,19 +1,19 @@
-#include "miwear/app.h"
-#include "miwear/activity/activity.h"
-#include "miwear/config.h"
-#include "miwear/spp/fitness_sync.h"
-#include "miwear/spp/wire.h"
-#include "miwear/ui/ui.h"
-#include "miwear/activity/workout_types.h"
-#include "miwear/notifications/notifications.h"
-#include "miwear/find_phone.h"
-#include "miwear/ui/dashboard.h"
+#include "salus/app.h"
+#include "salus/activity/activity.h"
+#include "salus/config.h"
+#include "salus/spp/fitness_sync.h"
+#include "salus/spp/wire.h"
+#include "salus/ui/ui.h"
+#include "salus/activity/workout_types.h"
+#include "salus/notifications/notifications.h"
+#include "salus/find_phone.h"
+#include "salus/ui/dashboard.h"
 #include "ui_private.h"
-#include "miwear/ui/health_data.h"
-#include "miwear/sleep/mi_sleep_duration.h"
-#include "miwear/db/db.h"
-#include "miwear/local_time.h"
-#include "miwear/spp/weather.h"
+#include "salus/ui/health_data.h"
+#include "salus/sleep/mi_sleep_duration.h"
+#include "salus/db/db.h"
+#include "salus/local_time.h"
+#include "salus/spp/weather.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -52,7 +52,7 @@ static void ui_set_sensitive_if_widget(GtkWidget *widget, gboolean sensitive) {
     }
 }
 
-gboolean miwear_ui_has_saved_device(AppState *state) {
+gboolean salus_ui_has_saved_device(AppState *state) {
     uint8_t key[16];
     return state != NULL && state->selected_address != NULL && state->selected_address[0] != '\0' &&
            hex_to_bytes16(state->auth_key_hex, key);
@@ -215,13 +215,13 @@ static void on_setup_cancel(GtkButton *b, gpointer user_data) {
 
 static GtkWidget *build_setup_page(AppState *state) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 24);
-    gtk_widget_add_css_class(box, "mi-page");
+    gtk_widget_add_css_class(box, "salus-page");
     gtk_widget_set_margin_top(box, 12);
 
     GtkWidget *head = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-    GtkWidget *icon = gtk_image_new_from_icon_name("miwear-watch-symbolic");
+    GtkWidget *icon = gtk_image_new_from_icon_name("salus-watch-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(icon), 56);
-    gtk_widget_add_css_class(icon, "mi-band-icon");
+    gtk_widget_add_css_class(icon, "salus-band-icon");
     gtk_widget_set_halign(icon, GTK_ALIGN_CENTER);
     GtkWidget *title = gtk_label_new("Connect Your Band");
     gtk_widget_add_css_class(title, "title-1");
@@ -285,7 +285,7 @@ static GtkWidget *build_setup_page(AppState *state) {
     gtk_box_append(GTK_BOX(actions), state->label_status);
     gtk_box_append(GTK_BOX(box), actions);
 
-    GtkWidget *scroll = mi_page_scroll(box, 560);
+    GtkWidget *scroll = ui_page_scroll(box, 560);
 
     GtkWidget *header = adw_header_bar_new();
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), adw_window_title_new("Set Up", NULL));
@@ -298,11 +298,11 @@ static GtkWidget *build_setup_page(AppState *state) {
     return tb;
 }
 
-void miwear_ui_show_setup(AppState *state) {
+void salus_ui_show_setup(AppState *state) {
     if (state == NULL || state->stack == NULL) {
         return;
     }
-    gtk_widget_set_visible(state->setup_cancel_button, miwear_ui_has_saved_device(state));
+    gtk_widget_set_visible(state->setup_cancel_button, salus_ui_has_saved_device(state));
     gtk_editable_set_text(GTK_EDITABLE(state->entry_authkey), state->auth_key_hex);
     gtk_stack_set_visible_child_name(GTK_STACK(state->stack), "setup");
     populate_device_list(state);
@@ -363,7 +363,7 @@ static gboolean ui_set_status_cb(gpointer user_data) {
     if (ctx->state->label_status != NULL) {
         gtk_label_set_text(GTK_LABEL(ctx->state->label_status), ctx->status);
     }
-    miwear_dashboard_set_status(ctx->state, ctx->status);
+    salus_dashboard_set_status(ctx->state, ctx->status);
     g_free(ctx->status);
     g_free(ctx);
     return G_SOURCE_REMOVE;
@@ -378,7 +378,7 @@ static gboolean ui_set_busy_cb(gpointer user_data) {
     if (state->setup_spinner != NULL) {
         gtk_widget_set_visible(state->setup_spinner, ctx->busy);
     }
-    miwear_dashboard_set_busy(state, ctx->busy);
+    salus_dashboard_set_busy(state, ctx->busy);
     setup_update_connect_sensitivity(state);
     g_free(ctx);
     return G_SOURCE_REMOVE;
@@ -398,7 +398,7 @@ void set_status(AppState *state, const gchar *status) {
     g_idle_add(ui_set_status_cb, ctx);
 }
 
-void miwear_live_metrics_update(AppState *state, const MiwearLiveMetrics *m) {
+void salus_live_metrics_update(AppState *state, const SalusLiveMetrics *m) {
     if (m->has_hr) {
         state->live_hr = m->hr;
         state->has_live_hr = TRUE;
@@ -410,12 +410,12 @@ void miwear_live_metrics_update(AppState *state, const MiwearLiveMetrics *m) {
     if (m->has_battery && state->dash_ui != NULL) {
         state->dash_ui->battery = (int)m->battery;
     }
-    miwear_dashboard_schedule_refresh(state);
+    salus_dashboard_schedule_refresh(state);
 }
 
 static gboolean ui_update_state_cb(gpointer user_data) {
     UiStateUpdate *u = user_data;
-    miwear_dashboard_update_device_state(u->state, u->charging_text, u->wearing_text, u->sleep_text);
+    salus_dashboard_update_device_state(u->state, u->charging_text, u->wearing_text, u->sleep_text);
     g_free(u->charging_text);
     g_free(u->wearing_text);
     g_free(u->sleep_text);
@@ -459,7 +459,7 @@ static GArray *recorded_create_day_array(void) {
 }
 
 static void recorded_refresh_ui(AppState *state) {
-    miwear_dashboard_redraw_charts(state);
+    salus_dashboard_redraw_charts(state);
 }
 
 typedef struct {
@@ -519,7 +519,7 @@ void recorded_store_samples_for_day_key(AppState *state, const gchar *day_key, c
 
 void recorded_store_daily_details(AppState *state, uint32_t ts, const RecordedSample *samples, size_t count) {
     if (samples == NULL || count == 0) return;
-    gchar *day_key = miwear_local_day_key((gint64)ts);
+    gchar *day_key = salus_local_day_key((gint64)ts);
     if (day_key == NULL) return;
     recorded_store_samples_for_day_key(state, day_key, samples, count);
     g_free(day_key);
@@ -540,20 +540,20 @@ static void flush_recorded_day_buckets(AppState *state, GHashTable *by_day) {
 
 struct RecordedBatch {
     GHashTable *by_day; /* day key → GArray<RecordedSample> */
-    MiwearLocalDayCursor cursor;
+    SalusLocalDayCursor cursor;
 };
 
 RecordedBatch *recorded_batch_new(void) {
     RecordedBatch *b = g_new0(RecordedBatch, 1);
     b->by_day = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_array_unref);
-    miwear_local_day_cursor_init(&b->cursor);
+    salus_local_day_cursor_init(&b->cursor);
     return b;
 }
 
 void recorded_batch_add_sleep_minute(RecordedBatch *b, gint64 unix_sec, int stage) {
     const gchar *day_key = NULL;
     guint16 mod = 0;
-    if (b == NULL || !miwear_local_day_cursor_resolve(&b->cursor, unix_sec, &day_key, &mod)) {
+    if (b == NULL || !salus_local_day_cursor_resolve(&b->cursor, unix_sec, &day_key, &mod)) {
         return;
     }
     GArray *bucket = g_hash_table_lookup(b->by_day, day_key);
@@ -575,22 +575,22 @@ void recorded_batch_commit(AppState *state, RecordedBatch *b) {
     }
     flush_recorded_day_buckets(state, b->by_day);
     g_hash_table_unref(b->by_day);
-    miwear_local_day_cursor_clear(&b->cursor);
+    salus_local_day_cursor_clear(&b->cursor);
     g_free(b);
 }
 
-void recorded_merge_xiaomi_activity_rows(AppState *state, const MiwearXiaomiActivityRow *rows, size_t count) {
+void recorded_merge_xiaomi_activity_rows(AppState *state, const SalusXiaomiActivityRow *rows, size_t count) {
     if (state == NULL || rows == NULL || count == 0) {
         return;
     }
     GHashTable *by_day = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_array_unref);
-    MiwearLocalDayCursor cursor;
-    miwear_local_day_cursor_init(&cursor);
+    SalusLocalDayCursor cursor;
+    salus_local_day_cursor_init(&cursor);
     for (size_t i = 0; i < count; i++) {
-        const MiwearXiaomiActivityRow *r = &rows[i];
+        const SalusXiaomiActivityRow *r = &rows[i];
         const gchar *day_key = NULL;
         guint16 mod = 0;
-        if (!miwear_local_day_cursor_resolve(&cursor, (gint64)r->timestamp_sec, &day_key, &mod)) {
+        if (!salus_local_day_cursor_resolve(&cursor, (gint64)r->timestamp_sec, &day_key, &mod)) {
             continue;
         }
 
@@ -614,7 +614,7 @@ void recorded_merge_xiaomi_activity_rows(AppState *state, const MiwearXiaomiActi
         rs.intensity = r->raw_intensity > 0 && r->raw_intensity <= 7 ? r->raw_intensity : 0;
         g_array_append_val(bucket, rs);
     }
-    miwear_local_day_cursor_clear(&cursor);
+    salus_local_day_cursor_clear(&cursor);
     flush_recorded_day_buckets(state, by_day);
     g_hash_table_unref(by_day);
 }
@@ -624,11 +624,11 @@ static GHashTable *daily_summary_table_new(void) {
 }
 
 /* Stores the band's summary for its local day. Main thread only (the dashboard reads it there). */
-void health_apply_daily_summary(AppState *state, const MiwearDailySummaryRow *row) {
+void health_apply_daily_summary(AppState *state, const SalusDailySummaryRow *row) {
     if (state == NULL || row == NULL || row->timestamp_ms <= 0) {
         return;
     }
-    gchar *day_key = miwear_local_day_key(row->timestamp_ms / 1000LL);
+    gchar *day_key = salus_local_day_key(row->timestamp_ms / 1000LL);
     if (day_key == NULL) {
         return;
     }
@@ -638,7 +638,7 @@ void health_apply_daily_summary(AppState *state, const MiwearDailySummaryRow *ro
     }
     g_hash_table_replace(state->daily_summaries, day_key, g_memdup2(row, sizeof(*row)));
     g_mutex_unlock(&state->recorded_lock);
-    miwear_dashboard_schedule_refresh(state);
+    salus_dashboard_schedule_refresh(state);
 }
 
 typedef struct {
@@ -653,7 +653,7 @@ typedef struct {
     GArray *sleep_stage_markers;
     GArray *sleep_sessions; /* RebuildSleepSession, ordered by bed time */
     GHashTable *sleep_summaries;
-    MiwearLocalDayCursor cursor;
+    SalusLocalDayCursor cursor;
 } RecordedRebuildCtx;
 
 /* A stage marker outside any recorded bed→wake session lasts until the next marker, but no
@@ -664,18 +664,18 @@ static void sleep_duration_value_free(gpointer data) {
     g_free(data);
 }
 
-static void rebuild_store_sleep_durations(RecordedRebuildCtx *ctx, const MiwearSleepTimeRow *r) {
+static void rebuild_store_sleep_durations(RecordedRebuildCtx *ctx, const SalusSleepTimeRow *r) {
     if (ctx == NULL || r == NULL || ctx->sleep_summaries == NULL) {
         return;
     }
-    MiwearSleepStageDurations nd = {
+    SalusSleepStageDurations nd = {
         .deep_min = r->deep_min,
         .light_min = r->light_min,
         .rem_min = r->rem_min,
         .awake_min = r->awake_min,
         .total_min = r->total_min,
     };
-    miwear_sleep_normalize_stage_durations(&nd);
+    salus_sleep_normalize_stage_durations(&nd);
     const int deep = nd.deep_min > 0 ? nd.deep_min : 0;
     const int light = nd.light_min > 0 ? nd.light_min : 0;
     const int rem = nd.rem_min > 0 ? nd.rem_min : 0;
@@ -685,13 +685,13 @@ static void rebuild_store_sleep_durations(RecordedRebuildCtx *ctx, const MiwearS
         return;
     }
 
-    gchar *wake_day = miwear_local_day_key(r->wake_ms / 1000LL);
+    gchar *wake_day = salus_local_day_key(r->wake_ms / 1000LL);
     if (wake_day == NULL) {
         return;
     }
-    MiwearSleepDurationSummary *sum_row = g_hash_table_lookup(ctx->sleep_summaries, wake_day);
+    SalusSleepDurationSummary *sum_row = g_hash_table_lookup(ctx->sleep_summaries, wake_day);
     if (sum_row == NULL) {
-        sum_row = g_new0(MiwearSleepDurationSummary, 1);
+        sum_row = g_new0(SalusSleepDurationSummary, 1);
         g_hash_table_insert(ctx->sleep_summaries, wake_day, sum_row);
     } else {
         g_free(wake_day);
@@ -734,7 +734,7 @@ static void rebuild_store_sleep_durations(RecordedRebuildCtx *ctx, const MiwearS
 static RecordedSample *rebuild_minute_slot(RecordedRebuildCtx *ctx, gint64 unix_sec) {
     const gchar *day_key = NULL;
     guint16 mod = 0;
-    if (!miwear_local_day_cursor_resolve(&ctx->cursor, unix_sec, &day_key, &mod)) {
+    if (!salus_local_day_cursor_resolve(&ctx->cursor, unix_sec, &day_key, &mod)) {
         return NULL;
     }
     GArray *day = g_hash_table_lookup(ctx->days, day_key);
@@ -762,7 +762,7 @@ static void rebuild_set_sleep_minute(RecordedRebuildCtx *ctx, gint64 unix_sec, i
 static gboolean rebuild_session_has_markers(const RecordedRebuildCtx *ctx, gint64 bed_sec, gint64 wake_sec) {
     const GArray *m = ctx->sleep_stage_markers;
     for (guint i = 0; m != NULL && i < m->len; i++) {
-        const gint64 t = g_array_index(m, MiwearSleepStageRow, i).timestamp_ms / 1000LL;
+        const gint64 t = g_array_index(m, SalusSleepStageRow, i).timestamp_ms / 1000LL;
         if (t >= wake_sec) {
             break;
         }
@@ -792,11 +792,11 @@ static void rebuild_expand_sleep_stage_markers(RecordedRebuildCtx *ctx) {
     }
     GArray *m = ctx->sleep_stage_markers;
     for (guint i = 0; i < m->len; i++) {
-        const MiwearSleepStageRow *p = &g_array_index(m, MiwearSleepStageRow, i);
+        const SalusSleepStageRow *p = &g_array_index(m, SalusSleepStageRow, i);
         const gint64 start_sec = p->timestamp_ms / 1000LL;
         gint64 end_sec;
         if (i + 1 < m->len) {
-            end_sec = g_array_index(m, MiwearSleepStageRow, i + 1).timestamp_ms / 1000LL;
+            end_sec = g_array_index(m, SalusSleepStageRow, i + 1).timestamp_ms / 1000LL;
         } else {
             end_sec = start_sec + 60;
         }
@@ -811,14 +811,14 @@ static void rebuild_expand_sleep_stage_markers(RecordedRebuildCtx *ctx) {
         if (end_sec <= start_sec) {
             end_sec = start_sec + 60;
         }
-        const int stage = miwear_normalize_sleep_stage(p->stage);
+        const int stage = salus_normalize_sleep_stage(p->stage);
         for (gint64 sec = start_sec; sec < end_sec; sec += 60) {
             rebuild_set_sleep_minute(ctx, sec, stage);
         }
     }
 }
 
-static gboolean rebuild_activity_cb(const MiwearXiaomiActivityRow *r, gpointer user_data) {
+static gboolean rebuild_activity_cb(const SalusXiaomiActivityRow *r, gpointer user_data) {
     RecordedRebuildCtx *ctx = user_data;
     RecordedSample *dst = rebuild_minute_slot(ctx, (gint64)r->timestamp_sec);
     if (dst == NULL) {
@@ -851,28 +851,28 @@ static gboolean rebuild_activity_cb(const MiwearXiaomiActivityRow *r, gpointer u
     return TRUE;
 }
 
-static gboolean rebuild_daily_summary_cb(const MiwearDailySummaryRow *r, gpointer user_data) {
+static gboolean rebuild_daily_summary_cb(const SalusDailySummaryRow *r, gpointer user_data) {
     RecordedRebuildCtx *ctx = user_data;
     const gchar *day_key = NULL;
     guint16 mod = 0;
     if (r->timestamp_ms > 0 &&
-        miwear_local_day_cursor_resolve(&ctx->cursor, r->timestamp_ms / 1000LL, &day_key, &mod)) {
+        salus_local_day_cursor_resolve(&ctx->cursor, r->timestamp_ms / 1000LL, &day_key, &mod)) {
         g_hash_table_replace(ctx->summaries, g_strdup(day_key), g_memdup2(r, sizeof(*r)));
     }
     return TRUE;
 }
 
-static gboolean rebuild_sleep_stage_cb(const MiwearSleepStageRow *r, gpointer user_data) {
+static gboolean rebuild_sleep_stage_cb(const SalusSleepStageRow *r, gpointer user_data) {
     RecordedRebuildCtx *ctx = user_data;
     if (ctx->sleep_stage_markers == NULL) {
-        ctx->sleep_stage_markers = g_array_new(FALSE, FALSE, sizeof(MiwearSleepStageRow));
+        ctx->sleep_stage_markers = g_array_new(FALSE, FALSE, sizeof(SalusSleepStageRow));
     }
-    MiwearSleepStageRow copy = *r;
+    SalusSleepStageRow copy = *r;
     g_array_append_val(ctx->sleep_stage_markers, copy);
     return TRUE;
 }
 
-static gboolean rebuild_sleep_time_cb(const MiwearSleepTimeRow *r, gpointer user_data) {
+static gboolean rebuild_sleep_time_cb(const SalusSleepTimeRow *r, gpointer user_data) {
     RecordedRebuildCtx *ctx = user_data;
     rebuild_store_sleep_durations(ctx, r);
     const gint64 bed_sec = r->bed_ms / 1000LL;
@@ -886,7 +886,7 @@ static gboolean rebuild_sleep_time_cb(const MiwearSleepTimeRow *r, gpointer user
      * any) still give the breakdown. Never invent a timeline from the totals. */
     if (!rebuild_session_has_markers(ctx, bed_sec, wake_sec)) {
         for (gint64 sec = bed_sec; sec < wake_sec; sec += 60) {
-            rebuild_set_sleep_minute(ctx, sec, MIWEAR_SLEEP_STAGE_UNSPEC);
+            rebuild_set_sleep_minute(ctx, sec, SALUS_SLEEP_STAGE_UNSPEC);
         }
     }
     return TRUE;
@@ -897,7 +897,7 @@ void recorded_rebuild_from_db(AppState *state) {
     if (state == NULL || state->selected_address == NULL || state->selected_address[0] == '\0') {
         return;
     }
-    if (!miwear_db_ensure_device(state->selected_address)) {
+    if (!salus_db_ensure_device(state->selected_address)) {
         return;
     }
 
@@ -907,18 +907,18 @@ void recorded_rebuild_from_db(AppState *state) {
     ctx.summaries = daily_summary_table_new();
     ctx.sleep_summaries = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, sleep_duration_value_free);
     ctx.sleep_sessions = g_array_new(FALSE, FALSE, sizeof(RebuildSleepSession));
-    miwear_local_day_cursor_init(&ctx.cursor);
+    salus_local_day_cursor_init(&ctx.cursor);
 
-    (void)miwear_db_foreach_xiaomi_activity(rebuild_activity_cb, &ctx);
-    (void)miwear_db_foreach_sleep_stage(rebuild_sleep_stage_cb, &ctx); /* before the sessions */
-    (void)miwear_db_foreach_sleep_time(rebuild_sleep_time_cb, &ctx);
-    (void)miwear_db_foreach_daily_summary(rebuild_daily_summary_cb, &ctx);
+    (void)salus_db_foreach_xiaomi_activity(rebuild_activity_cb, &ctx);
+    (void)salus_db_foreach_sleep_stage(rebuild_sleep_stage_cb, &ctx); /* before the sessions */
+    (void)salus_db_foreach_sleep_time(rebuild_sleep_time_cb, &ctx);
+    (void)salus_db_foreach_daily_summary(rebuild_daily_summary_cb, &ctx);
     rebuild_expand_sleep_stage_markers(&ctx);
     if (ctx.sleep_stage_markers != NULL) {
         g_array_unref(ctx.sleep_stage_markers);
     }
     g_array_unref(ctx.sleep_sessions);
-    miwear_local_day_cursor_clear(&ctx.cursor);
+    salus_local_day_cursor_clear(&ctx.cursor);
 
     g_mutex_lock(&state->recorded_lock);
     if (state->recorded_days != NULL) {
@@ -944,7 +944,7 @@ static gboolean recorded_rebuild_idle_cb(gpointer user_data) {
     AppState *state = user_data;
     state->recorded_rebuild_source_id = 0;
     recorded_rebuild_from_db(state);
-    miwear_dashboard_schedule_refresh(state);
+    salus_dashboard_schedule_refresh(state);
     return G_SOURCE_REMOVE;
 }
 
@@ -957,12 +957,12 @@ void recorded_schedule_rebuild(AppState *state) {
 
 static void show_main(AppState *state) {
     recorded_rebuild_from_db(state);
-    miwear_sport_load_from_db(state);
+    salus_sport_load_from_db(state);
     if (state->stack != NULL) {
         gtk_stack_set_visible_child_name(GTK_STACK(state->stack), "main");
     }
-    miwear_dashboard_update_device_state(state, NULL, NULL, NULL);
-    miwear_dashboard_schedule_refresh(state);
+    salus_dashboard_update_device_state(state, NULL, NULL, NULL);
+    salus_dashboard_schedule_refresh(state);
 }
 
 /* Auth succeeded: the band is connected. */
@@ -970,7 +970,7 @@ void switch_to_dashboard(AppState *state) {
     show_main(state);
     gchar *msg = g_strdup_printf("Connected to %s",
                                  state->device_display_name != NULL ? state->device_display_name : "the band");
-    miwear_dashboard_toast(state, msg);
+    salus_dashboard_toast(state, msg);
     g_free(msg);
 }
 
@@ -988,11 +988,11 @@ void schedule_switch_to_dashboard(AppState *state) {
 
 /* Connection lost: saved data stays browsable; only fall back to setup without a saved band. */
 void switch_to_pairing(AppState *state) {
-    if (miwear_ui_has_saved_device(state)) {
-        miwear_dashboard_toast(state, "Connection to the band was lost");
-        miwear_dashboard_schedule_refresh(state);
+    if (salus_ui_has_saved_device(state)) {
+        salus_dashboard_toast(state, "Connection to the band was lost");
+        salus_dashboard_schedule_refresh(state);
     } else {
-        miwear_ui_show_setup(state);
+        salus_ui_show_setup(state);
     }
 }
 
@@ -1041,8 +1041,8 @@ void start_connect_for_address(AppState *state, const gchar *raw_address) {
     g_free(state->selected_address);
     state->selected_address = g_strdup(normalized);
     update_device_display_name(state);
-    miwear_dashboard_update_device_state(state, NULL, NULL, NULL);
-    (void)miwear_config_save(state, NULL);
+    salus_dashboard_update_device_state(state, NULL, NULL, NULL);
+    (void)salus_config_save(state, NULL);
 
     ConnectTask *task = g_new0(ConnectTask, 1);
     task->state = state;
@@ -1052,7 +1052,7 @@ void start_connect_for_address(AppState *state, const gchar *raw_address) {
     g_thread_unref(g_thread_new("connect-worker", connect_worker_main, task));
 }
 
-void miwear_app_shutdown(GApplication *app, gpointer user_data) {
+void salus_app_shutdown(GApplication *app, gpointer user_data) {
     (void)app;
     AppState *state = user_data;
     if (state->activity_refetch_source_id != 0) {
@@ -1063,8 +1063,8 @@ void miwear_app_shutdown(GApplication *app, gpointer user_data) {
         g_source_remove(state->activity_live_poll_source_id);
         state->activity_live_poll_source_id = 0;
     }
-    miwear_find_phone_shutdown(state);
-    miwear_weather_shutdown(state);
+    salus_find_phone_shutdown(state);
+    salus_weather_shutdown(state);
     if (state->find_band_stop_source != 0) {
         g_source_remove(state->find_band_stop_source);
         state->find_band_stop_source = 0;
@@ -1113,32 +1113,32 @@ void miwear_app_shutdown(GApplication *app, gpointer user_data) {
     g_free(state->weather_location_name);
     g_free(state->weather_last_status);
     g_free(state->notification_status);
-    miwear_notifications_shutdown(state);
+    salus_notifications_shutdown(state);
     state->weather_location_name = NULL;
     state->weather_last_status = NULL;
     if (state->health_view_date != NULL) {
         g_date_free(state->health_view_date);
         state->health_view_date = NULL;
     }
-    miwear_sport_entries_clear(state);
+    salus_sport_entries_clear(state);
     if (state->dash_ui != NULL) {
-        miwear_dashboard_ui_free(state->dash_ui);
+        salus_dashboard_ui_free(state->dash_ui);
         state->dash_ui = NULL;
     }
     g_clear_pointer(&state->pairing_selected_address, g_free);
-    miwear_db_close();
+    salus_db_close();
 }
 
-void miwear_activate(GApplication *application, gpointer user_data) {
+void salus_activate(GApplication *application, gpointer user_data) {
     AppState *state = user_data;
     if (state->window != NULL) {
         gtk_window_present(GTK_WINDOW(state->window));
         return;
     }
-    if (!miwear_db_open()) {
+    if (!salus_db_open()) {
         g_warning("Gadgetbridge-compatible database could not be opened; samples will not be persisted.");
     }
-    mi_style_install(gdk_display_get_default());
+    ui_style_install(gdk_display_get_default());
     state->log_buffer = gtk_text_buffer_new(NULL);
 
     state->window = adw_application_window_new(GTK_APPLICATION(application));
@@ -1148,8 +1148,8 @@ void miwear_activate(GApplication *application, gpointer user_data) {
 
     update_device_display_name(state);
 
-    state->dash_ui = miwear_dashboard_ui_new();
-    state->page_dashboard = miwear_dashboard_build(state, state->dash_ui);
+    state->dash_ui = salus_dashboard_ui_new();
+    state->page_dashboard = salus_dashboard_build(state, state->dash_ui);
     state->page_pairing = build_setup_page(state);
 
     state->stack = gtk_stack_new();
@@ -1159,19 +1159,19 @@ void miwear_activate(GApplication *application, gpointer user_data) {
 
     state->toast_overlay = adw_toast_overlay_new();
     adw_toast_overlay_set_child(ADW_TOAST_OVERLAY(state->toast_overlay), state->stack);
-    miwear_dashboard_set_toast_overlay(state->dash_ui, state->toast_overlay);
+    salus_dashboard_set_toast_overlay(state->dash_ui, state->toast_overlay);
     adw_application_window_set_content(ADW_APPLICATION_WINDOW(state->window), state->toast_overlay);
-    miwear_dashboard_add_breakpoints(state->window, state->dash_ui);
+    salus_dashboard_add_breakpoints(state->window, state->dash_ui);
 
-    if (miwear_ui_has_saved_device(state)) {
+    if (salus_ui_has_saved_device(state)) {
         show_main(state);
     } else {
-        miwear_ui_show_setup(state);
+        salus_ui_show_setup(state);
     }
     gtk_window_present(GTK_WINDOW(state->window));
 
     if (state->notifications_enabled) {
-        miwear_notifications_on_connect(state);
+        salus_notifications_on_connect(state);
     }
-    miwear_dashboard_schedule_refresh(state);
+    salus_dashboard_schedule_refresh(state);
 }

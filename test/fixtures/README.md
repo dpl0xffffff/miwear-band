@@ -5,7 +5,7 @@ Drop band payloads here for regression decoding.
 Generate captures during sync:
 
 ```bash
-export MIWEAR_CAPTURE_DIR="$(pwd)/test/fixtures"
+export SALUS_CAPTURE_DIR="$(pwd)/test/fixtures"
 /path/to/build/salus
 ```
 

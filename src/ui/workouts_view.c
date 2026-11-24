@@ -1,8 +1,8 @@
 #include "ui_private.h"
 
-#include "miwear/activity/activity.h"
-#include "miwear/activity/workout_summary.h"
-#include "miwear/db/workout_store.h"
+#include "salus/activity/activity.h"
+#include "salus/activity/workout_summary.h"
+#include "salus/db/workout_store.h"
 
 #include <math.h>
 #include <string.h>
@@ -11,9 +11,9 @@
 /* Sport entry model (backend-facing API)                                                   */
 /* ======================================================================================== */
 
-static MiwearSportEntry *sport_find_entry(AppState *state, uint32_t ts, int subtype) {
+static SalusSportEntry *sport_find_entry(AppState *state, uint32_t ts, int subtype) {
     for (GList *l = state != NULL ? state->sport_entries : NULL; l != NULL; l = l->next) {
-        MiwearSportEntry *e = l->data;
+        SalusSportEntry *e = l->data;
         if (e->ts_sec == ts && e->sport_subtype == subtype) {
             return e;
         }
@@ -21,7 +21,7 @@ static MiwearSportEntry *sport_find_entry(AppState *state, uint32_t ts, int subt
     return NULL;
 }
 
-static void sport_entry_apply_summary(MiwearSportEntry *e, const MiwearWorkoutSummary *summary) {
+static void sport_entry_apply_summary(SalusSportEntry *e, const SalusWorkoutSummary *summary) {
     if (e == NULL || summary == NULL) {
         return;
     }
@@ -33,29 +33,29 @@ static void sport_entry_apply_summary(MiwearSportEntry *e, const MiwearWorkoutSu
     e->hr_avg = summary->hr_avg;
     g_free(e->label);
     e->label = g_strdup(summary->sport_name != NULL ? summary->sport_name
-                                                    : miwear_sport_subtype_name(e->sport_subtype));
+                                                    : salus_sport_subtype_name(e->sport_subtype));
     if (e->detail != NULL) {
-        miwear_workout_summary_clear(e->detail);
+        salus_workout_summary_clear(e->detail);
         g_free(e->detail);
     }
-    e->detail = miwear_workout_summary_dup(summary);
+    e->detail = salus_workout_summary_dup(summary);
 }
 
 static int sport_entry_time_cmp(gconstpointer a, gconstpointer b) {
-    const MiwearSportEntry *ea = a;
-    const MiwearSportEntry *eb = b;
+    const SalusSportEntry *ea = a;
+    const SalusSportEntry *eb = b;
     const uint32_t ta = ea->start_sec > 0 ? ea->start_sec : ea->ts_sec;
     const uint32_t tb = eb->start_sec > 0 ? eb->start_sec : eb->ts_sec;
     return ta > tb ? -1 : ta < tb ? 1 : 0;
 }
 
-void miwear_sport_entries_clear(AppState *state) {
+void salus_sport_entries_clear(AppState *state) {
     if (state == NULL) {
         return;
     }
     /* A pushed detail page draws from an entry: close it before the entries are freed
      * (a reconnect reloads them from the DB while a workout may be open). */
-    MiwearDashboardUi *dash = state->dash_ui;
+    SalusDashboardUi *dash = state->dash_ui;
     if (dash != NULL && dash->sport_detail_entry != NULL) {
         dash->sport_detail_entry = NULL;
         if (dash->nav_view != NULL) {
@@ -63,10 +63,10 @@ void miwear_sport_entries_clear(AppState *state) {
         }
     }
     for (GList *l = state->sport_entries; l != NULL; l = l->next) {
-        MiwearSportEntry *e = l->data;
+        SalusSportEntry *e = l->data;
         g_free(e->label);
         if (e->detail != NULL) {
-            miwear_workout_summary_clear(e->detail);
+            salus_workout_summary_clear(e->detail);
             g_free(e->detail);
         }
         g_free(e);
@@ -75,14 +75,14 @@ void miwear_sport_entries_clear(AppState *state) {
     state->sport_entries = NULL;
 }
 
-static gboolean sport_load_row_cb(const MiwearDbSportWorkoutRow *row, gpointer user_data) {
+static gboolean sport_load_row_cb(const SalusDbSportWorkoutRow *row, gpointer user_data) {
     AppState *state = user_data;
     if (state == NULL || row == NULL || row->detail_json == NULL) {
         return TRUE;
     }
-    MiwearWorkoutSummary sum = {0};
+    SalusWorkoutSummary sum = {0};
     int sport_type = 1;
-    if (!miwear_workout_summary_from_json(row->detail_json, &sport_type, &sum)) {
+    if (!salus_workout_summary_from_json(row->detail_json, &sport_type, &sum)) {
         return TRUE;
     }
     if (sum.file_ts_sec == 0) {
@@ -91,7 +91,7 @@ static gboolean sport_load_row_cb(const MiwearDbSportWorkoutRow *row, gpointer u
     if (sum.sport_subtype == 0) {
         sum.sport_subtype = row->sport_subtype;
     }
-    MiwearSportEntry *e = g_new0(MiwearSportEntry, 1);
+    SalusSportEntry *e = g_new0(SalusSportEntry, 1);
     e->ts_sec = row->file_ts;
     e->sport_type = sport_type > 0 ? sport_type : row->sport_type;
     e->sport_subtype = row->sport_subtype;
@@ -104,27 +104,27 @@ static gboolean sport_load_row_cb(const MiwearDbSportWorkoutRow *row, gpointer u
                 (int)((uint64_t)e->detail->duration_sec * 1000u / (uint32_t)e->detail->distance_m);
         }
     }
-    miwear_workout_summary_clear(&sum);
+    salus_workout_summary_clear(&sum);
     state->sport_entries = g_list_prepend(state->sport_entries, e);
     return TRUE;
 }
 
-void miwear_sport_load_from_db(AppState *state) {
+void salus_sport_load_from_db(AppState *state) {
     if (state == NULL || state->selected_address == NULL || state->selected_address[0] == '\0') {
         return;
     }
-    if (!miwear_db_ensure_device(state->selected_address)) {
+    if (!salus_db_ensure_device(state->selected_address)) {
         return;
     }
-    miwear_sport_entries_clear(state);
-    (void)miwear_db_foreach_sport_workout(sport_load_row_cb, state);
-    miwear_sport_rebuild_list(state);
+    salus_sport_entries_clear(state);
+    (void)salus_db_foreach_sport_workout(sport_load_row_cb, state);
+    salus_sport_rebuild_list(state);
 }
 
-void miwear_sport_add_entry(AppState *state, uint32_t ts, int type, int subtype, const MiwearWorkoutSummary *summary) {
-    MiwearSportEntry *e = sport_find_entry(state, ts, subtype);
+void salus_sport_add_entry(AppState *state, uint32_t ts, int type, int subtype, const SalusWorkoutSummary *summary) {
+    SalusSportEntry *e = sport_find_entry(state, ts, subtype);
     if (e == NULL) {
-        e = g_new0(MiwearSportEntry, 1);
+        e = g_new0(SalusSportEntry, 1);
         e->ts_sec = ts;
         e->sport_type = type;
         e->sport_subtype = subtype;
@@ -138,32 +138,32 @@ void miwear_sport_add_entry(AppState *state, uint32_t ts, int type, int subtype,
         sport_entry_apply_summary(e, summary);
     }
     if (summary != NULL && state->selected_address != NULL && state->selected_address[0] != '\0') {
-        if (miwear_db_ensure_device(state->selected_address)) {
-            (void)miwear_db_replace_sport_workout(type, ts, subtype, summary);
+        if (salus_db_ensure_device(state->selected_address)) {
+            (void)salus_db_replace_sport_workout(type, ts, subtype, summary);
         }
     }
-    miwear_sport_rebuild_list(state);
+    salus_sport_rebuild_list(state);
 }
 
-void miwear_sport_merge_attachment(AppState *state, uint32_t ts, int subtype, MiwearWorkoutSummary *patch) {
+void salus_sport_merge_attachment(AppState *state, uint32_t ts, int subtype, SalusWorkoutSummary *patch) {
     if (state == NULL || patch == NULL) {
         return;
     }
-    MiwearSportEntry *e = sport_find_entry(state, ts, subtype);
+    SalusSportEntry *e = sport_find_entry(state, ts, subtype);
     if (e == NULL) {
-        miwear_sport_add_entry(state, ts, 1, subtype, NULL);
+        salus_sport_add_entry(state, ts, 1, subtype, NULL);
         e = sport_find_entry(state, ts, subtype);
     }
     if (e == NULL) {
         return;
     }
     if (e->detail == NULL) {
-        e->detail = g_new0(MiwearWorkoutSummary, 1);
+        e->detail = g_new0(SalusWorkoutSummary, 1);
         e->detail->sport_subtype = subtype;
         e->detail->file_ts_sec = ts;
-        e->detail->sport_name = g_strdup(miwear_sport_subtype_name(subtype));
+        e->detail->sport_name = g_strdup(salus_sport_subtype_name(subtype));
     }
-    MiwearWorkoutSummary *d = e->detail;
+    SalusWorkoutSummary *d = e->detail;
     if (patch->record_samples != NULL && patch->record_samples->len > 0) {
         if (d->record_samples != NULL) {
             g_array_unref(d->record_samples);
@@ -178,48 +178,48 @@ void miwear_sport_merge_attachment(AppState *state, uint32_t ts, int subtype, Mi
         d->gps_track = g_array_ref(patch->gps_track);
     }
     if (state->selected_address != NULL && state->selected_address[0] != '\0' &&
-        miwear_db_ensure_device(state->selected_address) && d->duration_sec > 0) {
-        (void)miwear_db_replace_sport_workout(e->sport_type > 0 ? e->sport_type : 1, ts, subtype, d);
+        salus_db_ensure_device(state->selected_address) && d->duration_sec > 0) {
+        (void)salus_db_replace_sport_workout(e->sport_type > 0 ? e->sport_type : 1, ts, subtype, d);
     }
-    miwear_sport_rebuild_list(state);
-    miwear_dashboard_schedule_refresh(state);
+    salus_sport_rebuild_list(state);
+    salus_dashboard_schedule_refresh(state);
 }
 
 /* ======================================================================================== */
 /* Presentation helpers                                                                     */
 /* ======================================================================================== */
 
-static const char *sport_icon(const MiwearSportEntry *e) {
+static const char *sport_icon(const SalusSportEntry *e) {
     const int t = e->detail != NULL && e->detail->sub_sport_type > 0 ? e->detail->sub_sport_type : e->sport_subtype;
     switch (t) {
-        case 1: case 3: case 5: case 208: return "miwear-run-symbolic";
-        case 2: case 4: case 15: case 22: case 207: case 333: return "miwear-walk-symbolic";
-        case 6: case 7: case 23: case 206: case 324: return "miwear-bike-symbolic";
+        case 1: case 3: case 5: case 208: return "salus-run-symbolic";
+        case 2: case 4: case 15: case 22: case 207: case 333: return "salus-walk-symbolic";
+        case 6: case 7: case 23: case 206: case 324: return "salus-bike-symbolic";
         case 9: case 10: case 25: case 109: case 111: case 112: case 116: case 117: case 118:
-            return "miwear-swim-symbolic";
+            return "salus-swim-symbolic";
         default: break;
     }
     const char *l = e->label != NULL ? e->label : "";
     gchar *low = g_ascii_strdown(l, -1);
-    const char *icon = "miwear-dumbbell-symbolic";
+    const char *icon = "salus-dumbbell-symbolic";
     if (strstr(low, "swim") != NULL) {
-        icon = "miwear-swim-symbolic";
+        icon = "salus-swim-symbolic";
     } else if (strstr(low, "cycl") != NULL || strstr(low, "bik") != NULL || strstr(low, "ride") != NULL) {
-        icon = "miwear-bike-symbolic";
+        icon = "salus-bike-symbolic";
     } else if (strstr(low, "walk") != NULL || strstr(low, "hik") != NULL) {
-        icon = "miwear-walk-symbolic";
+        icon = "salus-walk-symbolic";
     } else if (strstr(low, "run") != NULL || strstr(low, "treadmill") != NULL) {
-        icon = "miwear-run-symbolic";
+        icon = "salus-run-symbolic";
     }
     g_free(low);
     return icon;
 }
 
-static uint32_t entry_start(const MiwearSportEntry *e) {
+static uint32_t entry_start(const SalusSportEntry *e) {
     return e->start_sec > 0 ? e->start_sec : e->ts_sec;
 }
 
-static const MiwearWorkoutSummary *entry_detail(const MiwearSportEntry *e) {
+static const SalusWorkoutSummary *entry_detail(const SalusSportEntry *e) {
     return e != NULL ? e->detail : NULL;
 }
 
@@ -248,16 +248,16 @@ static void format_duration(int sec, gchar *buf, gsize len) {
 /* ======================================================================================== */
 
 static const char *const load_level_names[5] = {"", "Too light", "Optimal", "High", "Overreaching"};
-static const MiColor load_level_colors[4] = {MI_COLOR_SPO2, MI_COLOR_STEPS, MI_COLOR_STRESS, MI_COLOR_HR};
+static const UiColor load_level_colors[4] = {UI_COLOR_SPO2, UI_COLOR_STEPS, UI_COLOR_STRESS, UI_COLOR_HR};
 static const char *const vo2_level_names[8] = {"", "Novice", "Beginner", "Fair", "Average", "Good", "Excellent",
                                                "Elite"};
-static const MiColor vo2_level_colors[7] = {MI_COLOR_HR,     MI_COLOR_CALORIES, MI_COLOR_STRESS, MI_COLOR_STEPS,
-                                            MI_COLOR_ACTIVE, MI_COLOR_SPO2,     MI_COLOR_SLEEP};
+static const UiColor vo2_level_colors[7] = {UI_COLOR_HR,     UI_COLOR_CALORIES, UI_COLOR_STRESS, UI_COLOR_STEPS,
+                                            UI_COLOR_ACTIVE, UI_COLOR_SPO2,     UI_COLOR_SLEEP};
 static const char *const training_status_names[9] = {"",         "No status", "Overreaching", "Detraining",
                                                      "Unproductive", "Maintaining", "Recovery", "Productive",
                                                      "Peaking"};
 
-static int entry_training_load(const MiwearWorkoutSummary *d) {
+static int entry_training_load(const SalusWorkoutSummary *d) {
     if (d == NULL) {
         return 0;
     }
@@ -265,7 +265,7 @@ static int entry_training_load(const MiwearWorkoutSummary *d) {
                                                                                  : d->swim_training_load;
 }
 
-static int entry_recovery_min(const MiwearWorkoutSummary *d) {
+static int entry_recovery_min(const SalusWorkoutSummary *d) {
     if (d == NULL) {
         return 0;
     }
@@ -276,7 +276,7 @@ static int entry_recovery_min(const MiwearWorkoutSummary *d) {
 typedef struct {
     int count;
     int active; /* 1-based, 0 = none */
-    const MiColor *colors;
+    const UiColor *colors;
     const char *const *names; /* 1-based */
 } LevelGauge;
 
@@ -288,12 +288,12 @@ static void draw_level_gauge(GtkDrawingArea *area, cairo_t *cr, int width, int h
     const double seg = (width - gap * (g->count - 1)) / g->count;
     for (int i = 0; i < g->count; i++) {
         const double x = i * (seg + gap);
-        mi_cairo_set_color(cr, g->colors[i], i + 1 == g->active ? 1.0 : 0.22);
-        mi_rounded_rect(cr, x, top, seg, bar_h, bar_h / 2);
+        ui_cairo_set_color(cr, g->colors[i], i + 1 == g->active ? 1.0 : 0.22);
+        ui_rounded_rect(cr, x, top, seg, bar_h, bar_h / 2);
         cairo_fill(cr);
         if (i + 1 == g->active) {
             const double cx = x + seg / 2;
-            mi_cairo_set_fg(cr, w, 0.85);
+            ui_cairo_set_fg(cr, w, 0.85);
             cairo_move_to(cr, cx - 5, 0);
             cairo_line_to(cr, cx + 5, 0);
             cairo_line_to(cr, cx, top - 1);
@@ -302,15 +302,15 @@ static void draw_level_gauge(GtkDrawingArea *area, cairo_t *cr, int width, int h
         }
     }
     /* End labels plus the active level name. */
-    mi_draw_text(cr, w, g->names[1], 0, top + bar_h + 15, 10.5, g->active == 1 ? 0.9 : 0.5, 0.0);
-    mi_draw_text(cr, w, g->names[g->count], width, top + bar_h + 15, 10.5, g->active == g->count ? 0.9 : 0.5, 1.0);
+    ui_draw_text(cr, w, g->names[1], 0, top + bar_h + 15, 10.5, g->active == 1 ? 0.9 : 0.5, 0.0);
+    ui_draw_text(cr, w, g->names[g->count], width, top + bar_h + 15, 10.5, g->active == g->count ? 0.9 : 0.5, 1.0);
     if (g->active > 1 && g->active < g->count) {
         const double cx = (g->active - 1) * (seg + gap) + seg / 2;
-        mi_draw_text(cr, w, g->names[g->active], cx, top + bar_h + 15, 10.5, 0.9, 0.5);
+        ui_draw_text(cr, w, g->names[g->active], cx, top + bar_h + 15, 10.5, 0.9, 0.5);
     }
 }
 
-static GtkWidget *level_gauge_new(int count, int active, const MiColor *colors, const char *const *names) {
+static GtkWidget *level_gauge_new(int count, int active, const UiColor *colors, const char *const *names) {
     LevelGauge *g = g_new(LevelGauge, 1);
     *g = (LevelGauge){count, CLAMP(active, 0, count), colors, names};
     GtkWidget *area = gtk_drawing_area_new();
@@ -320,19 +320,19 @@ static GtkWidget *level_gauge_new(int count, int active, const MiColor *colors, 
 }
 
 /* Big value + coloured level text, as a header row of a training card. */
-static GtkWidget *training_value_row(const char *value, const char *unit, const char *level, MiColor color) {
+static GtkWidget *training_value_row(const char *value, const char *unit, const char *level, UiColor color) {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    GtkWidget *v = mi_label(value, "mi-tile-value numeric", 0.0f);
+    GtkWidget *v = ui_label(value, "salus-tile-value numeric", 0.0f);
     gtk_widget_set_valign(v, GTK_ALIGN_BASELINE_FILL);
     gtk_box_append(GTK_BOX(row), v);
     if (unit != NULL) {
-        GtkWidget *u = mi_label(unit, "mi-tile-unit", 0.0f);
+        GtkWidget *u = ui_label(unit, "salus-tile-unit", 0.0f);
         gtk_widget_set_valign(u, GTK_ALIGN_BASELINE_FILL);
         gtk_box_append(GTK_BOX(row), u);
     }
     if (level != NULL && level[0] != '\0') {
-        GtkWidget *l = mi_label(level, "heading", 1.0f);
-        gtk_widget_add_css_class(l, mi_color_css_class(color));
+        GtkWidget *l = ui_label(level, "heading", 1.0f);
+        gtk_widget_add_css_class(l, ui_color_css_class(color));
         gtk_widget_set_hexpand(l, TRUE);
         gtk_widget_set_valign(l, GTK_ALIGN_BASELINE_FILL);
         gtk_box_append(GTK_BOX(row), l);
@@ -341,7 +341,7 @@ static GtkWidget *training_value_row(const char *value, const char *unit, const 
 }
 
 /* "Training" card on a workout's detail page; NULL when the band reported none of it. */
-static GtkWidget *workout_training_card(const MiwearWorkoutSummary *d) {
+static GtkWidget *workout_training_card(const SalusWorkoutSummary *d) {
     const int load = entry_training_load(d);
     const int recovery = entry_recovery_min(d);
     const float te_aer = d->has_swim_detail ? d->swim_training_effect : d->walk_te_aerobic;
@@ -350,21 +350,21 @@ static GtkWidget *workout_training_card(const MiwearWorkoutSummary *d) {
         return NULL;
     }
     GtkWidget *inner = NULL;
-    GtkWidget *card = mi_card_new(&inner, 12);
+    GtkWidget *card = ui_card_new(&inner, 12);
     gchar buf[64];
 
     if (load > 0) {
-        gtk_box_append(GTK_BOX(inner), mi_card_header("Training Load", NULL, NULL));
+        gtk_box_append(GTK_BOX(inner), ui_card_header("Training Load", NULL, NULL));
         const int lvl = CLAMP(d->training_load_level, 0, 4);
         g_snprintf(buf, sizeof(buf), "%d", load);
         gtk_box_append(GTK_BOX(inner), training_value_row(buf, NULL, load_level_names[lvl],
-                                                          lvl > 0 ? load_level_colors[lvl - 1] : MI_COLOR_STEPS));
+                                                          lvl > 0 ? load_level_colors[lvl - 1] : UI_COLOR_STEPS));
         if (lvl > 0) {
             gtk_box_append(GTK_BOX(inner), level_gauge_new(4, lvl, load_level_colors, load_level_names));
         }
     }
     if (d->vo2_max > 0) {
-        GtkWidget *hdr = mi_card_header("VO₂ Max", NULL, NULL);
+        GtkWidget *hdr = ui_card_header("VO₂ Max", NULL, NULL);
         if (load > 0) {
             gtk_widget_set_margin_top(hdr, 8);
         }
@@ -372,31 +372,31 @@ static GtkWidget *workout_training_card(const MiwearWorkoutSummary *d) {
         const int lvl = CLAMP(d->vo2_max_level, 0, 7);
         g_snprintf(buf, sizeof(buf), "%d", d->vo2_max);
         gtk_box_append(GTK_BOX(inner), training_value_row(buf, "ml/kg/min", vo2_level_names[lvl],
-                                                          lvl > 0 ? vo2_level_colors[lvl - 1] : MI_COLOR_SPO2));
+                                                          lvl > 0 ? vo2_level_colors[lvl - 1] : UI_COLOR_SPO2));
         if (lvl > 0) {
             gtk_box_append(GTK_BOX(inner), level_gauge_new(7, lvl, vo2_level_colors, vo2_level_names));
         }
     }
 
-    GtkWidget *stats = mi_stat_flow_new();
+    GtkWidget *stats = ui_stat_flow_new();
     GtkWidget *v;
     if (d->training_status > 0 && d->training_status <= 8) {
-        mi_stat_flow_append(stats, mi_stat_new("Training status", &v));
+        ui_stat_flow_append(stats, ui_stat_new("Training status", &v));
         gtk_label_set_text(GTK_LABEL(v), training_status_names[d->training_status]);
     }
     if (te_aer > 0.05f) {
-        mi_stat_flow_append(stats, mi_stat_new("Aerobic effect", &v));
+        ui_stat_flow_append(stats, ui_stat_new("Aerobic effect", &v));
         g_snprintf(buf, sizeof(buf), "%.1f", (double)te_aer);
         gtk_label_set_text(GTK_LABEL(v), buf);
     }
     if (te_ana > 0.05f) {
-        mi_stat_flow_append(stats, mi_stat_new("Anaerobic effect", &v));
+        ui_stat_flow_append(stats, ui_stat_new("Anaerobic effect", &v));
         g_snprintf(buf, sizeof(buf), "%.1f", (double)te_ana);
         gtk_label_set_text(GTK_LABEL(v), buf);
     }
     if (recovery > 0) {
-        mi_stat_flow_append(stats, mi_stat_new("Recovery time", &v));
-        miwear_format_recovery_duration(recovery, buf, sizeof(buf));
+        ui_stat_flow_append(stats, ui_stat_new("Recovery time", &v));
+        salus_format_recovery_duration(recovery, buf, sizeof(buf));
         gtk_label_set_text(GTK_LABEL(v), buf);
     }
     if (gtk_widget_get_first_child(stats) != NULL) {
@@ -423,13 +423,13 @@ static void draw_week_load(GtkDrawingArea *area, cairo_t *cr, int width, int hei
         const double cx = slot * (i + 0.5);
         const int v = training_week_day_load[i];
         const double bh = v > 0 ? MAX(3.0, (height - bottom - 4) * v / max) : 3.0;
-        mi_cairo_set_color(cr, MI_COLOR_STEPS, v > 0 ? (i == 6 ? 1.0 : 0.6) : 0.18);
-        mi_rounded_rect(cr, cx - bw / 2, height - bottom - bh, bw, bh, MIN(4, bw / 2));
+        ui_cairo_set_color(cr, UI_COLOR_STEPS, v > 0 ? (i == 6 ? 1.0 : 0.6) : 0.18);
+        ui_rounded_rect(cr, cx - bw / 2, height - bottom - bh, bw, bh, MIN(4, bw / 2));
         cairo_fill(cr);
         GDateTime *d = g_date_time_add_days(now, i - 6);
         gchar *wd = g_date_time_format(d, "%a");
         g_date_time_unref(d);
-        mi_draw_text(cr, w, wd, cx, height - 3, 10, i == 6 ? 0.85 : 0.5, 0.5);
+        ui_draw_text(cr, w, wd, cx, height - 3, 10, i == 6 ? 0.85 : 0.5, 0.5);
         g_free(wd);
     }
     g_date_time_unref(now);
@@ -437,18 +437,18 @@ static void draw_week_load(GtkDrawingArea *area, cairo_t *cr, int width, int hei
 
 /* Fills the two summary cards from the band's daily summaries and the stored workouts. */
 static void refresh_training_cards(AppState *state) {
-    MiwearDashboardUi *dash = state->dash_ui;
-    GtkWidget *load_box = g_object_get_data(G_OBJECT(dash->sport_list_box), "mi-load-box");
-    GtkWidget *vo2_box = g_object_get_data(G_OBJECT(dash->sport_list_box), "mi-vo2-box");
+    SalusDashboardUi *dash = state->dash_ui;
+    GtkWidget *load_box = g_object_get_data(G_OBJECT(dash->sport_list_box), "salus-load-box");
+    GtkWidget *vo2_box = g_object_get_data(G_OBJECT(dash->sport_list_box), "salus-vo2-box");
     if (load_box == NULL || vo2_box == NULL) {
         return;
     }
-    mi_clear_box(load_box);
-    mi_clear_box(vo2_box);
+    ui_clear_box(load_box);
+    ui_clear_box(vo2_box);
     gchar buf[96];
 
     /* Training load: latest daily summary that carries it (today's, when synced). */
-    MiwearDailySummaryRow latest = {0};
+    SalusDailySummaryRow latest = {0};
     gboolean have_latest = FALSE;
     GDateTime *now = g_date_time_new_now_local();
     g_mutex_lock(&state->recorded_lock);
@@ -456,7 +456,7 @@ static void refresh_training_cards(AppState *state) {
         GDateTime *d = g_date_time_add_days(now, i - 6);
         gchar *key = g_date_time_format(d, "%Y-%m-%d");
         g_date_time_unref(d);
-        const MiwearDailySummaryRow *r =
+        const SalusDailySummaryRow *r =
             state->daily_summaries != NULL ? g_hash_table_lookup(state->daily_summaries, key) : NULL;
         g_free(key);
         training_week_day_load[i] = (r != NULL && r->has_training_vitality) ? r->training_load_day : 0;
@@ -468,12 +468,12 @@ static void refresh_training_cards(AppState *state) {
     g_mutex_unlock(&state->recorded_lock);
     g_date_time_unref(now);
 
-    gtk_box_append(GTK_BOX(load_box), mi_card_header("Training Load", NULL, NULL));
+    gtk_box_append(GTK_BOX(load_box), ui_card_header("Training Load", NULL, NULL));
     if (have_latest) {
         const int lvl = CLAMP(latest.training_load_level, 0, 4);
         g_snprintf(buf, sizeof(buf), "%d", latest.training_load_week);
         gtk_box_append(GTK_BOX(load_box), training_value_row(buf, "7 days", load_level_names[lvl],
-                                                             lvl > 0 ? load_level_colors[lvl - 1] : MI_COLOR_STEPS));
+                                                             lvl > 0 ? load_level_colors[lvl - 1] : UI_COLOR_STEPS));
         if (lvl > 0) {
             gtk_box_append(GTK_BOX(load_box), level_gauge_new(4, lvl, load_level_colors, load_level_names));
         }
@@ -482,28 +482,28 @@ static void refresh_training_cards(AppState *state) {
         gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(bars), draw_week_load, NULL, NULL);
         gtk_box_append(GTK_BOX(load_box), bars);
         g_snprintf(buf, sizeof(buf), "Today %d · from the band's daily summary", latest.training_load_day);
-        gtk_box_append(GTK_BOX(load_box), mi_label(buf, "caption dimmed", 0.0f));
+        gtk_box_append(GTK_BOX(load_box), ui_label(buf, "caption dimmed", 0.0f));
     } else {
-        GtkWidget *l = mi_label("Comes with the band's daily summary after a sync.", "dimmed", 0.0f);
+        GtkWidget *l = ui_label("Comes with the band's daily summary after a sync.", "dimmed", 0.0f);
         gtk_label_set_wrap(GTK_LABEL(l), TRUE);
         gtk_box_append(GTK_BOX(load_box), l);
     }
 
     /* VO2 max: latest workout that estimated it. */
-    const MiwearSportEntry *best = NULL;
+    const SalusSportEntry *best = NULL;
     for (GList *l = state->sport_entries; l != NULL; l = l->next) {
-        const MiwearSportEntry *e = l->data;
+        const SalusSportEntry *e = l->data;
         if (e->detail != NULL && e->detail->vo2_max > 0 && (best == NULL || entry_start(e) > entry_start(best))) {
             best = e;
         }
     }
-    gtk_box_append(GTK_BOX(vo2_box), mi_card_header("VO₂ Max", NULL, NULL));
+    gtk_box_append(GTK_BOX(vo2_box), ui_card_header("VO₂ Max", NULL, NULL));
     if (best != NULL) {
-        const MiwearWorkoutSummary *d = best->detail;
+        const SalusWorkoutSummary *d = best->detail;
         const int lvl = CLAMP(d->vo2_max_level, 0, 7);
         g_snprintf(buf, sizeof(buf), "%d", d->vo2_max);
         gtk_box_append(GTK_BOX(vo2_box), training_value_row(buf, "ml/kg/min", vo2_level_names[lvl],
-                                                            lvl > 0 ? vo2_level_colors[lvl - 1] : MI_COLOR_SPO2));
+                                                            lvl > 0 ? vo2_level_colors[lvl - 1] : UI_COLOR_SPO2));
         if (lvl > 0) {
             gtk_box_append(GTK_BOX(vo2_box), level_gauge_new(7, lvl, vo2_level_colors, vo2_level_names));
         }
@@ -512,9 +512,9 @@ static void refresh_training_cards(AppState *state) {
         g_date_time_unref(dt);
         g_snprintf(buf, sizeof(buf), "From %s on %s", best->label != NULL ? best->label : "a workout", when);
         g_free(when);
-        gtk_box_append(GTK_BOX(vo2_box), mi_label(buf, "caption dimmed", 0.0f));
+        gtk_box_append(GTK_BOX(vo2_box), ui_label(buf, "caption dimmed", 0.0f));
     } else {
-        GtkWidget *l = mi_label("The band estimates VO₂ max during outdoor runs and walks with heart rate. "
+        GtkWidget *l = ui_label("The band estimates VO₂ max during outdoor runs and walks with heart rate. "
                                 "It shows up here after the next one is synced.",
                                 "dimmed", 0.0f);
         gtk_label_set_wrap(GTK_LABEL(l), TRUE);
@@ -526,10 +526,10 @@ static void refresh_training_cards(AppState *state) {
 /* Detail page                                                                              */
 /* ======================================================================================== */
 
-static const MiColor zone_colors[5] = {MI_COLOR_SPO2, MI_COLOR_STEPS, MI_COLOR_STRESS, MI_COLOR_CALORIES,
-                                       MI_COLOR_HR};
+static const UiColor zone_colors[5] = {UI_COLOR_SPO2, UI_COLOR_STEPS, UI_COLOR_STRESS, UI_COLOR_CALORIES,
+                                       UI_COLOR_HR};
 
-static int zone_for_hr(const MiwearWorkoutHrZones *z, int hr) {
+static int zone_for_hr(const SalusWorkoutHrZones *z, int hr) {
     if (z == NULL || z->zone1_lower_bpm <= 0) {
         return -1;
     }
@@ -547,7 +547,7 @@ static int zone_for_hr(const MiwearWorkoutHrZones *z, int hr) {
 #define DETAIL_BINS_MAX 240
 #define DETAIL_STEPS (-1)
 #define DETAIL_HR (-2)
-static guint detail_bins(const MiwearWorkoutSummary *d, int series, guint nbins, double *out, uint32_t *t_end);
+static guint detail_bins(const SalusWorkoutSummary *d, int series, guint nbins, double *out, uint32_t *t_end);
 
 static void draw_time_axis(cairo_t *cr, GtkWidget *w, double left, double pw, double y, uint32_t t_end) {
     const int minutes = (int)(t_end / 60);
@@ -555,21 +555,21 @@ static void draw_time_axis(cairo_t *cr, GtkWidget *w, double left, double pw, do
     for (int m = 0; m <= minutes; m += step) {
         gchar t[16];
         g_snprintf(t, sizeof(t), "%d′", m);
-        mi_draw_text(cr, w, t, CLAMP(left + pw * m * 60.0 / t_end, left + 8, left + pw - 8), y, 10.5, 0.55, 0.5);
+        ui_draw_text(cr, w, t, CLAMP(left + pw * m * 60.0 / t_end, left + 8, left + pw - 8), y, 10.5, 0.55, 0.5);
     }
 }
 
 static void draw_detail_hr(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
-    MiwearDashboardUi *dash = user_data;
+    SalusDashboardUi *dash = user_data;
     GtkWidget *w = GTK_WIDGET(area);
-    const MiwearWorkoutSummary *d = entry_detail(dash->sport_detail_entry);
+    const SalusWorkoutSummary *d = entry_detail(dash->sport_detail_entry);
     if (d == NULL || d->record_samples == NULL || d->record_samples->len < 2 || width < 80) {
         return;
     }
     const guint n = d->record_samples->len;
     int lo = 255, hi = 0;
     for (guint i = 0; i < n; i++) {
-        const MiwearWorkoutSample *s = &g_array_index(d->record_samples, MiwearWorkoutSample, i);
+        const SalusWorkoutSample *s = &g_array_index(d->record_samples, SalusWorkoutSample, i);
         if (s->hr > 0) {
             lo = MIN(lo, (int)s->hr);
             hi = MAX(hi, (int)s->hr);
@@ -582,19 +582,19 @@ static void draw_detail_hr(GtkDrawingArea *area, cairo_t *cr, int width, int hei
     hi = ((hi + 14) / 10) * 10;
     const double left = 34, right = 6, top = 6, bottom = 22;
     const double pw = width - left - right, ph = height - top - bottom;
-    const uint32_t t_end = g_array_index(d->record_samples, MiwearWorkoutSample, n - 1).offset_sec;
+    const uint32_t t_end = g_array_index(d->record_samples, SalusWorkoutSample, n - 1).offset_sec;
 #define DY(v) (top + ph * (1.0 - ((double)(v) - lo) / (double)(hi - lo)))
 
     for (int k = 0; k <= 4; k++) {
         const int v = lo + (hi - lo) * k / 4;
-        mi_cairo_set_fg(cr, w, k == 0 ? 0.18 : 0.07);
+        ui_cairo_set_fg(cr, w, k == 0 ? 0.18 : 0.07);
         cairo_set_line_width(cr, 1);
         cairo_move_to(cr, left, round(DY(v)) + 0.5);
         cairo_line_to(cr, left + pw, round(DY(v)) + 0.5);
         cairo_stroke(cr);
         gchar t[8];
         g_snprintf(t, sizeof(t), "%d", v);
-        mi_draw_text(cr, w, t, left - 6, DY(v) + 3.5, 10.5, 0.55, 1.0);
+        ui_draw_text(cr, w, t, left - 6, DY(v) + 3.5, 10.5, 0.55, 1.0);
     }
     draw_time_axis(cr, w, left, pw, top + ph + 16, t_end);
 
@@ -611,9 +611,9 @@ static void draw_detail_hr(GtkDrawingArea *area, cairo_t *cr, int width, int hei
         }
         const int z = zone_for_hr(&d->hr_zones, (int)lround(bins[b]));
         if (z >= 0) {
-            mi_cairo_set_color(cr, zone_colors[z], 1.0);
+            ui_cairo_set_color(cr, zone_colors[z], 1.0);
         } else {
-            mi_cairo_set_color(cr, MI_COLOR_HR, 1.0);
+            ui_cairo_set_color(cr, UI_COLOR_HR, 1.0);
         }
         cairo_move_to(cr, left + pw * (b - 0.5) / nb, DY(bins[b - 1]));
         cairo_line_to(cr, left + pw * (b + 0.5) / nb, DY(bins[b]));
@@ -622,7 +622,7 @@ static void draw_detail_hr(GtkDrawingArea *area, cairo_t *cr, int width, int hei
     if (d->hr_avg > 0) {
         const double dashes[] = {4, 4};
         cairo_set_dash(cr, dashes, 2, 0);
-        mi_cairo_set_fg(cr, w, 0.45);
+        ui_cairo_set_fg(cr, w, 0.45);
         cairo_set_line_width(cr, 1);
         cairo_move_to(cr, left, round(DY(d->hr_avg)) + 0.5);
         cairo_line_to(cr, left + pw, round(DY(d->hr_avg)) + 0.5);
@@ -633,16 +633,16 @@ static void draw_detail_hr(GtkDrawingArea *area, cairo_t *cr, int width, int hei
 }
 
 /* Time buckets over the record: steps are summed, other series averaged (NAN = no data). */
-static guint detail_bins(const MiwearWorkoutSummary *d, int series, guint nbins, double *out, uint32_t *t_end) {
+static guint detail_bins(const SalusWorkoutSummary *d, int series, guint nbins, double *out, uint32_t *t_end) {
     const guint n = d->record_samples->len;
-    *t_end = MAX(g_array_index(d->record_samples, MiwearWorkoutSample, n - 1).offset_sec, 1u);
+    *t_end = MAX(g_array_index(d->record_samples, SalusWorkoutSample, n - 1).offset_sec, 1u);
     nbins = CLAMP(nbins, 1u, DETAIL_BINS_MAX);
     int cnt[DETAIL_BINS_MAX] = {0};
     for (guint b = 0; b < nbins; b++) {
         out[b] = 0;
     }
     for (guint i = 0; i < n; i++) {
-        const MiwearWorkoutSample *smp = &g_array_index(d->record_samples, MiwearWorkoutSample, i);
+        const SalusWorkoutSample *smp = &g_array_index(d->record_samples, SalusWorkoutSample, i);
         const guint b = MIN(nbins - 1, (guint)((double)smp->offset_sec / *t_end * nbins));
         const double v = series == DETAIL_STEPS ? smp->steps_delta
                          : series == DETAIL_HR   ? (smp->hr > 0 ? smp->hr : NAN)
@@ -661,9 +661,9 @@ static guint detail_bins(const MiwearWorkoutSummary *d, int series, guint nbins,
 }
 
 static void draw_detail_steps(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
-    MiwearDashboardUi *dash = user_data;
+    SalusDashboardUi *dash = user_data;
     GtkWidget *w = GTK_WIDGET(area);
-    const MiwearWorkoutSummary *d = entry_detail(dash->sport_detail_entry);
+    const SalusWorkoutSummary *d = entry_detail(dash->sport_detail_entry);
     if (d == NULL || d->record_samples == NULL || d->record_samples->len == 0 || width < 80) {
         return;
     }
@@ -678,53 +678,53 @@ static void draw_detail_steps(GtkDrawingArea *area, cairo_t *cr, int width, int 
     }
     gchar t[16];
     g_snprintf(t, sizeof(t), "%.0f", smax);
-    mi_draw_text(cr, w, t, left - 6, top + 8, 10.5, 0.55, 1.0);
-    mi_draw_text(cr, w, "0", left - 6, top + ph, 10.5, 0.55, 1.0);
+    ui_draw_text(cr, w, t, left - 6, top + 8, 10.5, 0.55, 1.0);
+    ui_draw_text(cr, w, "0", left - 6, top + ph, 10.5, 0.55, 1.0);
     draw_time_axis(cr, w, left, pw, top + ph + 16, t_end);
     const double bw = pw / nb;
-    mi_cairo_set_color(cr, MI_COLOR_STEPS, 0.9);
+    ui_cairo_set_color(cr, UI_COLOR_STEPS, 0.9);
     for (guint b = 0; b < nb; b++) {
         if (bins[b] <= 0) {
             continue;
         }
         const double bh = ph * bins[b] / smax;
-        mi_rounded_rect(cr, left + bw * b + bw * 0.1, top + ph - bh, MAX(bw * 0.8, 1), bh, MIN(2.5, bw * 0.4));
+        ui_rounded_rect(cr, left + bw * b + bw * 0.1, top + ph - bh, MAX(bw * 0.8, 1), bh, MIN(2.5, bw * 0.4));
         cairo_fill(cr);
     }
 }
 
-static MiColor series_color(int k) {
+static UiColor series_color(int k) {
     switch (k) {
-        case MIWEAR_SERIES_PACE:
-        case MIWEAR_SERIES_SPEED:
-            return MI_COLOR_ACTIVE;
-        case MIWEAR_SERIES_CADENCE:
-        case MIWEAR_SERIES_STRIDE:
-            return MI_COLOR_STEPS;
-        case MIWEAR_SERIES_POWER:
-            return MI_COLOR_CALORIES;
-        case MIWEAR_SERIES_ALTITUDE:
-            return MI_COLOR_VITALITY;
-        case MIWEAR_SERIES_SPO2:
-            return MI_COLOR_SPO2;
-        case MIWEAR_SERIES_STRESS:
-            return MI_COLOR_STRESS;
-        case MIWEAR_SERIES_WATER_TEMP:
-            return MI_COLOR_HR;
-        case MIWEAR_SERIES_GROUND_CONTACT:
-        case MIWEAR_SERIES_VERTICAL_OSC:
-            return MI_COLOR_CYCLES;
+        case SALUS_SERIES_PACE:
+        case SALUS_SERIES_SPEED:
+            return UI_COLOR_ACTIVE;
+        case SALUS_SERIES_CADENCE:
+        case SALUS_SERIES_STRIDE:
+            return UI_COLOR_STEPS;
+        case SALUS_SERIES_POWER:
+            return UI_COLOR_CALORIES;
+        case SALUS_SERIES_ALTITUDE:
+            return UI_COLOR_VITALITY;
+        case SALUS_SERIES_SPO2:
+            return UI_COLOR_SPO2;
+        case SALUS_SERIES_STRESS:
+            return UI_COLOR_STRESS;
+        case SALUS_SERIES_WATER_TEMP:
+            return UI_COLOR_HR;
+        case SALUS_SERIES_GROUND_CONTACT:
+        case SALUS_SERIES_VERTICAL_OSC:
+            return UI_COLOR_CYCLES;
         default:
-            return MI_COLOR_SLEEP;
+            return UI_COLOR_SLEEP;
     }
 }
 
 static void format_series_value(int k, double v, gchar *buf, gsize len) {
-    if (k == MIWEAR_SERIES_PACE) {
+    if (k == SALUS_SERIES_PACE) {
         const int sec = (int)lround(v);
         g_snprintf(buf, len, "%d′%02d″", sec / 60, sec % 60);
-    } else if (k == MIWEAR_SERIES_SPEED || k == MIWEAR_SERIES_ALTITUDE || k == MIWEAR_SERIES_DEPTH ||
-               k == MIWEAR_SERIES_WATER_TEMP || k == MIWEAR_SERIES_VERTICAL_OSC) {
+    } else if (k == SALUS_SERIES_SPEED || k == SALUS_SERIES_ALTITUDE || k == SALUS_SERIES_DEPTH ||
+               k == SALUS_SERIES_WATER_TEMP || k == SALUS_SERIES_VERTICAL_OSC) {
         g_snprintf(buf, len, "%.1f", v);
     } else {
         g_snprintf(buf, len, "%.0f", v);
@@ -732,10 +732,10 @@ static void format_series_value(int k, double v, gchar *buf, gsize len) {
 }
 
 static void draw_detail_series(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
-    MiwearDashboardUi *dash = user_data;
+    SalusDashboardUi *dash = user_data;
     GtkWidget *w = GTK_WIDGET(area);
     const int k = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(area), "series"));
-    const MiwearWorkoutSummary *d = entry_detail(dash->sport_detail_entry);
+    const SalusWorkoutSummary *d = entry_detail(dash->sport_detail_entry);
     if (d == NULL || d->record_samples == NULL || d->record_samples->len < 2 || width < 80) {
         return;
     }
@@ -754,22 +754,22 @@ static void draw_detail_series(GtkDrawingArea *area, cairo_t *cr, int width, int
     if (!isfinite(lo)) {
         return;
     }
-    const double pad = MAX((hi - lo) * 0.1, k == MIWEAR_SERIES_PACE ? 10 : 1);
+    const double pad = MAX((hi - lo) * 0.1, k == SALUS_SERIES_PACE ? 10 : 1);
     lo -= pad;
     hi += pad;
-    const gboolean invert = k == MIWEAR_SERIES_PACE; /* faster (lower) pace up, as Mi Fitness does */
+    const gboolean invert = k == SALUS_SERIES_PACE; /* faster (lower) pace up, as Mi Fitness does */
 #define SX(b) (left + pw * ((b) + 0.5) / nb)
 #define SY(v) (top + ph * (invert ? ((v) - lo) / (hi - lo) : 1.0 - ((v) - lo) / (hi - lo)))
     for (int g = 0; g <= 3; g++) {
         const double v = lo + (hi - lo) * g / 3;
-        mi_cairo_set_fg(cr, w, g == (invert ? 3 : 0) ? 0.18 : 0.07);
+        ui_cairo_set_fg(cr, w, g == (invert ? 3 : 0) ? 0.18 : 0.07);
         cairo_set_line_width(cr, 1);
         cairo_move_to(cr, left, round(SY(v)) + 0.5);
         cairo_line_to(cr, left + pw, round(SY(v)) + 0.5);
         cairo_stroke(cr);
         gchar t[24];
         format_series_value(k, v, t, sizeof(t));
-        mi_draw_text(cr, w, t, left - 6, SY(v) + 3.5, 10.5, 0.55, 1.0);
+        ui_draw_text(cr, w, t, left - 6, SY(v) + 3.5, 10.5, 0.55, 1.0);
     }
     draw_time_axis(cr, w, left, pw, top + ph + 16, t_end);
 
@@ -794,10 +794,10 @@ static void draw_detail_series(GtkDrawingArea *area, cairo_t *cr, int width, int
                     cairo_line_to(cr, last_x, base);
                     cairo_line_to(cr, first_x, base);
                     cairo_close_path(cr);
-                    mi_cairo_set_color(cr, series_color(k), 0.14);
+                    ui_cairo_set_color(cr, series_color(k), 0.14);
                     cairo_fill(cr);
                 } else {
-                    mi_cairo_set_color(cr, series_color(k), 1.0);
+                    ui_cairo_set_color(cr, series_color(k), 1.0);
                     cairo_set_line_width(cr, 2.0);
                     cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
                     cairo_stroke(cr);
@@ -811,16 +811,16 @@ static void draw_detail_series(GtkDrawingArea *area, cairo_t *cr, int width, int
 }
 
 /* avg / max (min for pace) of a series, FALSE when it was never recorded. */
-static gboolean series_stats(const MiwearWorkoutSummary *d, int k, double *avg, double *best) {
+static gboolean series_stats(const SalusWorkoutSummary *d, int k, double *avg, double *best) {
     double sum = 0;
     guint n = 0;
-    *best = k == MIWEAR_SERIES_PACE ? INFINITY : -INFINITY;
+    *best = k == SALUS_SERIES_PACE ? INFINITY : -INFINITY;
     for (guint i = 0; i < d->record_samples->len; i++) {
-        const double v = g_array_index(d->record_samples, MiwearWorkoutSample, i).v[k];
+        const double v = g_array_index(d->record_samples, SalusWorkoutSample, i).v[k];
         if (!isnan(v)) {
             sum += v;
             n++;
-            *best = k == MIWEAR_SERIES_PACE ? MIN(*best, v) : MAX(*best, v);
+            *best = k == SALUS_SERIES_PACE ? MIN(*best, v) : MAX(*best, v);
         }
     }
     *avg = n > 0 ? sum / n : 0;
@@ -829,14 +829,14 @@ static gboolean series_stats(const MiwearWorkoutSummary *d, int k, double *avg, 
 
 static void draw_detail_route(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
     (void)area;
-    MiwearDashboardUi *dash = user_data;
-    const MiwearWorkoutSummary *d = entry_detail(dash->sport_detail_entry);
+    SalusDashboardUi *dash = user_data;
+    const SalusWorkoutSummary *d = entry_detail(dash->sport_detail_entry);
     if (d == NULL || d->gps_track == NULL || d->gps_track->len < 2) {
         return;
     }
     double min_lat = 90, max_lat = -90, min_lon = 180, max_lon = -180;
     for (guint i = 0; i < d->gps_track->len; i++) {
-        const MiwearWorkoutGpsPoint *p = &g_array_index(d->gps_track, MiwearWorkoutGpsPoint, i);
+        const SalusWorkoutGpsPoint *p = &g_array_index(d->gps_track, SalusWorkoutGpsPoint, i);
         min_lat = MIN(min_lat, p->lat);
         max_lat = MAX(max_lat, p->lat);
         min_lon = MIN(min_lon, p->lon);
@@ -854,14 +854,14 @@ static void draw_detail_route(GtkDrawingArea *area, cairo_t *cr, int width, int 
     cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
     for (int pass = 0; pass < 2; pass++) {
         if (pass == 0) {
-            mi_cairo_set_color(cr, MI_COLOR_STEPS, 0.25);
+            ui_cairo_set_color(cr, UI_COLOR_STEPS, 0.25);
             cairo_set_line_width(cr, 8);
         } else {
-            mi_cairo_set_color(cr, MI_COLOR_STEPS, 1.0);
+            ui_cairo_set_color(cr, UI_COLOR_STEPS, 1.0);
             cairo_set_line_width(cr, 3);
         }
         for (guint i = 0; i < d->gps_track->len; i++) {
-            const MiwearWorkoutGpsPoint *p = &g_array_index(d->gps_track, MiwearWorkoutGpsPoint, i);
+            const SalusWorkoutGpsPoint *p = &g_array_index(d->gps_track, SalusWorkoutGpsPoint, i);
             if (i == 0) {
                 cairo_move_to(cr, RX(p), RY(p));
             } else {
@@ -870,18 +870,18 @@ static void draw_detail_route(GtkDrawingArea *area, cairo_t *cr, int width, int 
         }
         cairo_stroke(cr);
     }
-    const MiwearWorkoutGpsPoint *a = &g_array_index(d->gps_track, MiwearWorkoutGpsPoint, 0);
-    const MiwearWorkoutGpsPoint *b = &g_array_index(d->gps_track, MiwearWorkoutGpsPoint, d->gps_track->len - 1);
+    const SalusWorkoutGpsPoint *a = &g_array_index(d->gps_track, SalusWorkoutGpsPoint, 0);
+    const SalusWorkoutGpsPoint *b = &g_array_index(d->gps_track, SalusWorkoutGpsPoint, d->gps_track->len - 1);
     cairo_set_source_rgb(cr, 1, 1, 1);
     cairo_arc(cr, RX(a), RY(a), 7, 0, 2 * G_PI);
     cairo_fill(cr);
-    mi_cairo_set_color(cr, MI_COLOR_STEPS, 1.0);
+    ui_cairo_set_color(cr, UI_COLOR_STEPS, 1.0);
     cairo_arc(cr, RX(a), RY(a), 5, 0, 2 * G_PI);
     cairo_fill(cr);
     cairo_set_source_rgb(cr, 1, 1, 1);
     cairo_arc(cr, RX(b), RY(b), 7, 0, 2 * G_PI);
     cairo_fill(cr);
-    mi_cairo_set_color(cr, MI_COLOR_HR, 1.0);
+    ui_cairo_set_color(cr, UI_COLOR_HR, 1.0);
     cairo_arc(cr, RX(b), RY(b), 5, 0, 2 * G_PI);
     cairo_fill(cr);
 #undef RX
@@ -894,9 +894,9 @@ static void add_stat_tile(GtkWidget *flow, const char *caption, const char *valu
     }
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
     gtk_widget_add_css_class(box, "card");
-    gtk_widget_add_css_class(box, "mi-card");
-    gtk_box_append(GTK_BOX(box), mi_label(caption, "caption dimmed", 0.0f));
-    gtk_box_append(GTK_BOX(box), mi_label(value, "mi-stat-value numeric", 0.0f));
+    gtk_widget_add_css_class(box, "salus-card");
+    gtk_box_append(GTK_BOX(box), ui_label(caption, "caption dimmed", 0.0f));
+    gtk_box_append(GTK_BOX(box), ui_label(value, "salus-stat-value numeric", 0.0f));
     gtk_flow_box_append(GTK_FLOW_BOX(flow), box);
 }
 
@@ -949,7 +949,7 @@ static void format_metric(MetricFmt fmt, double v, int sport, gchar *buf, gsize 
         case MF_BPM: g_snprintf(buf, len, "%d bpm", n); break;
         case MF_PACE: {
             gchar p[32];
-            miwear_format_walk_pace(n, p, sizeof(p));
+            salus_format_walk_pace(n, p, sizeof(p));
             g_snprintf(buf, len, "%s %s", p, sport == 9 || sport == 10 ? "/100 m" : "/km");
             break;
         }
@@ -968,7 +968,7 @@ static void format_metric(MetricFmt fmt, double v, int sport, gchar *buf, gsize 
         case MF_FLOAT1: g_snprintf(buf, len, "%.1f", v); break;
         case MF_PLUS: g_snprintf(buf, len, "+%d", n); break;
         case MF_LEVEL: g_snprintf(buf, len, "%d / 100", n); break;
-        case MF_STROKE: g_strlcpy(buf, miwear_swim_stroke_name(n), len); break;
+        case MF_STROKE: g_strlcpy(buf, salus_swim_stroke_name(n), len); break;
         case MF_LANDING: {
             static const char *k[] = {"—", "Whole foot", "Forefoot", "Heel"};
             g_strlcpy(buf, n >= 1 && n <= 3 ? k[n] : "—", len);
@@ -976,7 +976,7 @@ static void format_metric(MetricFmt fmt, double v, int sport, gchar *buf, gsize 
         }
         default: {
             gchar t[32];
-            mi_format_thousands(n, t, sizeof(t));
+            ui_format_thousands(n, t, sizeof(t));
             g_strlcpy(buf, t, len);
             break;
         }
@@ -984,21 +984,21 @@ static void format_metric(MetricFmt fmt, double v, int sport, gchar *buf, gsize 
 }
 
 /* Tiles for every catalogued metric the workout reported (non-zero). TRUE when any was added. */
-static gboolean add_metric_tiles(GtkWidget *flow, const MiwearWorkoutSummary *d, int sport) {
+static gboolean add_metric_tiles(GtkWidget *flow, const SalusWorkoutSummary *d, int sport) {
     if (d == NULL || d->metrics == NULL || d->metrics->len == 0) {
         return FALSE;
     }
     gboolean any = FALSE;
     for (size_t i = 0; i < G_N_ELEMENTS(metric_defs); i++) {
         const MetricDef *m = &metric_defs[i];
-        if (!miwear_workout_has_metric(d, m->id)) {
+        if (!salus_workout_has_metric(d, m->id)) {
             continue;
         }
-        const double v = miwear_workout_metric(d, m->id, 0);
+        const double v = salus_workout_metric(d, m->id, 0);
         if (v == 0 && m->fmt != MF_STROKE) {
             continue;
         }
-        if (m->id == 6 && miwear_workout_metric(d, 7, 0) <= 0) {
+        if (m->id == 6 && salus_workout_metric(d, 7, 0) <= 0) {
             continue; /* active calories already shown as the workout's calories */
         }
         gchar buf[64];
@@ -1009,7 +1009,7 @@ static gboolean add_metric_tiles(GtkWidget *flow, const MiwearWorkoutSummary *d,
     return any;
 }
 
-static GtkWidget *zones_card(const MiwearWorkoutHrZones *z) {
+static GtkWidget *zones_card(const SalusWorkoutHrZones *z) {
     const int secs[5] = {z->zone1_sec, z->zone2_sec, z->zone3_sec, z->zone4_sec, z->zone5_sec};
     const int lows[5] = {z->zone1_lower_bpm, z->zone2_lower_bpm, z->zone3_lower_bpm, z->zone4_lower_bpm,
                          z->zone5_lower_bpm};
@@ -1023,27 +1023,27 @@ static GtkWidget *zones_card(const MiwearWorkoutHrZones *z) {
         return NULL;
     }
     GtkWidget *inner = NULL;
-    GtkWidget *card = mi_card_new(&inner, 10);
-    gtk_box_append(GTK_BOX(inner), mi_card_header("Heart Rate Zones", NULL, NULL));
+    GtkWidget *card = ui_card_new(&inner, 10);
+    gtk_box_append(GTK_BOX(inner), ui_card_header("Heart Rate Zones", NULL, NULL));
     for (int i = 4; i >= 0; i--) {
         GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
         GtkWidget *names_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
         gtk_widget_set_size_request(names_box, 92, -1);
-        gtk_box_append(GTK_BOX(names_box), mi_label(names[i], NULL, 0.0f));
+        gtk_box_append(GTK_BOX(names_box), ui_label(names[i], NULL, 0.0f));
         gchar range[32];
         g_snprintf(range, sizeof(range), "≥ %d bpm", lows[i]);
-        gtk_box_append(GTK_BOX(names_box), mi_label(range, "caption dimmed", 0.0f));
+        gtk_box_append(GTK_BOX(names_box), ui_label(range, "caption dimmed", 0.0f));
         GtkWidget *bar = gtk_level_bar_new_for_interval(0, max);
         gtk_level_bar_set_value(GTK_LEVEL_BAR(bar), secs[i]);
         gtk_level_bar_remove_offset_value(GTK_LEVEL_BAR(bar), GTK_LEVEL_BAR_OFFSET_LOW);
         gtk_level_bar_remove_offset_value(GTK_LEVEL_BAR(bar), GTK_LEVEL_BAR_OFFSET_HIGH);
         gtk_level_bar_remove_offset_value(GTK_LEVEL_BAR(bar), GTK_LEVEL_BAR_OFFSET_FULL);
-        gtk_widget_add_css_class(bar, mi_color_css_class(zone_colors[i]));
+        gtk_widget_add_css_class(bar, ui_color_css_class(zone_colors[i]));
         gtk_widget_set_hexpand(bar, TRUE);
         gtk_widget_set_valign(bar, GTK_ALIGN_CENTER);
         gchar t[32];
         g_snprintf(t, sizeof(t), "%d min · %d%%", secs[i] / 60, (int)lround(100.0 * secs[i] / total));
-        GtkWidget *tl = mi_label(t, "numeric", 1.0f);
+        GtkWidget *tl = ui_label(t, "numeric", 1.0f);
         gtk_widget_set_size_request(tl, 96, -1);
         gtk_box_append(GTK_BOX(row), names_box);
         gtk_box_append(GTK_BOX(row), bar);
@@ -1055,32 +1055,32 @@ static GtkWidget *zones_card(const MiwearWorkoutHrZones *z) {
 
 static void on_detail_hidden(AdwNavigationPage *page, gpointer user_data) {
     (void)page;
-    MiwearDashboardUi *dash = user_data;
+    SalusDashboardUi *dash = user_data;
     dash->sport_detail_entry = NULL;
     dash->sport_detail_page = NULL;
 }
 
-static void open_detail(AppState *state, MiwearSportEntry *e) {
-    MiwearDashboardUi *dash = state->dash_ui;
-    const MiwearWorkoutSummary *d = entry_detail(e);
+static void open_detail(AppState *state, SalusSportEntry *e) {
+    SalusDashboardUi *dash = state->dash_ui;
+    const SalusWorkoutSummary *d = entry_detail(e);
     dash->sport_detail_entry = e;
 
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-    gtk_widget_add_css_class(box, "mi-page");
+    gtk_widget_add_css_class(box, "salus-page");
 
     /* Hero */
     GtkWidget *inner = NULL;
-    GtkWidget *hero = mi_card_new(&inner, 14);
+    GtkWidget *hero = ui_card_new(&inner, 14);
     GtkWidget *head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    GtkWidget *icon = mi_icon(sport_icon(e), MI_COLOR_STEPS, 24);
-    gtk_widget_add_css_class(icon, "mi-bubble");
+    GtkWidget *icon = ui_icon(sport_icon(e), UI_COLOR_STEPS, 24);
+    gtk_widget_add_css_class(icon, "salus-bubble");
     gtk_widget_set_valign(icon, GTK_ALIGN_CENTER);
     GtkWidget *texts = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-    gtk_box_append(GTK_BOX(texts), mi_label(e->label != NULL ? e->label : "Workout", "title-3", 0.0f));
+    gtk_box_append(GTK_BOX(texts), ui_label(e->label != NULL ? e->label : "Workout", "title-3", 0.0f));
     GDateTime *dt = g_date_time_new_from_unix_local((gint64)entry_start(e));
     gchar *when = g_date_time_format(dt, "%A, %-d %B %Y · %H:%M");
     g_date_time_unref(dt);
-    gtk_box_append(GTK_BOX(texts), mi_label(when, "dimmed", 0.0f));
+    gtk_box_append(GTK_BOX(texts), ui_label(when, "dimmed", 0.0f));
     gtk_box_append(GTK_BOX(head), icon);
     gtk_box_append(GTK_BOX(head), texts);
     gtk_box_append(GTK_BOX(inner), head);
@@ -1089,19 +1089,19 @@ static void open_detail(AppState *state, MiwearSportEntry *e) {
     const int distance = d != NULL && d->distance_m > 0 ? d->distance_m : e->distance_m;
     const int calories = d != NULL && d->calories > 0 ? d->calories : e->calories;
     const int hr_avg = d != NULL && d->hr_avg > 0 ? d->hr_avg : e->hr_avg;
-    GtkWidget *strip = mi_stat_flow_new();
+    GtkWidget *strip = ui_stat_flow_new();
     GtkWidget *v;
     gchar buf[128];
-    mi_stat_flow_append(strip, mi_stat_new("Duration", &v));
+    ui_stat_flow_append(strip, ui_stat_new("Duration", &v));
     format_duration(duration, buf, sizeof(buf));
     gtk_label_set_text(GTK_LABEL(v), buf);
-    mi_stat_flow_append(strip, mi_stat_new("Distance", &v));
+    ui_stat_flow_append(strip, ui_stat_new("Distance", &v));
     format_distance(distance, buf, sizeof(buf));
     gtk_label_set_text(GTK_LABEL(v), buf);
-    mi_stat_flow_append(strip, mi_stat_new("Calories", &v));
+    ui_stat_flow_append(strip, ui_stat_new("Calories", &v));
     g_snprintf(buf, sizeof(buf), calories > 0 ? "%d kcal" : "—", calories);
     gtk_label_set_text(GTK_LABEL(v), buf);
-    mi_stat_flow_append(strip, mi_stat_new("Avg heart rate", &v));
+    ui_stat_flow_append(strip, ui_stat_new("Avg heart rate", &v));
     g_snprintf(buf, sizeof(buf), hr_avg > 0 ? "%d bpm" : "—", hr_avg);
     gtk_label_set_text(GTK_LABEL(v), buf);
     gtk_box_append(GTK_BOX(inner), strip);
@@ -1127,13 +1127,13 @@ static void open_detail(AppState *state, MiwearSportEntry *e) {
         if (d->has_swim_detail) {
             g_snprintf(t, sizeof(t), "%d", d->swim_lengths);
             add_stat_tile(flow, "Lengths", d->swim_lengths > 0 ? t : NULL);
-            miwear_format_swim_pace(d->swim_avg_pace_sec_per_100m, t, sizeof(t));
+            salus_format_swim_pace(d->swim_avg_pace_sec_per_100m, t, sizeof(t));
             if (d->swim_avg_pace_sec_per_100m > 0) {
                 gchar p[64];
                 g_snprintf(p, sizeof(p), "%s /100 m", t);
                 add_stat_tile(flow, "Avg pace", p);
             }
-            add_stat_tile(flow, "Main stroke", miwear_swim_stroke_name(d->swim_main_stroke));
+            add_stat_tile(flow, "Main stroke", salus_swim_stroke_name(d->swim_main_stroke));
             g_snprintf(t, sizeof(t), "%d", d->swim_avg_swolf);
             add_stat_tile(flow, "Avg SWOLF", d->swim_avg_swolf > 0 ? t : NULL);
             g_snprintf(t, sizeof(t), "%d", d->swim_total_strokes);
@@ -1148,7 +1148,7 @@ static void open_detail(AppState *state, MiwearSportEntry *e) {
             if (pace_sec <= 0 && distance > 0 && duration > 0) {
                 pace_sec = (int)((uint64_t)duration * 1000u / (uint32_t)distance);
             }
-            miwear_format_walk_pace(pace_sec, pace, sizeof(pace));
+            salus_format_walk_pace(pace_sec, pace, sizeof(pace));
             if (pace_sec > 0) {
                 g_snprintf(t, sizeof(t), "%s /km", pace);
                 add_stat_tile(flow, "Avg pace", t);
@@ -1158,7 +1158,7 @@ static void open_detail(AppState *state, MiwearSportEntry *e) {
                 add_stat_tile(flow, "Avg speed", t);
             }
             if (d->walk_steps > 0) {
-                mi_format_thousands(d->walk_steps, t, sizeof(t));
+                ui_format_thousands(d->walk_steps, t, sizeof(t));
                 add_stat_tile(flow, "Steps", t);
             }
             g_snprintf(t, sizeof(t), "%d spm", d->walk_avg_cadence_spm);
@@ -1184,7 +1184,7 @@ static void open_detail(AppState *state, MiwearSportEntry *e) {
     if (d != NULL && d->record_samples != NULL && d->record_samples->len >= 2) {
         gboolean any_hr = FALSE, any_steps = FALSE;
         for (guint i = 0; i < d->record_samples->len; i++) {
-            const MiwearWorkoutSample *smp = &g_array_index(d->record_samples, MiwearWorkoutSample, i);
+            const SalusWorkoutSample *smp = &g_array_index(d->record_samples, SalusWorkoutSample, i);
             any_hr |= smp->hr > 0;
             any_steps |= smp->steps_delta > 0;
         }
@@ -1192,8 +1192,8 @@ static void open_detail(AppState *state, MiwearSportEntry *e) {
         GtkWidget *card = NULL;
         GtkWidget *area = NULL;
         if (any_hr) {
-            card = mi_card_new(&inner, 10);
-            gtk_box_append(GTK_BOX(inner), mi_card_header("Heart Rate", &sub, NULL));
+            card = ui_card_new(&inner, 10);
+            gtk_box_append(GTK_BOX(inner), ui_card_header("Heart Rate", &sub, NULL));
             g_snprintf(buf, sizeof(buf), "avg %d · max %d · min %d bpm · dashed line = average", d->hr_avg, d->hr_max,
                        d->hr_min);
             gtk_label_set_text(GTK_LABEL(sub), buf);
@@ -1205,18 +1205,18 @@ static void open_detail(AppState *state, MiwearSportEntry *e) {
         }
 
         /* One chart per series the band recorded (distance and calories are per-second deltas). */
-        for (int k = 0; k < MIWEAR_SERIES_COUNT; k++) {
+        for (int k = 0; k < SALUS_SERIES_COUNT; k++) {
             double avg = 0, best = 0;
-            if (k == MIWEAR_SERIES_DISTANCE || k == MIWEAR_SERIES_CALORIES || !series_stats(d, k, &avg, &best)) {
+            if (k == SALUS_SERIES_DISTANCE || k == SALUS_SERIES_CALORIES || !series_stats(d, k, &avg, &best)) {
                 continue;
             }
             gchar a[24], m[24];
             format_series_value(k, avg, a, sizeof(a));
             format_series_value(k, best, m, sizeof(m));
-            card = mi_card_new(&inner, 10);
-            gtk_box_append(GTK_BOX(inner), mi_card_header(miwear_series_title(k), &sub, NULL));
-            g_snprintf(buf, sizeof(buf), "avg %s · %s %s %s", a, k == MIWEAR_SERIES_PACE ? "best" : "max", m,
-                       miwear_series_unit(k));
+            card = ui_card_new(&inner, 10);
+            gtk_box_append(GTK_BOX(inner), ui_card_header(salus_series_title(k), &sub, NULL));
+            g_snprintf(buf, sizeof(buf), "avg %s · %s %s %s", a, k == SALUS_SERIES_PACE ? "best" : "max", m,
+                       salus_series_unit(k));
             gtk_label_set_text(GTK_LABEL(sub), buf);
             area = gtk_drawing_area_new();
             gtk_widget_set_size_request(area, -1, 140);
@@ -1227,8 +1227,8 @@ static void open_detail(AppState *state, MiwearSportEntry *e) {
         }
 
         if (any_steps) {
-            card = mi_card_new(&inner, 10);
-            gtk_box_append(GTK_BOX(inner), mi_card_header("Steps", &sub, NULL));
+            card = ui_card_new(&inner, 10);
+            gtk_box_append(GTK_BOX(inner), ui_card_header("Steps", &sub, NULL));
             gtk_label_set_text(GTK_LABEL(sub), "Steps over the workout");
             area = gtk_drawing_area_new();
             gtk_widget_set_size_request(area, -1, 120);
@@ -1245,8 +1245,8 @@ static void open_detail(AppState *state, MiwearSportEntry *e) {
     }
     if (d != NULL && d->gps_track != NULL && d->gps_track->len >= 2) {
         GtkWidget *sub = NULL;
-        GtkWidget *card = mi_card_new(&inner, 10);
-        gtk_box_append(GTK_BOX(inner), mi_card_header("Route", &sub, NULL));
+        GtkWidget *card = ui_card_new(&inner, 10);
+        gtk_box_append(GTK_BOX(inner), ui_card_header("Route", &sub, NULL));
         g_snprintf(buf, sizeof(buf), "%u GPS points · green = start, red = finish", d->gps_track->len);
         gtk_label_set_text(GTK_LABEL(sub), buf);
         GtkWidget *area = gtk_drawing_area_new();
@@ -1256,7 +1256,7 @@ static void open_detail(AppState *state, MiwearSportEntry *e) {
         gtk_box_append(GTK_BOX(box), card);
     }
 
-    GtkWidget *scroll = mi_page_scroll(box, 960);
+    GtkWidget *scroll = ui_page_scroll(box, 960);
 
     GtkWidget *tb = adw_toolbar_view_new();
     GtkWidget *header = adw_header_bar_new();
@@ -1278,18 +1278,18 @@ static void open_detail(AppState *state, MiwearSportEntry *e) {
 
 static void on_row_activated(AdwActionRow *row, gpointer user_data) {
     AppState *state = user_data;
-    MiwearSportEntry *e = g_object_get_data(G_OBJECT(row), "mi-entry");
+    SalusSportEntry *e = g_object_get_data(G_OBJECT(row), "salus-entry");
     if (e != NULL && g_list_find(state->sport_entries, e) != NULL) {
         open_detail(state, e);
     }
 }
 
-void miwear_sport_rebuild_list(AppState *state) {
-    MiwearDashboardUi *dash = state != NULL ? state->dash_ui : NULL;
+void salus_sport_rebuild_list(AppState *state) {
+    SalusDashboardUi *dash = state != NULL ? state->dash_ui : NULL;
     if (dash == NULL || dash->sport_list_box == NULL) {
         return;
     }
-    mi_clear_box(dash->sport_list_box);
+    ui_clear_box(dash->sport_list_box);
     GList *sorted = g_list_sort(g_list_copy(state->sport_entries), sport_entry_time_cmp);
     const gboolean empty = sorted == NULL;
     gtk_widget_set_visible(dash->sport_empty, empty);
@@ -1299,7 +1299,7 @@ void miwear_sport_rebuild_list(AppState *state) {
     const gint64 now = g_get_real_time() / G_USEC_PER_SEC;
     int count = 0, dist = 0, dur = 0, cal = 0;
     for (GList *l = sorted; l != NULL; l = l->next) {
-        const MiwearSportEntry *e = l->data;
+        const SalusSportEntry *e = l->data;
         if ((gint64)entry_start(e) >= now - 30 * 86400) {
             count++;
             dist += MAX(e->distance_m, 0);
@@ -1307,11 +1307,11 @@ void miwear_sport_rebuild_list(AppState *state) {
             cal += MAX(e->calories, 0);
         }
     }
-    GtkWidget **values = g_object_get_data(G_OBJECT(dash->sport_summary), "mi-values");
+    GtkWidget **values = g_object_get_data(G_OBJECT(dash->sport_summary), "salus-values");
     gchar buf[32];
     g_snprintf(buf, sizeof(buf), "%d", count);
     gtk_label_set_text(GTK_LABEL(values[0]), buf);
-    mi_format_minutes(dur / 60, buf, sizeof(buf));
+    ui_format_minutes(dur / 60, buf, sizeof(buf));
     gtk_label_set_text(GTK_LABEL(values[1]), buf);
     format_distance(dist, buf, sizeof(buf));
     gtk_label_set_text(GTK_LABEL(values[2]), dist > 0 ? buf : "—");
@@ -1321,7 +1321,7 @@ void miwear_sport_rebuild_list(AppState *state) {
     GtkWidget *group = NULL;
     gchar *group_key = NULL;
     for (GList *l = sorted; l != NULL; l = l->next) {
-        MiwearSportEntry *e = l->data;
+        SalusSportEntry *e = l->data;
         GDateTime *dt = g_date_time_new_from_unix_local((gint64)entry_start(e));
         gchar *month = g_date_time_format(dt, "%B %Y");
         if (group == NULL || g_strcmp0(month, group_key) != 0) {
@@ -1347,8 +1347,8 @@ void miwear_sport_rebuild_list(AppState *state) {
         adw_action_row_set_subtitle(ADW_ACTION_ROW(row), sub->str);
         g_string_free(sub, TRUE);
         g_free(when);
-        GtkWidget *icon = mi_icon(sport_icon(e), MI_COLOR_STEPS, 18);
-        gtk_widget_add_css_class(icon, "mi-bubble");
+        GtkWidget *icon = ui_icon(sport_icon(e), UI_COLOR_STEPS, 18);
+        gtk_widget_add_css_class(icon, "salus-bubble");
         gtk_widget_set_valign(icon, GTK_ALIGN_CENTER);
         adw_action_row_add_prefix(ADW_ACTION_ROW(row), icon);
         gchar dist_txt[32];
@@ -1359,11 +1359,11 @@ void miwear_sport_rebuild_list(AppState *state) {
         } else {
             dist_txt[0] = '\0';
         }
-        GtkWidget *suffix = mi_label(dist_txt, "heading numeric", 1.0f);
+        GtkWidget *suffix = ui_label(dist_txt, "heading numeric", 1.0f);
         adw_action_row_add_suffix(ADW_ACTION_ROW(row), suffix);
         adw_action_row_add_suffix(ADW_ACTION_ROW(row), gtk_image_new_from_icon_name("go-next-symbolic"));
         gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), TRUE);
-        g_object_set_data(G_OBJECT(row), "mi-entry", e);
+        g_object_set_data(G_OBJECT(row), "salus-entry", e);
         g_signal_connect(row, "activated", G_CALLBACK(on_row_activated), state);
         adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), row);
     }
@@ -1372,15 +1372,15 @@ void miwear_sport_rebuild_list(AppState *state) {
     refresh_training_cards(state);
 }
 
-void mi_workouts_refresh_training(AppState *state) {
+void ui_workouts_refresh_training(AppState *state) {
     if (state != NULL && state->dash_ui != NULL && state->dash_ui->sport_list_box != NULL) {
         refresh_training_cards(state);
     }
 }
 
-GtkWidget *mi_workouts_page_new(AppState *state, MiwearDashboardUi *dash) {
+GtkWidget *ui_workouts_page_new(AppState *state, SalusDashboardUi *dash) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 18);
-    gtk_widget_add_css_class(box, "mi-page");
+    gtk_widget_add_css_class(box, "salus-page");
 
     /* Training load + VO2 max, side by side when there is room. */
     GtkWidget *training = gtk_flow_box_new();
@@ -1391,41 +1391,41 @@ GtkWidget *mi_workouts_page_new(AppState *state, MiwearDashboardUi *dash) {
     gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(training), 12);
     gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(training), 12);
     GtkWidget *load_box = NULL, *vo2_box = NULL;
-    GtkWidget *load_card = mi_card_new(&load_box, 10);
-    GtkWidget *vo2_card = mi_card_new(&vo2_box, 10);
+    GtkWidget *load_card = ui_card_new(&load_box, 10);
+    GtkWidget *vo2_card = ui_card_new(&vo2_box, 10);
     gtk_widget_set_size_request(load_card, 280, -1);
     gtk_widget_set_size_request(vo2_card, 280, -1);
-    mi_stat_flow_append(training, load_card);
-    mi_stat_flow_append(training, vo2_card);
+    ui_stat_flow_append(training, load_card);
+    ui_stat_flow_append(training, vo2_card);
     gtk_box_append(GTK_BOX(box), training);
 
     GtkWidget *inner = NULL;
-    dash->sport_summary = mi_card_new(&inner, 12);
+    dash->sport_summary = ui_card_new(&inner, 12);
     gtk_widget_set_visible(dash->sport_summary, FALSE);
-    gtk_box_append(GTK_BOX(inner), mi_label("Last 30 Days", "heading", 0.0f));
-    GtkWidget *strip = mi_stat_flow_new();
+    gtk_box_append(GTK_BOX(inner), ui_label("Last 30 Days", "heading", 0.0f));
+    GtkWidget *strip = ui_stat_flow_new();
     GtkWidget **vals = g_new0(GtkWidget *, 4);
-    mi_stat_flow_append(strip, mi_stat_new("Workouts", &vals[0]));
-    mi_stat_flow_append(strip, mi_stat_new("Active time", &vals[1]));
-    mi_stat_flow_append(strip, mi_stat_new("Distance", &vals[2]));
-    mi_stat_flow_append(strip, mi_stat_new("Calories", &vals[3]));
+    ui_stat_flow_append(strip, ui_stat_new("Workouts", &vals[0]));
+    ui_stat_flow_append(strip, ui_stat_new("Active time", &vals[1]));
+    ui_stat_flow_append(strip, ui_stat_new("Distance", &vals[2]));
+    ui_stat_flow_append(strip, ui_stat_new("Calories", &vals[3]));
     gtk_box_append(GTK_BOX(inner), strip);
-    g_object_set_data_full(G_OBJECT(dash->sport_summary), "mi-values", vals, g_free);
+    g_object_set_data_full(G_OBJECT(dash->sport_summary), "salus-values", vals, g_free);
     gtk_box_append(GTK_BOX(box), dash->sport_summary);
 
     dash->sport_empty = adw_status_page_new();
-    adw_status_page_set_icon_name(ADW_STATUS_PAGE(dash->sport_empty), "miwear-run-symbolic");
+    adw_status_page_set_icon_name(ADW_STATUS_PAGE(dash->sport_empty), "salus-run-symbolic");
     adw_status_page_set_title(ADW_STATUS_PAGE(dash->sport_empty), "No Workouts Yet");
     adw_status_page_set_description(ADW_STATUS_PAGE(dash->sport_empty),
                                     "Workouts recorded on the band show up here after a sync.");
     gtk_box_append(GTK_BOX(box), dash->sport_empty);
 
     dash->sport_list_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 18);
-    g_object_set_data(G_OBJECT(dash->sport_list_box), "mi-load-box", load_box);
-    g_object_set_data(G_OBJECT(dash->sport_list_box), "mi-vo2-box", vo2_box);
+    g_object_set_data(G_OBJECT(dash->sport_list_box), "salus-load-box", load_box);
+    g_object_set_data(G_OBJECT(dash->sport_list_box), "salus-vo2-box", vo2_box);
     gtk_box_append(GTK_BOX(box), dash->sport_list_box);
 
-    GtkWidget *scroll = mi_page_scroll(box, 960);
-    miwear_sport_rebuild_list(state);
+    GtkWidget *scroll = ui_page_scroll(box, 960);
+    salus_sport_rebuild_list(state);
     return scroll;
 }

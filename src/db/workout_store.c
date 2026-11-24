@@ -1,13 +1,13 @@
-#include "miwear/db/workout_store.h"
+#include "salus/db/workout_store.h"
 
 #include <math.h>
 #include <stdlib.h>
 
-#include "miwear/activity/workout_record.h"
+#include "salus/activity/workout_record.h"
 
 #include <json-glib/json-glib.h>
 
-static void json_add_hr_zones(JsonBuilder *b, const MiwearWorkoutHrZones *z) {
+static void json_add_hr_zones(JsonBuilder *b, const SalusWorkoutHrZones *z) {
     if (b == NULL || z == NULL) {
         return;
     }
@@ -36,17 +36,17 @@ static void json_add_hr_zones(JsonBuilder *b, const MiwearWorkoutHrZones *z) {
     json_builder_end_object(b);
 }
 
-static void json_add_series(JsonBuilder *b, const MiwearWorkoutSummary *summary) {
+static void json_add_series(JsonBuilder *b, const SalusWorkoutSummary *summary) {
     json_builder_set_member_name(b, "record_interval_sec");
     json_builder_add_int_value(b, summary->record_interval_sec);
     /* Rows are [offset, hr, steps, <record_series values…>]; only series present in some sample
      * get a column, a missing value is null. */
-    int cols[MIWEAR_SERIES_COUNT];
+    int cols[SALUS_SERIES_COUNT];
     int ncols = 0;
     if (summary->record_samples != NULL) {
-        for (int k = 0; k < MIWEAR_SERIES_COUNT; k++) {
+        for (int k = 0; k < SALUS_SERIES_COUNT; k++) {
             for (guint i = 0; i < summary->record_samples->len; i++) {
-                if (!isnan(g_array_index(summary->record_samples, MiwearWorkoutSample, i).v[k])) {
+                if (!isnan(g_array_index(summary->record_samples, SalusWorkoutSample, i).v[k])) {
                     cols[ncols++] = k;
                     break;
                 }
@@ -56,14 +56,14 @@ static void json_add_series(JsonBuilder *b, const MiwearWorkoutSummary *summary)
     json_builder_set_member_name(b, "record_series");
     json_builder_begin_array(b);
     for (int c = 0; c < ncols; c++) {
-        json_builder_add_string_value(b, miwear_series_key((MiwearRecordSeries)cols[c]));
+        json_builder_add_string_value(b, salus_series_key((SalusRecordSeries)cols[c]));
     }
     json_builder_end_array(b);
     json_builder_set_member_name(b, "record_samples");
     json_builder_begin_array(b);
     if (summary->record_samples != NULL) {
         for (guint i = 0; i < summary->record_samples->len; i++) {
-            const MiwearWorkoutSample *s = &g_array_index(summary->record_samples, MiwearWorkoutSample, i);
+            const SalusWorkoutSample *s = &g_array_index(summary->record_samples, SalusWorkoutSample, i);
             json_builder_begin_array(b);
             json_builder_add_int_value(b, (gint64)s->offset_sec);
             json_builder_add_int_value(b, (gint64)s->hr);
@@ -84,7 +84,7 @@ static void json_add_series(JsonBuilder *b, const MiwearWorkoutSummary *summary)
     json_builder_begin_array(b);
     if (summary->gps_track != NULL) {
         for (guint i = 0; i < summary->gps_track->len; i++) {
-            const MiwearWorkoutGpsPoint *p = &g_array_index(summary->gps_track, MiwearWorkoutGpsPoint, i);
+            const SalusWorkoutGpsPoint *p = &g_array_index(summary->gps_track, SalusWorkoutGpsPoint, i);
             json_builder_begin_array(b);
             json_builder_add_double_value(b, p->lat);
             json_builder_add_double_value(b, p->lon);
@@ -94,29 +94,29 @@ static void json_add_series(JsonBuilder *b, const MiwearWorkoutSummary *summary)
     json_builder_end_array(b);
 }
 
-static void read_series(JsonObject *o, MiwearWorkoutSummary *summary) {
-    miwear_workout_summary_free_series(summary);
+static void read_series(JsonObject *o, SalusWorkoutSummary *summary) {
+    salus_workout_summary_free_series(summary);
     if (json_object_has_member(o, "record_interval_sec")) {
         summary->record_interval_sec = (int)json_object_get_int_member(o, "record_interval_sec");
     }
-    int cols[MIWEAR_SERIES_COUNT];
+    int cols[SALUS_SERIES_COUNT];
     guint ncols = 0;
     if (json_object_has_member(o, "record_series")) {
         JsonArray *keys = json_object_get_array_member(o, "record_series");
-        for (guint c = 0; keys != NULL && c < json_array_get_length(keys) && ncols < MIWEAR_SERIES_COUNT; c++) {
-            cols[ncols++] = miwear_series_from_key(json_array_get_string_element(keys, c)); /* -1: skip */
+        for (guint c = 0; keys != NULL && c < json_array_get_length(keys) && ncols < SALUS_SERIES_COUNT; c++) {
+            cols[ncols++] = salus_series_from_key(json_array_get_string_element(keys, c)); /* -1: skip */
         }
     }
     if (json_object_has_member(o, "record_samples")) {
         JsonArray *arr = json_object_get_array_member(o, "record_samples");
         if (arr != NULL && json_array_get_length(arr) > 0) {
-            summary->record_samples = g_array_new(FALSE, FALSE, sizeof(MiwearWorkoutSample));
+            summary->record_samples = g_array_new(FALSE, FALSE, sizeof(SalusWorkoutSample));
             for (guint i = 0; i < json_array_get_length(arr); i++) {
                 JsonArray *row = json_array_get_array_element(arr, i);
                 if (row == NULL || json_array_get_length(row) < 3) {
                     continue;
                 }
-                MiwearWorkoutSample s = miwear_workout_sample_init((uint32_t)json_array_get_int_element(row, 0));
+                SalusWorkoutSample s = salus_workout_sample_init((uint32_t)json_array_get_int_element(row, 0));
                 s.hr = (uint8_t)json_array_get_int_element(row, 1);
                 s.steps_delta = (uint16_t)json_array_get_int_element(row, 2);
                 for (guint c = 0; c < ncols && 3 + c < json_array_get_length(row); c++) {
@@ -132,13 +132,13 @@ static void read_series(JsonObject *o, MiwearWorkoutSummary *summary) {
     if (json_object_has_member(o, "gps_track")) {
         JsonArray *arr = json_object_get_array_member(o, "gps_track");
         if (arr != NULL && json_array_get_length(arr) > 0) {
-            summary->gps_track = g_array_new(FALSE, FALSE, sizeof(MiwearWorkoutGpsPoint));
+            summary->gps_track = g_array_new(FALSE, FALSE, sizeof(SalusWorkoutGpsPoint));
             for (guint i = 0; i < json_array_get_length(arr); i++) {
                 JsonArray *row = json_array_get_array_element(arr, i);
                 if (row == NULL || json_array_get_length(row) < 2) {
                     continue;
                 }
-                MiwearWorkoutGpsPoint p = {0};
+                SalusWorkoutGpsPoint p = {0};
                 p.lat = json_array_get_double_element(row, 0);
                 p.lon = json_array_get_double_element(row, 1);
                 g_array_append_val(summary->gps_track, p);
@@ -147,7 +147,7 @@ static void read_series(JsonObject *o, MiwearWorkoutSummary *summary) {
     }
 }
 
-static void read_hr_zones(JsonObject *o, MiwearWorkoutHrZones *z) {
+static void read_hr_zones(JsonObject *o, SalusWorkoutHrZones *z) {
     if (o == NULL || z == NULL || !json_object_has_member(o, "hr_zones")) {
         return;
     }
@@ -167,7 +167,7 @@ static void read_hr_zones(JsonObject *o, MiwearWorkoutHrZones *z) {
     z->zone5_lower_bpm = (int)json_object_get_int_member(hz, "zone5_lower_bpm");
 }
 
-gchar *miwear_workout_summary_to_json(int sport_type, const MiwearWorkoutSummary *summary) {
+gchar *salus_workout_summary_to_json(int sport_type, const SalusWorkoutSummary *summary) {
     if (summary == NULL) {
         return NULL;
     }
@@ -266,7 +266,7 @@ gchar *miwear_workout_summary_to_json(int sport_type, const MiwearWorkoutSummary
         json_builder_set_member_name(b, "metrics");
         json_builder_begin_object(b);
         for (guint i = 0; i < summary->metrics->len; i++) {
-            const MiwearWorkoutMetric *m = &g_array_index(summary->metrics, MiwearWorkoutMetric, i);
+            const SalusWorkoutMetric *m = &g_array_index(summary->metrics, SalusWorkoutMetric, i);
             gchar key[16];
             g_snprintf(key, sizeof(key), "%d", m->id);
             json_builder_set_member_name(b, key);
@@ -288,9 +288,9 @@ gchar *miwear_workout_summary_to_json(int sport_type, const MiwearWorkoutSummary
     return text;
 }
 
-gboolean miwear_workout_summary_from_json(const char *json,
+gboolean salus_workout_summary_from_json(const char *json,
                                           int *sport_type_out,
-                                          MiwearWorkoutSummary *summary_out) {
+                                          SalusWorkoutSummary *summary_out) {
     if (json == NULL || summary_out == NULL) {
         return FALSE;
     }
@@ -394,9 +394,9 @@ gboolean miwear_workout_summary_from_json(const char *json,
     if (json_object_has_member(o, "metrics")) {
         JsonObject *mo = json_object_get_object_member(o, "metrics");
         GList *keys = json_object_get_members(mo);
-        summary_out->metrics = g_array_new(FALSE, FALSE, sizeof(MiwearWorkoutMetric));
+        summary_out->metrics = g_array_new(FALSE, FALSE, sizeof(SalusWorkoutMetric));
         for (GList *l = keys; l != NULL; l = l->next) {
-            const MiwearWorkoutMetric m = {atoi(l->data), json_object_get_double_member(mo, l->data)};
+            const SalusWorkoutMetric m = {atoi(l->data), json_object_get_double_member(mo, l->data)};
             g_array_append_val(summary_out->metrics, m);
         }
         g_list_free(keys);

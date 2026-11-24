@@ -1,7 +1,7 @@
-#include "miwear/db/db.h"
-#include "miwear/db/workout_store.h"
+#include "salus/db/db.h"
+#include "salus/db/workout_store.h"
 
-#include "miwear/migrate.h"
+#include "salus/migrate.h"
 
 #include <sqlite3.h>
 #include <string.h>
@@ -15,7 +15,7 @@ static gint64 s_device_id;
 static gint64 s_user_id;
 static gboolean s_opened;
 
-static void miwear_db_mutex_ensure(void) {
+static void salus_db_mutex_ensure(void) {
     if (g_once_init_enter(&s_lock_once)) {
         g_mutex_init(&s_lock);
         g_once_init_leave(&s_lock_once, 1);
@@ -187,8 +187,8 @@ static gboolean ensure_user_row(sqlite3 *db) {
     return s_user_id > 0;
 }
 
-gboolean miwear_db_open(void) {
-    miwear_db_mutex_ensure();
+gboolean salus_db_open(void) {
+    salus_db_mutex_ensure();
     g_mutex_lock(&s_lock);
     if (s_opened) {
         g_mutex_unlock(&s_lock);
@@ -230,7 +230,7 @@ gboolean miwear_db_open(void) {
     return TRUE;
 }
 
-void miwear_db_close(void) {
+void salus_db_close(void) {
     g_mutex_lock(&s_lock);
     if (s_db != NULL) {
         sqlite3_close(s_db);
@@ -242,12 +242,12 @@ void miwear_db_close(void) {
     g_mutex_unlock(&s_lock);
 }
 
-gboolean miwear_db_ensure_device(const char *bluetooth_address) {
-    miwear_db_mutex_ensure();
+gboolean salus_db_ensure_device(const char *bluetooth_address) {
+    salus_db_mutex_ensure();
     if (bluetooth_address == NULL || bluetooth_address[0] == '\0') {
         return FALSE;
     }
-    if (s_db == NULL && !miwear_db_open()) {
+    if (s_db == NULL && !salus_db_open()) {
         return FALSE;
     }
 
@@ -311,7 +311,7 @@ static gboolean can_write(void) {
     return s_db != NULL && s_device_id > 0 && s_user_id > 0;
 }
 
-gboolean miwear_db_replace_xiaomi_activity_batch(const MiwearXiaomiActivityRow *rows, size_t n) {
+gboolean salus_db_replace_xiaomi_activity_batch(const SalusXiaomiActivityRow *rows, size_t n) {
     if (rows == NULL || n == 0) {
         return TRUE;
     }
@@ -338,7 +338,7 @@ gboolean miwear_db_replace_xiaomi_activity_batch(const MiwearXiaomiActivityRow *
     }
 
     for (size_t i = 0; i < n; i++) {
-        const MiwearXiaomiActivityRow *r = &rows[i];
+        const SalusXiaomiActivityRow *r = &rows[i];
         sqlite3_bind_int(st, 1, r->timestamp_sec);
         sqlite3_bind_int64(st, 2, s_device_id);
         sqlite3_bind_int64(st, 3, s_user_id);
@@ -374,7 +374,7 @@ gboolean miwear_db_replace_xiaomi_activity_batch(const MiwearXiaomiActivityRow *
     return TRUE;
 }
 
-gboolean miwear_db_replace_daily_summary(const MiwearDailySummaryRow *row) {
+gboolean salus_db_replace_daily_summary(const SalusDailySummaryRow *row) {
     if (row == NULL) {
         return FALSE;
     }
@@ -470,7 +470,7 @@ static gboolean sleep_time_should_skip_insert(int64_t bed_ms, int64_t new_wake_m
     return skip;
 }
 
-gboolean miwear_db_replace_sleep_stages_v2(uint32_t bed_sec,
+gboolean salus_db_replace_sleep_stages_v2(uint32_t bed_sec,
                                        uint32_t wake_sec,
                                        uint16_t total_min,
                                        uint16_t deep_min,
@@ -557,7 +557,7 @@ gboolean miwear_db_replace_sleep_stages_v2(uint32_t bed_sec,
     return TRUE;
 }
 
-gboolean miwear_db_replace_sleep_details_header(int64_t bed_ms,
+gboolean salus_db_replace_sleep_details_header(int64_t bed_ms,
                                             int64_t wake_ms,
                                             int is_awake,
                                             int total_min,
@@ -632,7 +632,7 @@ gboolean miwear_db_replace_sleep_details_header(int64_t bed_ms,
     return ok;
 }
 
-gboolean miwear_db_replace_sleep_stage_samples(const MiwearSleepStageRow *rows, size_t n) {
+gboolean salus_db_replace_sleep_stage_samples(const SalusSleepStageRow *rows, size_t n) {
     if (rows == NULL || n == 0) {
         return TRUE;
     }
@@ -687,7 +687,7 @@ gboolean miwear_db_replace_sleep_stage_samples(const MiwearSleepStageRow *rows, 
     return TRUE;
 }
 
-gboolean miwear_db_replace_heart_pulse_samples(const MiwearHeartPulseRow *rows, size_t n) {
+gboolean salus_db_replace_heart_pulse_samples(const SalusHeartPulseRow *rows, size_t n) {
     if (rows == NULL || n == 0) {
         return TRUE;
     }
@@ -730,7 +730,7 @@ gboolean miwear_db_replace_heart_pulse_samples(const MiwearHeartPulseRow *rows, 
     return TRUE;
 }
 
-static gboolean foreach_xiaomi_activity_locked(MiwearDbActivityRowFn fn, gpointer user_data) {
+static gboolean foreach_xiaomi_activity_locked(SalusDbActivityRowFn fn, gpointer user_data) {
     sqlite3_stmt *st = NULL;
     const char *sql = "SELECT \"timestamp\",\"rawIntensity\",\"steps\",\"rawKind\",\"heartRate\","
                       "\"stress\",\"spo2\",\"distanceCm\",\"activeCalories\",\"energy\" "
@@ -740,7 +740,7 @@ static gboolean foreach_xiaomi_activity_locked(MiwearDbActivityRowFn fn, gpointe
     }
     sqlite3_bind_int64(st, 1, s_device_id);
     while (sqlite3_step(st) == SQLITE_ROW) {
-        MiwearXiaomiActivityRow r = {0};
+        SalusXiaomiActivityRow r = {0};
         r.timestamp_sec = sqlite3_column_int(st, 0);
         r.raw_intensity = sqlite3_column_int(st, 1);
         r.steps = sqlite3_column_int(st, 2);
@@ -759,7 +759,7 @@ static gboolean foreach_xiaomi_activity_locked(MiwearDbActivityRowFn fn, gpointe
     return TRUE;
 }
 
-gboolean miwear_db_foreach_xiaomi_activity(MiwearDbActivityRowFn fn, gpointer user_data) {
+gboolean salus_db_foreach_xiaomi_activity(SalusDbActivityRowFn fn, gpointer user_data) {
     if (fn == NULL) {
         return FALSE;
     }
@@ -777,7 +777,7 @@ static int db_nullable_int(sqlite3_stmt *st, int col) {
     return sqlite3_column_type(st, col) == SQLITE_NULL ? -1 : sqlite3_column_int(st, col);
 }
 
-gboolean miwear_db_foreach_sleep_time(MiwearDbSleepTimeRowFn fn, gpointer user_data) {
+gboolean salus_db_foreach_sleep_time(SalusDbSleepTimeRowFn fn, gpointer user_data) {
     if (fn == NULL) {
         return FALSE;
     }
@@ -799,7 +799,7 @@ gboolean miwear_db_foreach_sleep_time(MiwearDbSleepTimeRowFn fn, gpointer user_d
     }
     sqlite3_bind_int64(st, 1, s_device_id);
     while (sqlite3_step(st) == SQLITE_ROW) {
-        MiwearSleepTimeRow r = {0};
+        SalusSleepTimeRow r = {0};
         r.bed_ms = sqlite3_column_int64(st, 0);
         if (sqlite3_column_type(st, 1) == SQLITE_NULL) {
             continue;
@@ -819,7 +819,7 @@ gboolean miwear_db_foreach_sleep_time(MiwearDbSleepTimeRowFn fn, gpointer user_d
     return TRUE;
 }
 
-gboolean miwear_db_foreach_sleep_stage(MiwearDbSleepStageRowFn fn, gpointer user_data) {
+gboolean salus_db_foreach_sleep_stage(SalusDbSleepStageRowFn fn, gpointer user_data) {
     if (fn == NULL) {
         return FALSE;
     }
@@ -840,7 +840,7 @@ gboolean miwear_db_foreach_sleep_stage(MiwearDbSleepStageRowFn fn, gpointer user
     }
     sqlite3_bind_int64(st, 1, s_device_id);
     while (sqlite3_step(st) == SQLITE_ROW) {
-        MiwearSleepStageRow r = {0};
+        SalusSleepStageRow r = {0};
         r.timestamp_ms = sqlite3_column_int64(st, 0);
         r.stage = sqlite3_column_int(st, 1);
         if (!fn(&r, user_data)) {
@@ -852,7 +852,7 @@ gboolean miwear_db_foreach_sleep_stage(MiwearDbSleepStageRowFn fn, gpointer user
     return TRUE;
 }
 
-gboolean miwear_db_foreach_daily_summary(MiwearDbDailySummaryRowFn fn, gpointer user_data) {
+gboolean salus_db_foreach_daily_summary(SalusDbDailySummaryRowFn fn, gpointer user_data) {
     if (fn == NULL) {
         return FALSE;
     }
@@ -875,7 +875,7 @@ gboolean miwear_db_foreach_daily_summary(MiwearDbDailySummaryRowFn fn, gpointer 
     }
     sqlite3_bind_int64(st, 1, s_device_id);
     while (sqlite3_step(st) == SQLITE_ROW) {
-        MiwearDailySummaryRow r = {0};
+        SalusDailySummaryRow r = {0};
         r.timestamp_ms = sqlite3_column_int64(st, 0);
         r.timezone = sqlite3_column_int(st, 1);
         r.steps = sqlite3_column_int(st, 2);
@@ -918,14 +918,14 @@ gboolean miwear_db_foreach_daily_summary(MiwearDbDailySummaryRowFn fn, gpointer 
     return TRUE;
 }
 
-gboolean miwear_db_replace_sport_workout(int sport_type,
+gboolean salus_db_replace_sport_workout(int sport_type,
                                            uint32_t file_ts,
                                            int sport_subtype,
-                                           const MiwearWorkoutSummary *summary) {
+                                           const SalusWorkoutSummary *summary) {
     if (summary == NULL || file_ts == 0) {
         return FALSE;
     }
-    gchar *json = miwear_workout_summary_to_json(sport_type, summary);
+    gchar *json = salus_workout_summary_to_json(sport_type, summary);
     if (json == NULL) {
         return FALSE;
     }
@@ -954,7 +954,7 @@ gboolean miwear_db_replace_sport_workout(int sport_type,
     return ok;
 }
 
-gboolean miwear_db_foreach_sport_workout(MiwearDbSportWorkoutRowFn fn, gpointer user_data) {
+gboolean salus_db_foreach_sport_workout(SalusDbSportWorkoutRowFn fn, gpointer user_data) {
     if (fn == NULL) {
         return FALSE;
     }
@@ -972,7 +972,7 @@ gboolean miwear_db_foreach_sport_workout(MiwearDbSportWorkoutRowFn fn, gpointer 
     }
     sqlite3_bind_int64(st, 1, s_device_id);
     while (sqlite3_step(st) == SQLITE_ROW) {
-        MiwearDbSportWorkoutRow row = {0};
+        SalusDbSportWorkoutRow row = {0};
         row.file_ts = (uint32_t)sqlite3_column_int(st, 0);
         row.sport_type = sqlite3_column_int(st, 1);
         row.sport_subtype = sqlite3_column_int(st, 2);

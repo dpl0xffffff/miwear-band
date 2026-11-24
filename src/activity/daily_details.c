@@ -1,4 +1,4 @@
-#include "miwear/activity/daily_details.h"
+#include "salus/activity/daily_details.h"
 
 #include <string.h>
 
@@ -71,7 +71,7 @@ static int get(const ComplexParser *p, int idx, int nbits) {
     return (int)((p->val >> shift) & ((1u << nbits) - 1u));
 }
 
-int miwear_daily_details_header_size(int version) {
+int salus_daily_details_header_size(int version) {
     switch (version) {
         case 1:
         case 2:
@@ -85,8 +85,8 @@ int miwear_daily_details_header_size(int version) {
     }
 }
 
-GArray *miwear_daily_details_decode(int version, const uint8_t *payload, size_t payload_len, const char **error_out) {
-    const int header_size = miwear_daily_details_header_size(version);
+GArray *salus_daily_details_decode(int version, const uint8_t *payload, size_t payload_len, const char **error_out) {
+    const int header_size = salus_daily_details_header_size(version);
     if (header_size == 0) {
         if (error_out != NULL) {
             *error_out = "unsupported daily details version";
@@ -108,12 +108,12 @@ GArray *miwear_daily_details_decode(int version, const uint8_t *payload, size_t 
         .pos = (size_t)(8 + header_size),
         .limit = payload_len - 4,
     };
-    GArray *out = g_array_new(FALSE, FALSE, sizeof(MiwearDailyDetailsMinute));
+    GArray *out = g_array_new(FALSE, FALSE, sizeof(SalusDailyDetailsMinute));
 
     while (p.pos < p.limit && !p.underflow) {
         const size_t before = p.pos;
         reset(&p);
-        MiwearDailyDetailsMinute m = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+        SalusDailyDetailsMinute m = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
 
         int include_extra_entry = 0;
         if (next_group(&p, 16)) {

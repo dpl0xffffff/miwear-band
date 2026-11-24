@@ -8,7 +8,7 @@ Source artifact: `com.xiaomi.wearable` **base.apk** 3.59.x (JADX static analysis
 |-------|------------------|-------------------|
 | RFCOMM | `com.xiaomi.wearable.connection.SppConnection` | `src/spp/bluez.c`, `src/spp/wire.c` |
 | Framing | `transport.TransportV2`, `SppTaskQueueV2` | `wire.c` SPP v2 |
-| Auth | `wear.api.WearAuthV2`, label `miwear-auth` | `src/spp/crypto.c` |
+| Auth | `wear.api.WearAuthV2`, label `salus-auth` | `src/spp/crypto.c` |
 | Protobuf | `xiaomi` Command (same as Gadgetbridge proto) | `src/proto/xiaomi.pb-c.*` |
 | Fitness pull | `FitnessDeviceSyncManager` + `FitnessWearSender` | `src/spp/fitness_sync.c` |
 | Binary parse | `FitnessDataProcessor` / `FitnessDataParser` | `src/activity/activity.c` (+ `manual.c`, `workout_summary.c`) |

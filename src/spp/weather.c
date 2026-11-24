@@ -1,5 +1,5 @@
-#include "miwear/spp/weather.h"
-#include "miwear/spp/wire_internal.h"
+#include "salus/spp/weather.h"
+#include "salus/spp/wire_internal.h"
 
 #include <math.h>
 #include <string.h>
@@ -138,7 +138,7 @@ static void send_weather_prefs(AppState *state) {
     cmd.subtype = 10;
     cmd.weather = &wx;
 
-    (void)miwear_wire_send_xiaomi_command(state, &cmd, "Weather prefs (°C)");
+    (void)salus_wire_send_xiaomi_command(state, &cmd, "Weather prefs (°C)");
 }
 
 static void send_add_location(AppState *state, const char *code, const char *name) {
@@ -155,7 +155,7 @@ static void send_add_location(AppState *state, const char *code, const char *nam
     cmd.subtype = 7;
     cmd.weather = &wx;
 
-    (void)miwear_wire_send_xiaomi_command(state, &cmd, "Weather add location");
+    (void)salus_wire_send_xiaomi_command(state, &cmd, "Weather add location");
 }
 
 static void send_current_weather(AppState *state,
@@ -213,7 +213,7 @@ static void send_current_weather(AppState *state,
     cmd.subtype = 0;
     cmd.weather = &wx;
 
-    (void)miwear_wire_send_xiaomi_command(state, &cmd, "Weather current conditions");
+    (void)salus_wire_send_xiaomi_command(state, &cmd, "Weather current conditions");
     g_free(wind.unit);
     g_free(pub);
 }
@@ -285,7 +285,7 @@ static void send_daily_forecast(AppState *state,
     cmd.subtype = 1;
     cmd.weather = &wx;
 
-    (void)miwear_wire_send_xiaomi_command(state, &cmd, "Weather daily forecast");
+    (void)salus_wire_send_xiaomi_command(state, &cmd, "Weather daily forecast");
     g_free(pub);
     g_free(entry_ptrs);
     g_free(entries);
@@ -483,7 +483,7 @@ static void schedule_weather_push(AppState *state) {
     g_object_unref(proc); /* the pending operation keeps its own reference */
 }
 
-void miwear_weather_shutdown(AppState *state) {
+void salus_weather_shutdown(AppState *state) {
     if (state == NULL || state->weather_cancellable == NULL) {
         return;
     }
@@ -492,7 +492,7 @@ void miwear_weather_shutdown(AppState *state) {
     state->weather_fetch_inflight = FALSE;
 }
 
-void miwear_weather_initialize(AppState *state) {
+void salus_weather_initialize(AppState *state) {
     if (state == NULL) {
         return;
     }
@@ -504,11 +504,11 @@ void miwear_weather_initialize(AppState *state) {
     schedule_weather_push(state);
 }
 
-void miwear_weather_push_cached(AppState *state) {
+void salus_weather_push_cached(AppState *state) {
     schedule_weather_push(state);
 }
 
-void miwear_weather_handle_command(AppState *state, const Xiaomi__Command *cmd) {
+void salus_weather_handle_command(AppState *state, const Xiaomi__Command *cmd) {
     if (state == NULL || cmd == NULL || cmd->type != 10) {
         return;
     }

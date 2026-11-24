@@ -1,12 +1,12 @@
-#include "miwear/activity/schema_reader.h"
-#include "miwear/activity/mi_fitness_data.h"
-#include "miwear/util.h"
+#include "salus/activity/schema_reader.h"
+#include "salus/activity/mi_fitness_data.h"
+#include "salus/util.h"
 
 #include <math.h>
 #include <string.h>
 
-#ifndef MIWEAR_SCHEMA_DIR
-#define MIWEAR_SCHEMA_DIR "third_party/mi-fitness-schemas"
+#ifndef SALUS_SCHEMA_DIR
+#define SALUS_SCHEMA_DIR "third_party/mi-fitness-schemas"
 #endif
 
 typedef struct {
@@ -122,11 +122,11 @@ static const char *daily_schema_activity(int daily_type) {
     }
 }
 
-static gchar *miwear_schema_resolve_activity_file(const char *activity, const char *file_type, int version) {
+static gchar *salus_schema_resolve_activity_file(const char *activity, const char *file_type, int version) {
     if (activity == NULL) {
         return NULL;
     }
-    gchar *index_path = g_build_filename(miwear_schema_dir(), "index.json", NULL);
+    gchar *index_path = g_build_filename(salus_schema_dir(), "index.json", NULL);
     GError *err = NULL;
     JsonParser *parser = json_parser_new();
     if (!json_parser_load_from_file(parser, index_path, &err)) {
@@ -160,9 +160,9 @@ static gchar *miwear_schema_resolve_activity_file(const char *activity, const ch
     return result;
 }
 
-const char *miwear_schema_dir(void) {
-    const char *env = g_getenv("MIWEAR_SCHEMA_DIR");
-    return env != NULL && env[0] != '\0' ? env : MIWEAR_SCHEMA_DIR;
+const char *salus_schema_dir(void) {
+    const char *env = g_getenv("SALUS_SCHEMA_DIR");
+    return env != NULL && env[0] != '\0' ? env : SALUS_SCHEMA_DIR;
 }
 
 static gboolean cursor_need(SchemaCursor *c, size_t n) {
@@ -187,7 +187,7 @@ static gboolean cursor_u16(SchemaCursor *c, uint16_t *v) {
     if (!cursor_read(c, b, 2)) {
         return FALSE;
     }
-    *v = miwear_read_u16_le(b);
+    *v = salus_read_u16_le(b);
     return TRUE;
 }
 
@@ -196,7 +196,7 @@ static gboolean cursor_u32(SchemaCursor *c, uint32_t *v) {
     if (!cursor_read(c, b, 4)) {
         return FALSE;
     }
-    *v = miwear_read_u32_le(b);
+    *v = salus_read_u32_le(b);
     return TRUE;
 }
 
@@ -215,7 +215,7 @@ static gboolean cursor_f32(SchemaCursor *c, double *v) {
         return FALSE;
     }
     float f;
-    uint32_t raw = miwear_read_u32_le(b);
+    uint32_t raw = salus_read_u32_le(b);
     memcpy(&f, &raw, sizeof(f));
     if (!isfinite((double)f)) {
         *v = 0.0;
@@ -225,7 +225,7 @@ static gboolean cursor_f32(SchemaCursor *c, double *v) {
     return TRUE;
 }
 
-GBytes *miwear_schema_sport_wire_buffer(const uint8_t *payload, size_t payload_len) {
+GBytes *salus_schema_sport_wire_buffer(const uint8_t *payload, size_t payload_len) {
     if (payload == NULL || payload_len < 8) {
         return NULL;
     }
@@ -517,7 +517,7 @@ static gboolean decode_field(SchemaDecodeCtx *ctx, SchemaCursor *c, JsonObject *
     return decode_scalar(ctx, c, typ, b);
 }
 
-gboolean miwear_schema_decode(const JsonNode *schema_root,
+gboolean salus_schema_decode(const JsonNode *schema_root,
                               const uint8_t *buffer,
                               size_t buffer_len,
                               JsonNode **out_decoded) {
@@ -546,7 +546,7 @@ gboolean miwear_schema_decode(const JsonNode *schema_root,
     return TRUE;
 }
 
-gboolean miwear_schema_load_root(const char *schema_json_path, JsonNode **out_root) {
+gboolean salus_schema_load_root(const char *schema_json_path, JsonNode **out_root) {
     if (schema_json_path == NULL || out_root == NULL) {
         return FALSE;
     }
@@ -565,7 +565,7 @@ gboolean miwear_schema_load_root(const char *schema_json_path, JsonNode **out_ro
     return TRUE;
 }
 
-gchar *miwear_schema_resolve_sport(int sport_type, int file_type, int version) {
+gchar *salus_schema_resolve_sport(int sport_type, int file_type, int version) {
     const char *activity = NULL;
     for (size_t i = 0; i < G_N_ELEMENTS(k_sport_activity); i++) {
         if (k_sport_activity[i].sport == sport_type) {
@@ -576,10 +576,10 @@ gchar *miwear_schema_resolve_sport(int sport_type, int file_type, int version) {
     if (activity == NULL || file_type < 0 || file_type > 3) {
         return NULL;
     }
-    return miwear_schema_resolve_activity_file(activity, k_file_type_sport[file_type], version);
+    return salus_schema_resolve_activity_file(activity, k_file_type_sport[file_type], version);
 }
 
-gchar *miwear_schema_resolve_daily(int daily_type, int file_type, int version) {
+gchar *salus_schema_resolve_daily(int daily_type, int file_type, int version) {
     if (file_type < 0 || file_type > 1) {
         return NULL;
     }
@@ -588,16 +588,16 @@ gchar *miwear_schema_resolve_daily(int daily_type, int file_type, int version) {
     if (activity == NULL) {
         return NULL;
     }
-    return miwear_schema_resolve_activity_file(activity, k_file_type_health[file_type], version);
+    return salus_schema_resolve_activity_file(activity, k_file_type_health[file_type], version);
 }
 
-void miwear_schema_maybe_capture(const uint8_t *payload,
+void salus_schema_maybe_capture(const uint8_t *payload,
                                  size_t payload_len,
                                  int sport_type,
                                  int detail,
                                  int version,
                                  uint32_t file_ts) {
-    const char *dir = g_getenv("MIWEAR_CAPTURE_DIR");
+    const char *dir = g_getenv("SALUS_CAPTURE_DIR");
     if (dir == NULL || dir[0] == '\0' || payload == NULL || payload_len == 0) {
         return;
     }

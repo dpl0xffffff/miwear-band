@@ -1,14 +1,14 @@
-#include "miwear/app.h"
-#include "miwear/activity/daily_details.h"
-#include "miwear/ui/dashboard.h"
-#include "miwear/ui/health_data.h"
-#include "miwear/activity/mi_fitness_full_day_sleep.h"
-#include "miwear/activity/manual.h"
-#include "miwear/sleep/mi_sleep_packets.h"
-#include "miwear/db/db.h"
-#include "miwear/spp/wire.h"
-#include "miwear/activity/mi_fitness_dispatch.h"
-#include "miwear/activity/workout_summary.h"
+#include "salus/app.h"
+#include "salus/activity/daily_details.h"
+#include "salus/ui/dashboard.h"
+#include "salus/ui/health_data.h"
+#include "salus/activity/mi_fitness_full_day_sleep.h"
+#include "salus/activity/manual.h"
+#include "salus/sleep/mi_sleep_packets.h"
+#include "salus/db/db.h"
+#include "salus/spp/wire.h"
+#include "salus/activity/mi_fitness_dispatch.h"
+#include "salus/activity/workout_summary.h"
 #include <gio/gio.h>
 #include <math.h>
 #include <stdio.h>
@@ -106,7 +106,7 @@ typedef struct {
     guint type[5];      /* 0..3, [4] = not stored */
 } DayActivityTotals;
 
-static gboolean day_totals_row(const MiwearXiaomiActivityRow *r, gpointer user_data) {
+static gboolean day_totals_row(const SalusXiaomiActivityRow *r, gpointer user_data) {
     DayActivityTotals *t = user_data;
     if (r->timestamp_sec < t->from || r->timestamp_sec >= t->to) {
         return TRUE;
@@ -141,7 +141,7 @@ static void log_day_activity_totals(AppState *state, gint64 any_sec) {
     g_date_time_unref(next);
     g_date_time_unref(day);
     g_date_time_unref(t);
-    if (miwear_db_foreach_xiaomi_activity(day_totals_row, &tot)) {
+    if (salus_db_foreach_xiaomi_activity(day_totals_row, &tot)) {
         gchar *line = g_strdup_printf(
             "Day activity totals %s: minutes=%u steps_sum=%u kcal_sum=%u kcal_minutes=%u "
             "intensity{0=%u 1=%u 2=%u 3=%u 4=%u 5=%u 6=%u 7=%u n/a=%u} "
@@ -166,7 +166,7 @@ static void parse_daily_details_for_log(AppState *state,
                                         const uint8_t *payload,
                                         size_t payload_len) {
     const char *error = NULL;
-    GArray *minutes_arr = miwear_daily_details_decode(version, payload, payload_len, &error);
+    GArray *minutes_arr = salus_daily_details_decode(version, payload, payload_len, &error);
     if (minutes_arr == NULL) {
         gchar *msg = g_strdup_printf("Daily details parser (v%d): %s.", version, error != NULL ? error : "failed");
         append_log(state, msg);
@@ -192,7 +192,7 @@ static void parse_daily_details_for_log(AppState *state,
      * row's rawIntensity / rawKind. */
     GArray *raw_levels = g_array_new(FALSE, FALSE, sizeof(int));
     for (guint i = 0; i < minutes_arr->len; i++) {
-        const MiwearDailyDetailsMinute *m = &g_array_index(minutes_arr, MiwearDailyDetailsMinute, i);
+        const SalusDailyDetailsMinute *m = &g_array_index(minutes_arr, SalusDailyDetailsMinute, i);
         minutes++;
         RecordedSample sample = {0};
         sample.steps = m->steps;
@@ -288,7 +288,7 @@ static void parse_daily_details_for_log(AppState *state,
                 0.0);
             g_date_time_unref(wall);
             if (start_min != NULL) {
-                GArray *act_rows = g_array_sized_new(FALSE, FALSE, sizeof(MiwearXiaomiActivityRow), samples->len);
+                GArray *act_rows = g_array_sized_new(FALSE, FALSE, sizeof(SalusXiaomiActivityRow), samples->len);
                 const gint64 now_sec = g_get_real_time() / G_USEC_PER_SEC;
                 guint future_rows = 0;
                 for (guint i = 0; i < samples->len; i++) {
@@ -303,7 +303,7 @@ static void parse_daily_details_for_log(AppState *state,
                     }
                     const RecordedSample *src = &g_array_index(samples, RecordedSample, i);
                     /* Mirror DailyDetailsParser + XiaomiActivitySample defaults (ActivitySample.NOT_MEASURED = -1). */
-                    MiwearXiaomiActivityRow r = {0};
+                    SalusXiaomiActivityRow r = {0};
                     r.timestamp_sec = (int32_t)unix_sec;
                     const int packed = g_array_index(raw_levels, int, i);
                     r.raw_intensity = (packed >> 8) != 0xff ? (packed >> 8) : -1;
@@ -324,13 +324,13 @@ static void parse_daily_details_for_log(AppState *state,
                     g_free(w);
                 }
                 recorded_merge_xiaomi_activity_rows(state,
-                                                    (const MiwearXiaomiActivityRow *)act_rows->data,
+                                                    (const SalusXiaomiActivityRow *)act_rows->data,
                                                     act_rows->len);
-                (void)miwear_db_replace_xiaomi_activity_batch((const MiwearXiaomiActivityRow *)act_rows->data, act_rows->len);
-                miwear_dashboard_schedule_refresh(state);
+                (void)salus_db_replace_xiaomi_activity_batch((const SalusXiaomiActivityRow *)act_rows->data, act_rows->len);
+                salus_dashboard_schedule_refresh(state);
                 if (act_rows->len > 0) {
                     log_day_activity_totals(state,
-                                            g_array_index(act_rows, MiwearXiaomiActivityRow, act_rows->len - 1).timestamp_sec);
+                                            g_array_index(act_rows, SalusXiaomiActivityRow, act_rows->len - 1).timestamp_sec);
                 }
                 g_array_unref(act_rows);
                 g_date_time_unref(start_min);
@@ -370,42 +370,42 @@ static void parse_daily_summary_for_log(AppState *state,
     }
 
     size_t off = (size_t)(8 + header_size);
-    const uint32_t steps = miwear_read_u32_le(payload + off); off += 4;
+    const uint32_t steps = salus_read_u32_le(payload + off); off += 4;
     /* Mi Fitness daily_activity_report: totalactiveCalories (u16), then current heart rate (u8). */
-    const uint16_t active_calories = miwear_read_u16_le(payload + off); off += 2;
+    const uint16_t active_calories = salus_read_u16_le(payload + off); off += 2;
     const uint8_t hr_now = payload[off++];
     const uint8_t hr_rest = payload[off++];
     const uint8_t hr_max = payload[off++];
-    const uint32_t hr_max_ts = miwear_read_u32_le(payload + off); off += 4;
+    const uint32_t hr_max_ts = salus_read_u32_le(payload + off); off += 4;
     const uint8_t hr_min = payload[off++];
-    const uint32_t hr_min_ts = miwear_read_u32_le(payload + off); off += 4;
+    const uint32_t hr_min_ts = salus_read_u32_le(payload + off); off += 4;
     const uint8_t hr_avg = payload[off++];
     const uint8_t stress_avg = payload[off++];
     const uint8_t stress_max = payload[off++];
     const uint8_t stress_min = payload[off++];
     const uint32_t standing_bits = (uint32_t)payload[off] | ((uint32_t)payload[off + 1] << 8) | ((uint32_t)payload[off + 2] << 16);
     off += 3;
-    const uint16_t calories = miwear_read_u16_le(payload + off); off += 2; /* totalCalories */
-    const uint16_t recovery_time = miwear_read_u16_le(payload + off); off += 2; /* residualrecoverytime */
+    const uint16_t calories = salus_read_u16_le(payload + off); off += 2; /* totalCalories */
+    const uint16_t recovery_time = salus_read_u16_le(payload + off); off += 2; /* residualrecoverytime */
     off += 1; /* current SpO2 */
     const uint8_t spo2_max = payload[off++];
-    const uint32_t spo2_max_ts = miwear_read_u32_le(payload + off); off += 4;
+    const uint32_t spo2_max_ts = salus_read_u32_le(payload + off); off += 4;
     const uint8_t spo2_min = payload[off++];
-    const uint32_t spo2_min_ts = miwear_read_u32_le(payload + off); off += 4;
+    const uint32_t spo2_min_ts = salus_read_u32_le(payload + off); off += 4;
     const uint8_t spo2_avg = payload[off++];
 
     gboolean has_training = FALSE;
     int t_day = 0, t_week = 0, t_level = 0, v_light = 0, v_mod = 0, v_high = 0, v_cur = 0;
     if (version > 3 && off + 10 <= payload_len - 4) {
-        t_day = (int)miwear_read_u16_le(payload + off);
+        t_day = (int)salus_read_u16_le(payload + off);
         off += 2;
-        t_week = (int)miwear_read_u16_le(payload + off);
+        t_week = (int)salus_read_u16_le(payload + off);
         off += 2;
         t_level = (int)payload[off++];
         v_light = (int)payload[off++];
         v_mod = (int)payload[off++];
         v_high = (int)payload[off++];
-        v_cur = (int)miwear_read_u16_le(payload + off);
+        v_cur = (int)salus_read_u16_le(payload + off);
         off += 2;
         has_training = TRUE;
     }
@@ -413,7 +413,7 @@ static void parse_daily_summary_for_log(AppState *state,
     gchar *ts_txt = fmt_unix_ts(ts);
     gchar *hr_max_txt = fmt_unix_ts(hr_max_ts);
     gchar *hr_min_txt = fmt_unix_ts(hr_min_ts);
-    const guint standing_metric = miwear_standing_display_value((int)standing_bits);
+    const guint standing_metric = salus_standing_display_value((int)standing_bits);
     gchar *line = g_strdup_printf(
         "Daily summary %s (v%d): steps=%u totalCalories=%u totalactiveCalories=%u hr_now=%u recovery=%u "
         "HR(rest/avg/min/max)=%u/%u/%u/%u "
@@ -442,7 +442,7 @@ static void parse_daily_summary_for_log(AppState *state,
     g_free(hr_max_txt);
     g_free(ts_txt);
 
-    MiwearDailySummaryRow dr = {0};
+    SalusDailySummaryRow dr = {0};
     dr.timestamp_ms = (int64_t)ts * 1000LL;
     dr.timezone = (int)tz;
     dr.steps = (int)steps;
@@ -472,7 +472,7 @@ static void parse_daily_summary_for_log(AppState *state,
     dr.vitality_increase_moderate = v_mod;
     dr.vitality_increase_high = v_high;
     dr.vitality_current = v_cur;
-    (void)miwear_db_replace_daily_summary(&dr);
+    (void)salus_db_replace_daily_summary(&dr);
     health_apply_daily_summary(state, &dr);
 }
 
@@ -493,14 +493,14 @@ static void parse_sleep_stages_v2_for_log(AppState *state,
     }
     size_t off = 8;
     off += 7;
-    const uint16_t sleep_duration = miwear_read_u16_le(payload + off); off += 2;
-    const uint32_t bed_time = miwear_read_u32_le(payload + off); off += 4;
-    const uint32_t wake_time = miwear_read_u32_le(payload + off); off += 4;
+    const uint16_t sleep_duration = salus_read_u16_le(payload + off); off += 2;
+    const uint32_t bed_time = salus_read_u32_le(payload + off); off += 4;
+    const uint32_t wake_time = salus_read_u32_le(payload + off); off += 4;
     off += 3;
-    const uint16_t deep = miwear_read_u16_le(payload + off); off += 2;
-    const uint16_t light = miwear_read_u16_le(payload + off); off += 2;
-    const uint16_t rem = miwear_read_u16_le(payload + off); off += 2;
-    const uint16_t awake = miwear_read_u16_le(payload + off); off += 2;
+    const uint16_t deep = salus_read_u16_le(payload + off); off += 2;
+    const uint16_t light = salus_read_u16_le(payload + off); off += 2;
+    const uint16_t rem = salus_read_u16_le(payload + off); off += 2;
+    const uint16_t awake = salus_read_u16_le(payload + off); off += 2;
     off += 1;
 
     GArray *raw_phases = g_array_new(FALSE, FALSE, sizeof(GbRawSleepPhaseChange));
@@ -509,27 +509,27 @@ static void parse_sleep_stages_v2_for_log(AppState *state,
     uint32_t prev_t = 0;
     int prev_stage = -1;
     while (off + 5 <= payload_len - 4) {
-        uint32_t t = miwear_read_u32_le(payload + off); off += 4;
+        uint32_t t = salus_read_u32_le(payload + off); off += 4;
         uint8_t stage = payload[off++];
         if (t == 0) continue;
         GbRawSleepPhaseChange ph = { t, stage };
         g_array_append_val(raw_phases, ph);
         if (prev_t != 0 && prev_stage >= 0 && t > prev_t) {
             for (uint32_t sec = prev_t; sec < t; sec += 60) {
-                recorded_batch_add_sleep_minute(sleep_batch, (gint64)sec, miwear_normalize_sleep_stage(prev_stage));
+                recorded_batch_add_sleep_minute(sleep_batch, (gint64)sec, salus_normalize_sleep_stage(prev_stage));
             }
         }
         prev_t = t;
-        prev_stage = miwear_normalize_sleep_stage((int)stage);
+        prev_stage = salus_normalize_sleep_stage((int)stage);
     }
     if (prev_t != 0 && prev_stage >= 0 && wake_time > prev_t) {
         for (uint32_t sec = prev_t; sec < wake_time; sec += 60) {
-            recorded_batch_add_sleep_minute(sleep_batch, (gint64)sec, miwear_normalize_sleep_stage(prev_stage));
+            recorded_batch_add_sleep_minute(sleep_batch, (gint64)sec, salus_normalize_sleep_stage(prev_stage));
         }
     }
 
     if (bed_time != 0 && wake_time != 0 && sleep_duration != 0) {
-        (void)miwear_db_replace_sleep_stages_v2(bed_time,
+        (void)salus_db_replace_sleep_stages_v2(bed_time,
                                            wake_time,
                                            sleep_duration,
                                            deep,
@@ -558,7 +558,7 @@ static void parse_sleep_stages_v2_for_log(AppState *state,
 /* Heart-rate or SpO2 series of a full_day_sleep report (one uint8 per point). */
 static void add_full_day_sleep_series(GArray *samples,
                                       const uint8_t *payload,
-                                      const MiwearFullDaySleepSeries *series,
+                                      const SalusFullDaySleepSeries *series,
                                       gboolean is_spo2) {
     if (!series->present || series->count == 0 || series->first_time == 0) {
         return;
@@ -593,7 +593,7 @@ typedef struct {
     uint32_t wake_sec;
 } ParseSleepFeatureCtx;
 
-static gboolean parse_sleep_feature_packet(const MiwearSleepPacketView *pkt, void *user_data) {
+static gboolean parse_sleep_feature_packet(const SalusSleepPacketView *pkt, void *user_data) {
     ParseSleepFeatureCtx *ctx = user_data;
     if (ctx == NULL || pkt == NULL) {
         return TRUE;
@@ -609,7 +609,7 @@ static gboolean parse_sleep_feature_packet(const MiwearSleepPacketView *pkt, voi
         const long long tms = (long long)pkt->ts_raw;
         if (llabs(ctx->last_hb_ms - tms) > 30000LL) {
             ctx->last_hb_ms = tms;
-            MiwearHeartPulseRow hp0 = {ctx->last_hb_ms};
+            SalusHeartPulseRow hp0 = {ctx->last_hb_ms};
             g_array_append_val(ctx->pulse_rows, hp0);
         }
         for (uint16_t i = 0; i < data_len; i++) {
@@ -618,7 +618,7 @@ static gboolean parse_sleep_feature_packet(const MiwearSleepPacketView *pkt, voi
                 continue;
             }
             ctx->last_hb_ms += (long long)delta * 10LL;
-            MiwearHeartPulseRow hp = {ctx->last_hb_ms};
+            SalusHeartPulseRow hp = {ctx->last_hb_ms};
             g_array_append_val(ctx->pulse_rows, hp);
             const int rr_ms = delta * 10;
             const int hr = rr_ms > 0 ? (60000 / rr_ms) : -1;
@@ -634,16 +634,16 @@ static gboolean parse_sleep_feature_packet(const MiwearSleepPacketView *pkt, voi
         }
     } else if (type == 17) {
         ctx->stage_packets++;
-        int64_t current_ms = miwear_sleep_packet_timestamp_ms(pkt->ts_raw);
-        if (!miwear_sleep_timestamp_plausible(current_ms)) {
+        int64_t current_ms = salus_sleep_packet_timestamp_ms(pkt->ts_raw);
+        if (!salus_sleep_timestamp_plausible(current_ms)) {
             /* Gadgetbridge anchors each stage packet at its own timestamp. Chaining an unreadable
              * one onto the end of the previous packet duplicated stage runs past wake-up. */
             return TRUE;
         }
         for (uint16_t i = 0; i + 1 < data_len; i += 2) {
             const uint16_t val = ((uint16_t)d[i] << 8) | d[i + 1];
-            const int stage = miwear_sleep_decode_raw_stage((val >> 12) & 0x0F);
-            const int paint = miwear_normalize_sleep_stage(stage); /* -1 for "not asleep" */
+            const int stage = salus_sleep_decode_raw_stage((val >> 12) & 0x0F);
+            const int paint = salus_normalize_sleep_stage(stage); /* -1 for "not asleep" */
             int offset_min = (int)(val & 0x0FFF);
             if (offset_min < 0 || offset_min > 720) {
                 continue;
@@ -651,7 +651,7 @@ static gboolean parse_sleep_feature_packet(const MiwearSleepPacketView *pkt, voi
             if (offset_min == 0) {
                 offset_min = 1;
             }
-            MiwearSleepStageRow gr = {current_ms, stage};
+            SalusSleepStageRow gr = {current_ms, stage};
             g_array_append_val(ctx->stage_rows, gr);
             for (int m = 0; paint >= 0 && m < offset_min; m++) {
                 RecordedSample s = {0};
@@ -666,11 +666,11 @@ static gboolean parse_sleep_feature_packet(const MiwearSleepPacketView *pkt, voi
     } else if (type == 16 && data_len >= 11 && ctx->summary_out != NULL) {
         ctx->stage_packets++;
         /* Big-endian, like the rest of the packet body (Gadgetbridge SleepDetailsParser). */
-        const uint16_t sleep_duration = miwear_read_u16_be(d + 1);
-        const uint16_t wake_duration = miwear_read_u16_be(d + 3);
-        const uint16_t light_duration = miwear_read_u16_be(d + 5);
-        const uint16_t rem_duration = miwear_read_u16_be(d + 7);
-        const uint16_t deep_duration = miwear_read_u16_be(d + 9);
+        const uint16_t sleep_duration = salus_read_u16_be(d + 1);
+        const uint16_t wake_duration = salus_read_u16_be(d + 3);
+        const uint16_t light_duration = salus_read_u16_be(d + 5);
+        const uint16_t rem_duration = salus_read_u16_be(d + 7);
+        const uint16_t deep_duration = salus_read_u16_be(d + 9);
         ctx->summary_out->total_min = (int)sleep_duration;
         ctx->summary_out->awake_min = (int)wake_duration;
         ctx->summary_out->light_min = (int)light_duration;
@@ -703,7 +703,7 @@ static guint parse_sleep_feature_data(const uint8_t *payload,
         .bed_sec = bed_sec,
         .wake_sec = wake_sec,
     };
-    (void)miwear_sleep_foreach_packet(payload + pos, end - pos, parse_sleep_feature_packet, &ctx);
+    (void)salus_sleep_foreach_packet(payload + pos, end - pos, parse_sleep_feature_packet, &ctx);
     return ctx.stage_packets;
 }
 
@@ -724,7 +724,7 @@ static void finalize_sleep_parse(AppState *state,
     const int rem_min = summary != NULL && summary->valid ? summary->rem_min : -1;
     const int awake_min = summary != NULL && summary->valid ? summary->awake_min : -1;
     if (bed_time != 0 && wake_time != 0) {
-        (void)miwear_db_replace_sleep_details_header((int64_t)bed_time * 1000LL,
+        (void)salus_db_replace_sleep_details_header((int64_t)bed_time * 1000LL,
                                                      (int64_t)wake_time * 1000LL,
                                                      (int)sleep_full,
                                                      total_min,
@@ -734,10 +734,10 @@ static void finalize_sleep_parse(AppState *state,
                                                      awake_min);
     }
     if (stage_rows->len > 0) {
-        (void)miwear_db_replace_sleep_stage_samples((const MiwearSleepStageRow *)stage_rows->data, stage_rows->len);
+        (void)salus_db_replace_sleep_stage_samples((const SalusSleepStageRow *)stage_rows->data, stage_rows->len);
     }
     if (pulse_rows->len > 0) {
-        (void)miwear_db_replace_heart_pulse_samples((const MiwearHeartPulseRow *)pulse_rows->data, pulse_rows->len);
+        (void)salus_db_replace_heart_pulse_samples((const SalusHeartPulseRow *)pulse_rows->data, pulse_rows->len);
     }
 
     if (samples->len > 0) {
@@ -789,8 +789,8 @@ static void parse_full_day_sleep_report(AppState *state,
         append_log(state, "Full-day sleep parser: unsupported version.");
         return;
     }
-    MiwearFullDaySleepLayout layout;
-    const gboolean layout_ok = miwear_full_day_sleep_layout(payload, payload_len, version, &layout);
+    SalusFullDaySleepLayout layout;
+    const gboolean layout_ok = salus_full_day_sleep_layout(payload, payload_len, version, &layout);
     const size_t vf_len = version == 5 ? 2 : 3;
     gchar *vf_hex = payload_len > 8 + vf_len ? format_hex(payload + 8, vf_len) : g_strdup("?");
     gchar *layout_line = g_strdup_printf(
@@ -809,8 +809,8 @@ static void parse_full_day_sleep_report(AppState *state,
 
     const uint8_t sleep_full = layout.sleep_full;
     GArray *samples = g_array_new(FALSE, FALSE, sizeof(RecordedSample));
-    GArray *stage_rows = g_array_new(FALSE, FALSE, sizeof(MiwearSleepStageRow));
-    GArray *pulse_rows = g_array_new(FALSE, FALSE, sizeof(MiwearHeartPulseRow));
+    GArray *stage_rows = g_array_new(FALSE, FALSE, sizeof(SalusSleepStageRow));
+    GArray *pulse_rows = g_array_new(FALSE, FALSE, sizeof(SalusHeartPulseRow));
 
     const uint32_t bed_time = layout.go_bed_time != 0 ? layout.go_bed_time : layout.start_time;
     const uint32_t wake_time = layout.live_bed_time != 0 ? layout.live_bed_time : layout.end_time;
@@ -882,8 +882,8 @@ static void parse_sleep_details_for_log(AppState *state,
     int header_idx = 0;
 
     const uint8_t is_awake = payload[off++]; header_idx++;
-    const uint32_t bed_time = miwear_read_u32_le(payload + off); off += 4; header_idx++;
-    const uint32_t wake_time = miwear_read_u32_le(payload + off); off += 4; header_idx++;
+    const uint32_t bed_time = salus_read_u32_le(payload + off); off += 4; header_idx++;
+    const uint32_t wake_time = salus_read_u32_le(payload + off); off += 4; header_idx++;
     if (version >= 4) {
         if (sleep_header_valid_bit(header, (size_t)header_size, header_idx) && off < payload_len - 4) {
             off += 1;
@@ -892,15 +892,15 @@ static void parse_sleep_details_for_log(AppState *state,
     }
 
     GArray *samples = g_array_new(FALSE, FALSE, sizeof(RecordedSample));
-    GArray *stage_rows = g_array_new(FALSE, FALSE, sizeof(MiwearSleepStageRow));
-    GArray *pulse_rows = g_array_new(FALSE, FALSE, sizeof(MiwearHeartPulseRow));
+    GArray *stage_rows = g_array_new(FALSE, FALSE, sizeof(SalusSleepStageRow));
+    GArray *pulse_rows = g_array_new(FALSE, FALSE, sizeof(SalusHeartPulseRow));
 
     if (sleep_header_valid_bit(header, (size_t)header_size, header_idx) && off + 4 <= payload_len - 4) {
-        uint16_t unit = miwear_read_u16_le(payload + off); off += 2;
-        uint16_t count = miwear_read_u16_le(payload + off); off += 2;
+        uint16_t unit = salus_read_u16_le(payload + off); off += 2;
+        uint16_t count = salus_read_u16_le(payload + off); off += 2;
         uint32_t first_record = bed_time;
         if (count > 0 && version >= 2 && off + 4 <= payload_len - 4) {
-            first_record = miwear_read_u32_le(payload + off);
+            first_record = salus_read_u32_le(payload + off);
             off += 4;
         }
         for (uint16_t i = 0; i < count && off < payload_len - 4; i++) {
@@ -919,11 +919,11 @@ static void parse_sleep_details_for_log(AppState *state,
     header_idx++;
 
     if (sleep_header_valid_bit(header, (size_t)header_size, header_idx) && off + 4 <= payload_len - 4) {
-        uint16_t unit = miwear_read_u16_le(payload + off); off += 2;
-        uint16_t count = miwear_read_u16_le(payload + off); off += 2;
+        uint16_t unit = salus_read_u16_le(payload + off); off += 2;
+        uint16_t count = salus_read_u16_le(payload + off); off += 2;
         uint32_t first_record = bed_time;
         if (count > 0 && version >= 2 && off + 4 <= payload_len - 4) {
-            first_record = miwear_read_u32_le(payload + off);
+            first_record = salus_read_u32_le(payload + off);
             off += 4;
         }
         for (uint16_t i = 0; i < count && off < payload_len - 4; i++) {
@@ -944,7 +944,7 @@ static void parse_sleep_details_for_log(AppState *state,
     if (version >= 3) {
         if (sleep_header_valid_bit(header, (size_t)header_size, header_idx) && off + 4 <= payload_len - 4) {
             off += 2; /* unit */
-            uint16_t count = miwear_read_u16_le(payload + off); off += 2;
+            uint16_t count = salus_read_u16_le(payload + off); off += 2;
             if (count > 0 && version >= 2 && off + 4 <= payload_len - 4) {
                 off += 4;
             }
@@ -1000,7 +1000,7 @@ const char *activity_subtype_name(int type, int subtype) {
         }
     }
     if (type == 1) {
-        return miwear_sport_subtype_name(subtype);
+        return salus_sport_subtype_name(subtype);
     }
     return "UNKNOWN";
 }
@@ -1029,7 +1029,7 @@ void handle_activity_payload(AppState *state, const uint8_t *payload, size_t pay
     }
 
     const uint32_t actual_crc = crc32_ieee(payload, payload_len - 4);
-    const uint32_t expected_crc = miwear_read_u32_le(payload + payload_len - 4);
+    const uint32_t expected_crc = salus_read_u32_le(payload + payload_len - 4);
     if (actual_crc != expected_crc) {
         gchar *line = g_strdup_printf("Activity payload CRC mismatch: got=%08X expected=%08X", actual_crc, expected_crc);
         append_log(state, line);
@@ -1038,9 +1038,9 @@ void handle_activity_payload(AppState *state, const uint8_t *payload, size_t pay
     }
     ack_allowed = TRUE;
 
-    (void)miwear_db_ensure_device(state->selected_address);
+    (void)salus_db_ensure_device(state->selected_address);
 
-    const uint32_t ts = miwear_read_u32_le(payload);
+    const uint32_t ts = salus_read_u32_le(payload);
     const int8_t tz = (int8_t)payload[4];
     const int version = payload[5];
     const int flags = payload[6];
@@ -1055,7 +1055,7 @@ void handle_activity_payload(AppState *state, const uint8_t *payload, size_t pay
     g_free(line);
 
     if (type == 1) {
-        miwear_apply_workout_file(state, ts, subtype, detail, version, payload, payload_len);
+        salus_apply_workout_file(state, ts, subtype, detail, version, payload, payload_len);
     } else if (type == 0 && subtype == 0 && detail == 0) {
         parse_daily_details_for_log(state, ts, version, payload, payload_len);
     } else if (type == 0 && subtype == 0 && detail == 1) {
@@ -1069,10 +1069,10 @@ void handle_activity_payload(AppState *state, const uint8_t *payload, size_t pay
         parse_sleep_details_for_log(state, ts, version, payload, payload_len);
         mi_fitness_apply_health_payload(state, ts, tz, subtype, detail, version, payload, payload_len);
     } else if (type == 0 && subtype == 6) {
-        miwear_manual_entries_reset();
-        miwear_apply_manual_samples(state, ts, payload, payload_len);
+        salus_manual_entries_reset();
+        salus_apply_manual_samples(state, ts, payload, payload_len);
         mi_fitness_apply_health_payload(state, ts, tz, subtype, detail, version, payload, payload_len);
-        if (version >= 2 && miwear_manual_entries_committed() == 0) {
+        if (version >= 2 && salus_manual_entries_committed() == 0) {
             append_log(state,
                        "Manual samples (v2): no stress/SpO₂/HR extracted — not acking so the band can retry.");
             ack_allowed = FALSE;
@@ -1090,14 +1090,14 @@ finish:
         (void)send_activity_fetch_ack(state, file_id, 7);
         if (state->activity_fetch_inflight &&
             memcmp(file_id, state->activity_fetch_current_id, 7) != 0) {
-            miwear_log_fetch_transition(state, "ack-sidecar", file_id);
+            salus_log_fetch_transition(state, "ack-sidecar", file_id);
         } else {
-            miwear_log_fetch_transition(state, "ack", file_id);
+            salus_log_fetch_transition(state, "ack", file_id);
         }
     }
 
     if (advance_fetch_queue && state->activity_fetch_inflight) {
-        miwear_log_fetch_transition(state, ack_allowed ? "advance-next" : "drop-next", file_id);
+        salus_log_fetch_transition(state, ack_allowed ? "advance-next" : "drop-next", file_id);
         if (state->activity_fetch_timeout_source_id != 0) {
             g_source_remove(state->activity_fetch_timeout_source_id);
             state->activity_fetch_timeout_source_id = 0;
@@ -1109,6 +1109,6 @@ finish:
                ack_allowed &&
                file_id != NULL &&
                memcmp(file_id, state->activity_fetch_current_id, 7) != 0) {
-        miwear_log_fetch_transition(state, "waiting-current", state->activity_fetch_current_id);
+        salus_log_fetch_transition(state, "waiting-current", state->activity_fetch_current_id);
     }
 }

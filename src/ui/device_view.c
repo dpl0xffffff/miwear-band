@@ -1,52 +1,52 @@
 #include "ui_private.h"
 
-#include "miwear/config.h"
-#include "miwear/find_phone.h"
-#include "miwear/notifications/notifications.h"
-#include "miwear/spp/fitness_sync.h"
-#include "miwear/spp/weather.h"
-#include "miwear/spp/workout_gps.h"
-#include "miwear/spp/wire.h"
-#include "miwear/spp/wire_internal.h"
+#include "salus/config.h"
+#include "salus/find_phone.h"
+#include "salus/notifications/notifications.h"
+#include "salus/spp/fitness_sync.h"
+#include "salus/spp/weather.h"
+#include "salus/spp/workout_gps.h"
+#include "salus/spp/wire.h"
+#include "salus/spp/wire_internal.h"
 
 #include <string.h>
 
 static void on_connect_clicked(GtkButton *b, gpointer user_data) {
     (void)b;
     AppState *state = user_data;
-    if (mi_is_connected(state)) {
+    if (ui_is_connected(state)) {
         disconnect_socket(state);
-        miwear_dashboard_set_status(state, "Disconnected");
-        mi_toast(state, "Disconnected from the band");
-        miwear_dashboard_refresh(state);
+        salus_dashboard_set_status(state, "Disconnected");
+        ui_toast(state, "Disconnected from the band");
+        salus_dashboard_refresh(state);
     } else {
-        mi_connect_saved(state);
+        ui_connect_saved(state);
     }
 }
 
 static void on_sync_clicked(GtkButton *b, gpointer user_data) {
     (void)b;
     AppState *state = user_data;
-    miwear_fitness_sync_resync(state);
-    mi_toast(state, "Syncing health data…");
+    salus_fitness_sync_resync(state);
+    ui_toast(state, "Syncing health data…");
 }
 
 static void on_find_clicked(GtkButton *b, gpointer user_data) {
     (void)b;
     AppState *state = user_data;
-    mi_toast(state, miwear_wire_find_band(state, TRUE) ? "The band is vibrating (about 45 s)"
+    ui_toast(state, salus_wire_find_band(state, TRUE) ? "The band is vibrating (about 45 s)"
                                                        : "Couldn't reach the band");
 }
 
 static void on_weather_clicked(GtkButton *b, gpointer user_data) {
     (void)b;
-    miwear_weather_push_cached(user_data);
-    mi_toast(user_data, "Sending weather to the band…");
+    salus_weather_push_cached(user_data);
+    ui_toast(user_data, "Sending weather to the band…");
 }
 
 static void on_find_phone_stop(GtkButton *b, gpointer user_data) {
     (void)b;
-    miwear_find_phone_dismiss(user_data);
+    salus_find_phone_dismiss(user_data);
 }
 
 static void on_notif_toggled(GObject *obj, GParamSpec *pspec, gpointer user_data) {
@@ -54,7 +54,7 @@ static void on_notif_toggled(GObject *obj, GParamSpec *pspec, gpointer user_data
     AppState *state = user_data;
     const gboolean on = adw_switch_row_get_active(ADW_SWITCH_ROW(obj));
     if (on != state->notifications_enabled) {
-        miwear_notifications_set_enabled(state, on);
+        salus_notifications_set_enabled(state, on);
     }
 }
 
@@ -66,25 +66,25 @@ static void on_share_location_toggled(GObject *obj, GParamSpec *pspec, gpointer 
         return;
     }
     state->share_location_with_band = on;
-    (void)miwear_config_save(state, NULL);
+    (void)salus_config_save(state, NULL);
     if (!on) {
-        miwear_workout_gps_stop(state, "location sharing turned off");
+        salus_workout_gps_stop(state, "location sharing turned off");
     }
 }
 
 static void on_notif_test(GtkButton *b, gpointer user_data) {
     (void)b;
-    miwear_notifications_send_test(user_data);
+    salus_notifications_send_test(user_data);
 }
 
 static void on_change_device(AdwActionRow *row, gpointer user_data) {
     (void)row;
-    miwear_ui_show_setup(user_data);
+    salus_ui_show_setup(user_data);
 }
 
 static void on_show_log(AdwActionRow *row, gpointer user_data) {
     (void)row;
-    mi_show_log_dialog(user_data);
+    ui_show_log_dialog(user_data);
 }
 
 static GtkWidget *row_button(GtkWidget *row, const char *label, GCallback cb, gpointer data) {
@@ -107,20 +107,20 @@ static GtkWidget *action_row(const char *title, const char *subtitle, const char
     return row;
 }
 
-GtkWidget *mi_device_page_new(AppState *state, MiwearDashboardUi *dash) {
+GtkWidget *ui_device_page_new(AppState *state, SalusDashboardUi *dash) {
     GtkWidget *page = adw_preferences_page_new();
 
     /* Hero */
     GtkWidget *hero_group = adw_preferences_group_new();
     GtkWidget *hero = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     gtk_widget_set_margin_top(hero, 6);
-    GtkWidget *icon = gtk_image_new_from_icon_name("miwear-watch-symbolic");
+    GtkWidget *icon = gtk_image_new_from_icon_name("salus-watch-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(icon), 48);
-    gtk_widget_add_css_class(icon, "mi-band-icon");
+    gtk_widget_add_css_class(icon, "salus-band-icon");
     gtk_widget_set_halign(icon, GTK_ALIGN_CENTER);
-    dash->dev_name = mi_label("Your band", "title-2", 0.5f);
-    dash->dev_address = mi_label("", "caption dimmed numeric", 0.5f);
-    dash->dev_state = mi_label("", "dimmed", 0.5f);
+    dash->dev_name = ui_label("Your band", "title-2", 0.5f);
+    dash->dev_address = ui_label("", "caption dimmed numeric", 0.5f);
+    dash->dev_state = ui_label("", "dimmed", 0.5f);
     gtk_label_set_wrap(GTK_LABEL(dash->dev_state), TRUE);
     gtk_label_set_justify(GTK_LABEL(dash->dev_state), GTK_JUSTIFY_CENTER);
     dash->dev_connect = gtk_button_new_with_label("Connect");
@@ -142,16 +142,16 @@ GtkWidget *mi_device_page_new(AppState *state, MiwearDashboardUi *dash) {
     dash->dev_battery_row = action_row("Battery", NULL, NULL);
     GtkWidget *batt_icon = gtk_image_new_from_icon_name("battery-missing-symbolic");
     adw_action_row_add_prefix(ADW_ACTION_ROW(dash->dev_battery_row), batt_icon);
-    g_object_set_data(G_OBJECT(dash->dev_battery_row), "mi-icon", batt_icon);
+    g_object_set_data(G_OBJECT(dash->dev_battery_row), "salus-icon", batt_icon);
     dash->dev_battery_bar = gtk_level_bar_new_for_interval(0, 100);
     gtk_widget_set_size_request(dash->dev_battery_bar, 120, -1);
     gtk_widget_set_valign(dash->dev_battery_bar, GTK_ALIGN_CENTER);
-    dash->dev_battery_label = mi_label("—", "numeric", 1.0f);
+    dash->dev_battery_label = ui_label("—", "numeric", 1.0f);
     gtk_widget_set_size_request(dash->dev_battery_label, 42, -1);
     adw_action_row_add_suffix(ADW_ACTION_ROW(dash->dev_battery_row), dash->dev_battery_bar);
     adw_action_row_add_suffix(ADW_ACTION_ROW(dash->dev_battery_row), dash->dev_battery_label);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(status), dash->dev_battery_row);
-    dash->dev_status_row = action_row("Band state", "Unknown until connected", "miwear-watch-symbolic");
+    dash->dev_status_row = action_row("Band state", "Unknown until connected", "salus-watch-symbolic");
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(status), dash->dev_status_row);
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(status));
 
@@ -245,13 +245,13 @@ static const char *battery_icon(int pct, gboolean charging) {
     return buf;
 }
 
-void mi_device_refresh(AppState *state) {
-    MiwearDashboardUi *dash = state->dash_ui;
+void ui_device_refresh(AppState *state) {
+    SalusDashboardUi *dash = state->dash_ui;
     if (dash == NULL || dash->dev_name == NULL) {
         return;
     }
-    const gboolean connected = mi_is_connected(state);
-    const gboolean have_device = miwear_ui_has_saved_device(state);
+    const gboolean connected = ui_is_connected(state);
+    const gboolean have_device = salus_ui_has_saved_device(state);
     gtk_label_set_text(GTK_LABEL(dash->dev_name),
                        state->device_display_name != NULL && state->device_display_name[0] != '\0'
                            ? state->device_display_name
@@ -279,7 +279,7 @@ void mi_device_refresh(AppState *state) {
         gtk_label_set_text(GTK_LABEL(dash->dev_battery_label), b);
         gtk_level_bar_set_value(GTK_LEVEL_BAR(dash->dev_battery_bar), dash->battery);
         adw_action_row_set_subtitle(ADW_ACTION_ROW(dash->dev_battery_row), charging ? "Charging" : "");
-        gtk_image_set_from_icon_name(g_object_get_data(G_OBJECT(dash->dev_battery_row), "mi-icon"),
+        gtk_image_set_from_icon_name(g_object_get_data(G_OBJECT(dash->dev_battery_row), "salus-icon"),
                                      battery_icon(dash->battery, charging));
     } else {
         gtk_label_set_text(GTK_LABEL(dash->dev_battery_label), "—");
@@ -309,7 +309,7 @@ void mi_device_refresh(AppState *state) {
     adw_action_row_set_subtitle(ADW_ACTION_ROW(dash->dev_weather_row),
                                 state->weather_last_status != NULL ? state->weather_last_status
                                                                    : "Send the current forecast to the band");
-    gtk_widget_set_visible(dash->dev_find_phone_row, miwear_find_phone_is_active(state));
+    gtk_widget_set_visible(dash->dev_find_phone_row, salus_find_phone_is_active(state));
     if (adw_switch_row_get_active(ADW_SWITCH_ROW(dash->dev_notif_switch)) != state->notifications_enabled) {
         adw_switch_row_set_active(ADW_SWITCH_ROW(dash->dev_notif_switch), state->notifications_enabled);
     }
@@ -329,6 +329,6 @@ void mi_device_refresh(AppState *state) {
     g_snprintf(v, sizeof(v), state->profile_max_hr > 0 ? "%u bpm" : "—", state->profile_max_hr);
     adw_action_row_set_subtitle(ADW_ACTION_ROW(dash->dev_profile_rows[3]), v);
     g_snprintf(v, sizeof(v), "%u active minutes a day",
-               state->goal_moving > 0 ? state->goal_moving : miwear_activity_goal_default());
+               state->goal_moving > 0 ? state->goal_moving : salus_activity_goal_default());
     adw_action_row_set_subtitle(ADW_ACTION_ROW(dash->dev_profile_rows[4]), v);
 }

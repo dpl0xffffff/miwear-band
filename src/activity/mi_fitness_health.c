@@ -1,12 +1,12 @@
-#include "miwear/activity/mi_fitness_health.h"
-#include "miwear/activity/mi_fitness_sleep_stages.h"
-#include "miwear/activity/mi_fitness_data.h"
-#include "miwear/activity/mi_fitness_oneden.h"
-#include "miwear/activity/manual.h"
-#include "miwear/app.h"
-#include "miwear/db/db.h"
-#include "miwear/ui/health_data.h"
-#include "miwear/ui/dashboard.h"
+#include "salus/activity/mi_fitness_health.h"
+#include "salus/activity/mi_fitness_sleep_stages.h"
+#include "salus/activity/mi_fitness_data.h"
+#include "salus/activity/mi_fitness_oneden.h"
+#include "salus/activity/manual.h"
+#include "salus/app.h"
+#include "salus/db/db.h"
+#include "salus/ui/health_data.h"
+#include "salus/ui/dashboard.h"
 
 #include <string.h>
 
@@ -59,8 +59,8 @@ static int json_optional_int(JsonObject *obj, const char *key) {
 }
 
 static void apply_daily_activity_record_schema(AppState *state, JsonNode *decoded, uint32_t ts) {
-    const guint pressure_points = miwear_apply_pressure_from_activity_record_json(state, decoded, ts);
-    const guint moderate_min = miwear_count_moderate_activity_minutes_json(decoded);
+    const guint pressure_points = salus_apply_pressure_from_activity_record_json(state, decoded, ts);
+    const guint moderate_min = salus_count_moderate_activity_minutes_json(decoded);
 
     gchar *line = g_strdup_printf(
         "Daily activity record (schema): moderate+ minutes=%u pressure points=%u",
@@ -69,7 +69,7 @@ static void apply_daily_activity_record_schema(AppState *state, JsonNode *decode
     append_log(state, line);
     g_free(line);
     if (pressure_points > 0) {
-        miwear_dashboard_schedule_refresh(state);
+        salus_dashboard_schedule_refresh(state);
     }
 }
 
@@ -84,7 +84,7 @@ static void apply_daily_activity_report_schema(AppState *state, JsonNode *decode
         hdr != NULL ? (uint32_t)json_obj_int64(hdr, "timestamp", 0) : 0;
     const int tz = hdr != NULL ? json_obj_int64(hdr, "timezone", 0) : 0;
 
-    MiwearDailySummaryRow dr = {0};
+    SalusDailySummaryRow dr = {0};
     dr.timestamp_ms = (int64_t)ts * 1000LL;
     dr.timezone = tz;
     dr.steps = json_obj_int64(body, "totalSteps", 0);
@@ -103,9 +103,9 @@ static void apply_daily_activity_report_schema(AppState *state, JsonNode *decode
     const int stress_avg = json_optional_int(body, "avgStress");
     const int stress_max = json_optional_int(body, "maxStress");
     const int stress_min = json_optional_int(body, "minStress");
-    dr.stress_avg = miwear_stress_value_valid(stress_avg) ? stress_avg : 0;
-    dr.stress_max = miwear_stress_value_valid(stress_max) ? stress_max : 0;
-    dr.stress_min = miwear_stress_value_valid(stress_min) ? stress_min : 0;
+    dr.stress_avg = salus_stress_value_valid(stress_avg) ? stress_avg : 0;
+    dr.stress_max = salus_stress_value_valid(stress_max) ? stress_max : 0;
+    dr.stress_min = salus_stress_value_valid(stress_min) ? stress_min : 0;
 
     dr.standing_bits = json_obj_int64(body, "standingindicator", 0);
 
@@ -113,11 +113,11 @@ static void apply_daily_activity_report_schema(AppState *state, JsonNode *decode
     const int spo2_max = json_optional_int(body, "maxOxygenSaturation");
     const int spo2_min = json_optional_int(body, "minOxygenSaturation");
     const int spo2_now = json_optional_int(body, "oxygenSaturation");
-    dr.spo2_avg = miwear_spo2_value_valid(spo2_avg) ? spo2_avg
-                  : miwear_spo2_value_valid(spo2_now) ? spo2_now
+    dr.spo2_avg = salus_spo2_value_valid(spo2_avg) ? spo2_avg
+                  : salus_spo2_value_valid(spo2_now) ? spo2_now
                                                       : 0;
-    dr.spo2_max = miwear_spo2_value_valid(spo2_max) ? spo2_max : 0;
-    dr.spo2_min = miwear_spo2_value_valid(spo2_min) ? spo2_min : 0;
+    dr.spo2_max = salus_spo2_value_valid(spo2_max) ? spo2_max : 0;
+    dr.spo2_min = salus_spo2_value_valid(spo2_min) ? spo2_min : 0;
     dr.spo2_max_ts_sec = (int32_t)json_obj_int64(body, "maxOxygenSaturationTime", 0);
     dr.spo2_min_ts_sec = (int32_t)json_obj_int64(body, "minOxygenSaturationTime", 0);
 
@@ -130,7 +130,7 @@ static void apply_daily_activity_report_schema(AppState *state, JsonNode *decode
     dr.vitality_current = json_obj_int64(body, "totalPast7dayearnedPoints", 0);
     dr.has_training_vitality = dr.vitality_current > 0 || dr.training_load_day > 0;
 
-    (void)miwear_db_replace_daily_summary(&dr);
+    (void)salus_db_replace_daily_summary(&dr);
     health_apply_daily_summary(state, &dr);
 
     gchar *line = g_strdup_printf(
@@ -139,7 +139,7 @@ static void apply_daily_activity_report_schema(AppState *state, JsonNode *decode
         dr.steps,
         (long long)json_obj_int64(body, "totalCalories", -1),
         (long long)json_obj_int64(body, "totalactiveCalories", -1),
-        miwear_standing_hours_from_bitmap(dr.standing_bits),
+        salus_standing_hours_from_bitmap(dr.standing_bits),
         dr.stress_avg,
         dr.spo2_avg);
     append_log(state, line);
@@ -237,7 +237,7 @@ void mi_fitness_apply_schema_health(AppState *state,
             }
             break;
         case 6:
-            miwear_apply_manual_measurement_json(state, ts, decoded);
+            salus_apply_manual_measurement_json(state, ts, decoded);
             break;
         default:
             break;
@@ -249,8 +249,8 @@ static gboolean native_split(const uint8_t *payload,
                              int wire_daily_type,
                              int detail,
                              int version,
-                             MiwearFitnessBinarySlice *slice,
-                             MiwearFitnessDataId *id_out) {
+                             SalusFitnessBinarySlice *slice,
+                             SalusFitnessDataId *id_out) {
     const size_t wire_len = payload_len >= 4 ? payload_len - 4 : payload_len;
     if (!mi_fitness_data_id_from_payload(payload, wire_len, detail, id_out)) {
         return FALSE;
@@ -290,8 +290,8 @@ gboolean mi_fitness_apply_native_health(AppState *state,
         return FALSE;
     }
     const int apk = mi_fitness_apk_daily_type(wire_daily_type);
-    MiwearFitnessDataId id;
-    MiwearFitnessBinarySlice slice;
+    SalusFitnessDataId id;
+    SalusFitnessBinarySlice slice;
     if (!native_split(payload, payload_len, wire_daily_type, detail, version, &slice, &id)) {
         return FALSE;
     }

@@ -1,6 +1,6 @@
-#include "miwear/local_time.h"
+#include "salus/local_time.h"
 
-void miwear_local_day_cursor_init(MiwearLocalDayCursor *c) {
+void salus_local_day_cursor_init(SalusLocalDayCursor *c) {
     c->tz = g_time_zone_new_local();
     c->win_start = 0;
     c->win_end = 0;
@@ -8,7 +8,7 @@ void miwear_local_day_cursor_init(MiwearLocalDayCursor *c) {
     c->day_key[0] = '\0';
 }
 
-void miwear_local_day_cursor_clear(MiwearLocalDayCursor *c) {
+void salus_local_day_cursor_clear(SalusLocalDayCursor *c) {
     if (c->tz != NULL) {
         g_time_zone_unref(c->tz);
         c->tz = NULL;
@@ -23,7 +23,7 @@ static gboolean offset_constant(GTimeZone *tz, gint64 start, gint64 end) {
     return a == b;
 }
 
-static gboolean cursor_refill(MiwearLocalDayCursor *c, gint64 unix_sec) {
+static gboolean cursor_refill(SalusLocalDayCursor *c, gint64 unix_sec) {
     GDateTime *dt = g_date_time_new_from_unix_local(unix_sec);
     if (dt == NULL) {
         return FALSE;
@@ -54,7 +54,7 @@ static gboolean cursor_refill(MiwearLocalDayCursor *c, gint64 unix_sec) {
     return TRUE;
 }
 
-gboolean miwear_local_day_cursor_resolve(MiwearLocalDayCursor *c,
+gboolean salus_local_day_cursor_resolve(SalusLocalDayCursor *c,
                                          gint64 unix_sec,
                                          const gchar **day_key_out,
                                          guint16 *minute_of_day_out) {
@@ -72,7 +72,7 @@ gboolean miwear_local_day_cursor_resolve(MiwearLocalDayCursor *c,
     return TRUE;
 }
 
-gchar *miwear_local_day_key(gint64 unix_sec) {
+gchar *salus_local_day_key(gint64 unix_sec) {
     GDateTime *dt = g_date_time_new_from_unix_local(unix_sec);
     if (dt == NULL) {
         return NULL;

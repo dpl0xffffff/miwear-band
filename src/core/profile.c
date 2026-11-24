@@ -1,15 +1,15 @@
-#include "miwear/profile.h"
-#include "miwear/ui/health_data.h"
+#include "salus/profile.h"
+#include "salus/ui/health_data.h"
 
-guint miwear_gender_config_to_proto(guint config_gender) {
-    return config_gender == MIWEAR_GENDER_FEMALE ? 2u : 1u;
+guint salus_gender_config_to_proto(guint config_gender) {
+    return config_gender == SALUS_GENDER_FEMALE ? 2u : 1u;
 }
 
-gboolean miwear_profile_shows_cycles(guint config_gender) {
-    return config_gender == MIWEAR_GENDER_FEMALE;
+gboolean salus_profile_shows_cycles(guint config_gender) {
+    return config_gender == SALUS_GENDER_FEMALE;
 }
 
-void miwear_profile_apply_defaults(AppState *state) {
+void salus_profile_apply_defaults(AppState *state) {
     if (state == NULL) {
         return;
     }
@@ -26,7 +26,7 @@ void miwear_profile_apply_defaults(AppState *state) {
         state->profile_max_hr = 185;
     }
     if (state->profile_goal_moving == 0) {
-        state->profile_goal_moving = miwear_activity_goal_default();
+        state->profile_goal_moving = salus_activity_goal_default();
     }
     if (state->goal_moving == 0) {
         state->goal_moving = state->profile_goal_moving;

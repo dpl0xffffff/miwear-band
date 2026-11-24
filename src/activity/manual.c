@@ -1,7 +1,7 @@
-#include "miwear/activity/manual.h"
-#include "miwear/db/db.h"
-#include "miwear/ui/dashboard.h"
-#include "miwear/ui/health_data.h"
+#include "salus/activity/manual.h"
+#include "salus/db/db.h"
+#include "salus/ui/dashboard.h"
+#include "salus/ui/health_data.h"
 
 #include <json-glib/json-glib.h>
 #include <string.h>
@@ -15,11 +15,11 @@ enum {
 
 static guint s_manual_entries_committed;
 
-void miwear_manual_entries_reset(void) {
+void salus_manual_entries_reset(void) {
     s_manual_entries_committed = 0;
 }
 
-guint miwear_manual_entries_committed(void) {
+guint salus_manual_entries_committed(void) {
     return s_manual_entries_committed;
 }
 
@@ -31,8 +31,8 @@ enum {
     MEASURE_BLOOD_PRESSURE = 5,
 };
 
-static MiwearXiaomiActivityRow manual_row_template(int32_t sample_ts) {
-    MiwearXiaomiActivityRow r = {0};
+static SalusXiaomiActivityRow manual_row_template(int32_t sample_ts) {
+    SalusXiaomiActivityRow r = {0};
     r.timestamp_sec = sample_ts;
     r.raw_intensity = -1;
     r.raw_kind = -1;
@@ -58,7 +58,7 @@ static int stress_from_manual_item(JsonObject *item) {
         return -1;
     }
     const int v = json_obj_int_opt(json_object_get_object_member(item, "stressObj"), "stress");
-    return miwear_stress_value_valid(v) ? v : -1;
+    return salus_stress_value_valid(v) ? v : -1;
 }
 
 static void commit_manual_rows(AppState *state, uint32_t file_day_ts, GArray *act_rows, const char *log_tag) {
@@ -68,17 +68,17 @@ static void commit_manual_rows(AppState *state, uint32_t file_day_ts, GArray *ac
 
     if (count > 0) {
         for (guint i = 0; i < count; i++) {
-            const MiwearXiaomiActivityRow *r = &g_array_index(act_rows, MiwearXiaomiActivityRow, i);
-            if (miwear_stress_value_valid(r->stress) && r->timestamp_sec >= latest_stress_ts) {
+            const SalusXiaomiActivityRow *r = &g_array_index(act_rows, SalusXiaomiActivityRow, i);
+            if (salus_stress_value_valid(r->stress) && r->timestamp_sec >= latest_stress_ts) {
                 latest_stress_ts = r->timestamp_sec;
                 latest_stress = r->stress;
             }
         }
-        (void)miwear_db_replace_xiaomi_activity_batch((const MiwearXiaomiActivityRow *)act_rows->data, count);
-        recorded_merge_xiaomi_activity_rows(state, (const MiwearXiaomiActivityRow *)act_rows->data, count);
+        (void)salus_db_replace_xiaomi_activity_batch((const SalusXiaomiActivityRow *)act_rows->data, count);
+        recorded_merge_xiaomi_activity_rows(state, (const SalusXiaomiActivityRow *)act_rows->data, count);
     }
 
-    miwear_dashboard_refresh(state);
+    salus_dashboard_refresh(state);
 
     gchar *summary = NULL;
     if (latest_stress >= 0) {
@@ -124,7 +124,7 @@ static void json_harvest_manual_row(JsonObject *item, int32_t fallback_ts, GArra
         sample_ts = fallback_ts;
     }
 
-    MiwearXiaomiActivityRow r = manual_row_template(sample_ts);
+    SalusXiaomiActivityRow r = manual_row_template(sample_ts);
     gboolean have = FALSE;
 
     if (json_object_has_member(item, "heartRateObj")) {
@@ -138,13 +138,13 @@ static void json_harvest_manual_row(JsonObject *item, int32_t fallback_ts, GArra
     if (json_object_has_member(item, "spo2Obj")) {
         JsonObject *sp = json_object_get_object_member(item, "spo2Obj");
         const int v = json_obj_int_opt(sp, "spo2");
-        if (miwear_spo2_value_valid(v)) {
+        if (salus_spo2_value_valid(v)) {
             r.spo2 = v;
             have = TRUE;
         }
     }
     const int stress_v = stress_from_manual_item(item);
-    if (miwear_stress_value_valid(stress_v)) {
+    if (salus_stress_value_valid(stress_v)) {
         r.stress = stress_v;
         have = TRUE;
         if (state != NULL) {
@@ -158,12 +158,12 @@ static void json_harvest_manual_row(JsonObject *item, int32_t fallback_ts, GArra
     }
 }
 
-guint miwear_apply_manual_measurement_json(AppState *state, uint32_t file_day_ts, JsonNode *decoded) {
+guint salus_apply_manual_measurement_json(AppState *state, uint32_t file_day_ts, JsonNode *decoded) {
     if (state == NULL || decoded == NULL || !JSON_NODE_HOLDS_OBJECT(decoded)) {
         return 0;
     }
     JsonObject *root = json_node_get_object(decoded);
-    GArray *act_rows = g_array_new(FALSE, FALSE, sizeof(MiwearXiaomiActivityRow));
+    GArray *act_rows = g_array_new(FALSE, FALSE, sizeof(SalusXiaomiActivityRow));
 
     /* manual_measurement_record_v2: body = array of {timestamp, measurementType, heartRateObj |
      * spo2Obj | stressObj | temperature | bloodPressure}. Only the items themselves carry a
@@ -230,25 +230,25 @@ static guint scan_legacy_manual_records(AppState *state,
                                         GArray *act_rows) {
     guint found = 0;
     for (size_t off = body_off; off + 6 <= body_len; off++) {
-        const uint32_t sample_ts = miwear_read_u32_le(payload + off);
+        const uint32_t sample_ts = salus_read_u32_le(payload + off);
         if (sample_ts < 1000000000u || sample_ts > 2000000000u) {
             continue;
         }
         const uint8_t typ = payload[off + 4];
         const int value = payload[off + 5];
-        MiwearXiaomiActivityRow r = manual_row_template((int32_t)sample_ts);
+        SalusXiaomiActivityRow r = manual_row_template((int32_t)sample_ts);
         if (typ == TYPE_HR || (typ & 0x0F) == MEASURE_HR) {
             if (value <= 0 || value >= 255) {
                 continue;
             }
             r.heart_rate = value;
         } else if (typ == TYPE_SPO2 || (typ & 0x0F) == MEASURE_SPO2) {
-            if (!miwear_spo2_value_valid(value)) {
+            if (!salus_spo2_value_valid(value)) {
                 continue;
             }
             r.spo2 = value;
         } else if (typ == TYPE_STRESS || (typ & 0x0F) == MEASURE_STRESS) {
-            if (!miwear_stress_value_valid(value)) {
+            if (!salus_stress_value_valid(value)) {
                 continue;
             }
             r.stress = value;
@@ -278,12 +278,12 @@ static gboolean parse_v2_measure_sample(AppState *state,
                                         const uint8_t *payload,
                                         size_t body_len,
                                         size_t *inout_off,
-                                        MiwearXiaomiActivityRow *out_row) {
+                                        SalusXiaomiActivityRow *out_row) {
     size_t off = *inout_off;
     if (off + 5 > body_len) {
         return FALSE;
     }
-    const uint32_t sample_ts = miwear_read_u32_le(payload + off);
+    const uint32_t sample_ts = salus_read_u32_le(payload + off);
     const uint8_t typ_byte = payload[off + 4];
     const int measure_type = typ_byte & 0x0F;
     const guint data_len = typ_byte >> 4;
@@ -293,7 +293,7 @@ static gboolean parse_v2_measure_sample(AppState *state,
         return FALSE;
     }
 
-    MiwearXiaomiActivityRow r = manual_row_template((int32_t)sample_ts);
+    SalusXiaomiActivityRow r = manual_row_template((int32_t)sample_ts);
     gboolean parsed = FALSE;
 
     switch (measure_type) {
@@ -307,7 +307,7 @@ static gboolean parse_v2_measure_sample(AppState *state,
         }
         case MEASURE_SPO2: {
             const int v = payload[value_off];
-            if (miwear_spo2_value_valid(v)) {
+            if (salus_spo2_value_valid(v)) {
                 r.spo2 = v;
                 parsed = TRUE;
             }
@@ -315,7 +315,7 @@ static gboolean parse_v2_measure_sample(AppState *state,
         }
         case MEASURE_STRESS: {
             const int v = payload[value_off];
-            if (miwear_stress_value_valid(v)) {
+            if (salus_stress_value_valid(v)) {
                 r.stress = v;
                 parsed = TRUE;
             }
@@ -323,7 +323,7 @@ static gboolean parse_v2_measure_sample(AppState *state,
         }
         case MEASURE_TEMPERATURE:
             if (payload_len >= 4) {
-                const uint32_t value = miwear_read_u32_le(payload + value_off);
+                const uint32_t value = salus_read_u32_le(payload + value_off);
                 if (state != NULL) {
                     gchar *tline =
                         g_strdup_printf("Manual temperature: %.2f (raw u32=%u)", value / 100.0, value);
@@ -359,7 +359,7 @@ static void apply_manual_samples_v2(AppState *state, uint32_t file_day_ts, const
     const size_t body_len = payload_len >= 4 ? payload_len - 4 : 0;
     const size_t body_off = manual_body_start(payload, body_len, version);
     size_t off = body_off;
-    GArray *act_rows = g_array_new(FALSE, FALSE, sizeof(MiwearXiaomiActivityRow));
+    GArray *act_rows = g_array_new(FALSE, FALSE, sizeof(SalusXiaomiActivityRow));
 
     while (off + 5 <= body_len) {
         const size_t before = off;
@@ -367,7 +367,7 @@ static void apply_manual_samples_v2(AppState *state, uint32_t file_day_ts, const
         const int v2_type = typ_byte & 0x0F;
         const guint data_len = typ_byte >> 4;
         if (v2_type >= MEASURE_HR && v2_type <= MEASURE_BLOOD_PRESSURE) {
-            MiwearXiaomiActivityRow r;
+            SalusXiaomiActivityRow r;
             if (parse_v2_measure_sample(state, payload, body_len, &off, &r)) {
                 g_array_append_val(act_rows, r);
             } else {
@@ -390,7 +390,7 @@ static void apply_manual_samples_v2(AppState *state, uint32_t file_day_ts, const
     g_array_unref(act_rows);
 }
 
-void miwear_apply_manual_samples(AppState *state, uint32_t file_day_ts, const uint8_t *payload, size_t payload_len) {
+void salus_apply_manual_samples(AppState *state, uint32_t file_day_ts, const uint8_t *payload, size_t payload_len) {
     if (payload_len > 5 && payload[5] >= 2) {
         apply_manual_samples_v2(state, file_day_ts, payload, payload_len);
         return;
@@ -411,15 +411,15 @@ void miwear_apply_manual_samples(AppState *state, uint32_t file_day_ts, const ui
         off += 1;
     }
 
-    GArray *act_rows = g_array_new(FALSE, FALSE, sizeof(MiwearXiaomiActivityRow));
+    GArray *act_rows = g_array_new(FALSE, FALSE, sizeof(SalusXiaomiActivityRow));
 
     while (off + 5 <= body_len) {
-        const uint32_t sample_ts = miwear_read_u32_le(payload + off);
+        const uint32_t sample_ts = salus_read_u32_le(payload + off);
         const uint8_t typ = payload[off + 4];
         const int v2_type = typ & 0x0F;
 
         if (v2_type >= MEASURE_HR && v2_type <= MEASURE_BLOOD_PRESSURE) {
-            MiwearXiaomiActivityRow r;
+            SalusXiaomiActivityRow r;
             if (parse_v2_measure_sample(state, payload, body_len, &off, &r)) {
                 g_array_append_val(act_rows, r);
             }
@@ -437,7 +437,7 @@ void miwear_apply_manual_samples(AppState *state, uint32_t file_day_ts, const ui
             if (off + 4 > body_len) {
                 break;
             }
-            value = miwear_read_u32_le(payload + off);
+            value = salus_read_u32_le(payload + off);
             off += 4;
         } else {
             gchar *line = g_strdup_printf("Manual samples: unknown type 0x%02X", typ);
@@ -450,7 +450,7 @@ void miwear_apply_manual_samples(AppState *state, uint32_t file_day_ts, const ui
             continue;
         }
 
-        MiwearXiaomiActivityRow r = manual_row_template((int32_t)sample_ts);
+        SalusXiaomiActivityRow r = manual_row_template((int32_t)sample_ts);
         if (typ == TYPE_HR) {
             r.heart_rate = (int)value;
         } else if (typ == TYPE_SPO2) {

@@ -1,13 +1,13 @@
 /* Workout report decoding against the tables extracted from Mi Fitness. */
 
-#include "miwear/activity/mi_fitness_report_tables.h"
-#include "miwear/activity/mi_fitness_sport_report.h"
-#include "miwear/activity/mi_fitness_validity.h"
-#include "miwear/activity/mi_fitness_data.h"
-#include "miwear/activity/schema_reader.h"
-#include "miwear/activity/mi_fitness_sport_record.h"
-#include "miwear/activity/workout_record.h"
-#include "miwear/db/workout_store.h"
+#include "salus/activity/mi_fitness_report_tables.h"
+#include "salus/activity/mi_fitness_sport_report.h"
+#include "salus/activity/mi_fitness_validity.h"
+#include "salus/activity/mi_fitness_data.h"
+#include "salus/activity/schema_reader.h"
+#include "salus/activity/mi_fitness_sport_record.h"
+#include "salus/activity/workout_record.h"
+#include "salus/db/workout_store.h"
 
 #include <math.h>
 
@@ -25,7 +25,7 @@ static GByteArray *encode_report(int sport, int version, const Val *vals, size_t
     size_t count = 0;
     const MiFitnessOneDimenField *f = mi_fitness_report_fields(sport, &count, NULL);
     g_assert_nonnull(f);
-    MiwearFitnessDataId id = {.data_type = 1, .file_type = 1, .sport_type = (uint8_t)sport, .version = (uint8_t)version};
+    SalusFitnessDataId id = {.data_type = 1, .file_type = 1, .sport_type = (uint8_t)sport, .version = (uint8_t)version};
     const int vlen = mi_fitness_data_validity_len(&id);
     g_assert_cmpint(vlen, >=, 0);
 
@@ -78,7 +78,7 @@ static void test_swim_report(void) {
                      {18, 90},        {35, 920},       {36, 2},   {39, 60},  {40, 38}, {42, 25}, {157, 31},
                      {110, 88},       {111, 2},        {29, 20},  {117, 12}};
     GByteArray *b = encode_report(9, 8, v, G_N_ELEMENTS(v)); /* v8: heart rate exists from v8 on */
-    MiwearWorkoutSummary s = {0};
+    SalusWorkoutSummary s = {0};
     g_assert_true(mi_fitness_parse_sport_report(b->data, b->len, 9, 8, &s));
     g_assert_cmpint(s.duration_sec, ==, 2400);
     g_assert_cmpint(s.distance_m, ==, 1500);
@@ -94,8 +94,8 @@ static void test_swim_report(void) {
     g_assert_cmpint(s.training_load_level, ==, 2);
     g_assert_cmpint(s.recovery_min, ==, 20 * 60);
     g_assert_true(s.has_swim_detail);
-    g_assert_true(miwear_workout_has_metric(&s, 40));
-    miwear_workout_summary_clear(&s);
+    g_assert_true(salus_workout_has_metric(&s, 40));
+    salus_workout_summary_clear(&s);
     g_byte_array_unref(b);
 }
 
@@ -105,7 +105,7 @@ static void test_outdoor_step_subsport(void) {
                      {14, 188}, {16, 151},       {17, 182}, {18, 96},  {27, 47}, {109, 5},   {110, 120},
                      {111, 3},  {148, 98},       {34, 300}, {30, 60},  {162, 95}};
     GByteArray *b = encode_report(22, 6, v, G_N_ELEMENTS(v));
-    MiwearWorkoutSummary s = {0};
+    SalusWorkoutSummary s = {0};
     g_assert_true(mi_fitness_parse_sport_report(b->data, b->len, 22, 6, &s));
     g_assert_cmpint(s.sub_sport_type, ==, 1);
     g_assert_cmpstr(mi_fitness_sport_type_name(s.sub_sport_type), ==, "Outdoor run");
@@ -122,7 +122,7 @@ static void test_outdoor_step_subsport(void) {
     g_assert_cmpint(s.hr_zones.zone1_sec, ==, 300); /* 34 = zone 1 (warm-up) */
     g_assert_cmpint(s.hr_zones.zone5_sec, ==, 60);
     g_assert_cmpint(s.hr_zones.zone1_lower_bpm, ==, 0); /* zone limits only exist from v7 */
-    miwear_workout_summary_clear(&s);
+    salus_workout_summary_clear(&s);
     g_byte_array_unref(b);
 }
 
@@ -138,7 +138,7 @@ static void test_schema_matches_native(void) {
     GRand *rnd = g_rand_new_with_seed(42);
     for (size_t c = 0; c < G_N_ELEMENTS(cases); c++) {
         const int sport = cases[c].sport, version = cases[c].version;
-        MiwearFitnessDataId id = {.data_type = 1, .file_type = 1, .sport_type = (uint8_t)sport, .version = (uint8_t)version};
+        SalusFitnessDataId id = {.data_type = 1, .file_type = 1, .sport_type = (uint8_t)sport, .version = (uint8_t)version};
         const int vlen = mi_fitness_data_validity_len(&id);
         size_t count = 0;
         const MiFitnessOneDimenField *f = mi_fitness_report_fields(sport, &count, NULL);
@@ -212,7 +212,7 @@ static void test_schema_matches_native(void) {
 
 /* Wraps a record body: header with `valid` (padded to the version's validity length) + CRC. */
 static GByteArray *record_file(int sport, int version, const guint8 *valid, size_t nvalid, GByteArray *body) {
-    MiwearFitnessDataId id = {.data_type = 1, .file_type = 0, .sport_type = (uint8_t)sport, .version = (uint8_t)version};
+    SalusFitnessDataId id = {.data_type = 1, .file_type = 0, .sport_type = (uint8_t)sport, .version = (uint8_t)version};
     const int vlen = mi_fitness_data_validity_len(&id);
     g_assert_cmpint(vlen, >=, (int)nvalid);
     GByteArray *b = g_byte_array_new();
@@ -247,13 +247,13 @@ static void put_f32(GByteArray *b, float f) {
     put_u32(b, v);
 }
 
-static gboolean parse_record(GByteArray *file, int sport, int version, MiwearWorkoutSummary *s) {
-    const gboolean ok = miwear_parse_workout_record(file->data, file->len, sport, version, s);
+static gboolean parse_record(GByteArray *file, int sport, int version, SalusWorkoutSummary *s) {
+    const gboolean ok = salus_parse_workout_record(file->data, file->len, sport, version, s);
     g_byte_array_unref(file);
     return ok;
 }
 
-#define SAMPLE(s, i) (&g_array_index((s)->record_samples, MiwearWorkoutSample, (i)))
+#define SAMPLE(s, i) (&g_array_index((s)->record_samples, SalusWorkoutSample, (i)))
 
 /* Outdoor walk v6: FourDimen items, start altitude in the init data, a pause between segments. */
 static void step_record(GByteArray *b, unsigned cal, unsigned steps, unsigned hr, unsigned up, unsigned dm) {
@@ -288,7 +288,7 @@ static void test_record_outdoor_step(void) {
     step_record(body, 1, 2, 140, 1, 3);
     step_record(body, 1, 2, 141, 1, 3);
 
-    MiwearWorkoutSummary s = {0};
+    SalusWorkoutSummary s = {0};
     g_assert_true(parse_record(record_file(22, 6, valid, sizeof(valid), body), 22, 6, &s));
     g_assert_cmpuint(s.record_samples->len, ==, 5);
     const guint32 off[] = {0, 1, 2, 10, 11};
@@ -297,33 +297,33 @@ static void test_record_outdoor_step(void) {
     for (guint i = 0; i < 5; i++) {
         g_assert_cmpuint(SAMPLE(&s, i)->offset_sec, ==, off[i]);
         g_assert_cmpuint(SAMPLE(&s, i)->hr, ==, hr[i]);
-        g_assert_cmpfloat_with_epsilon(SAMPLE(&s, i)->v[MIWEAR_SERIES_ALTITUDE], alt[i], 1e-3);
-        g_assert_cmpfloat_with_epsilon(SAMPLE(&s, i)->v[MIWEAR_SERIES_DISTANCE], 1.2, 1e-6);
-        g_assert_cmpfloat(SAMPLE(&s, i)->v[MIWEAR_SERIES_CADENCE], ==, 150);
-        g_assert_cmpfloat(SAMPLE(&s, i)->v[MIWEAR_SERIES_PACE], ==, 400);
-        g_assert_cmpfloat(SAMPLE(&s, i)->v[MIWEAR_SERIES_POWER], ==, 210);
-        g_assert_true(isnan(SAMPLE(&s, i)->v[MIWEAR_SERIES_STRIDE])); /* item absent */
+        g_assert_cmpfloat_with_epsilon(SAMPLE(&s, i)->v[SALUS_SERIES_ALTITUDE], alt[i], 1e-3);
+        g_assert_cmpfloat_with_epsilon(SAMPLE(&s, i)->v[SALUS_SERIES_DISTANCE], 1.2, 1e-6);
+        g_assert_cmpfloat(SAMPLE(&s, i)->v[SALUS_SERIES_CADENCE], ==, 150);
+        g_assert_cmpfloat(SAMPLE(&s, i)->v[SALUS_SERIES_PACE], ==, 400);
+        g_assert_cmpfloat(SAMPLE(&s, i)->v[SALUS_SERIES_POWER], ==, 210);
+        g_assert_true(isnan(SAMPLE(&s, i)->v[SALUS_SERIES_STRIDE])); /* item absent */
     }
     g_assert_cmpuint(SAMPLE(&s, 1)->steps_delta, ==, 3);
-    g_assert_cmpfloat(SAMPLE(&s, 2)->v[MIWEAR_SERIES_CALORIES], ==, 2);
+    g_assert_cmpfloat(SAMPLE(&s, 2)->v[SALUS_SERIES_CALORIES], ==, 2);
     g_assert_cmpint(s.record_interval_sec, ==, 2); /* 11 s over 4 gaps */
 
     /* The series survive the DB JSON round trip; older rows without extra columns still load. */
-    gchar *json = miwear_workout_summary_to_json(22, &s);
-    MiwearWorkoutSummary back = {0};
+    gchar *json = salus_workout_summary_to_json(22, &s);
+    SalusWorkoutSummary back = {0};
     int sport = 0;
-    g_assert_true(miwear_workout_summary_from_json(json, &sport, &back));
+    g_assert_true(salus_workout_summary_from_json(json, &sport, &back));
     g_assert_cmpuint(back.record_samples->len, ==, 5);
     for (guint i = 0; i < 5; i++) {
-        for (int k = 0; k < MIWEAR_SERIES_COUNT; k++) {
+        for (int k = 0; k < SALUS_SERIES_COUNT; k++) {
             const float a = SAMPLE(&s, i)->v[k], c = SAMPLE(&back, i)->v[k];
             g_assert_true(isnan(a) ? isnan(c) : fabsf(a - c) < 0.01f);
         }
         g_assert_cmpuint(SAMPLE(&back, i)->hr, ==, hr[i]);
     }
     g_free(json);
-    miwear_workout_summary_clear(&back);
-    miwear_workout_summary_clear(&s);
+    salus_workout_summary_clear(&back);
+    salus_workout_summary_clear(&s);
 }
 
 /* Pool swim v3: OneDimen lap records carrying their own end time. */
@@ -358,16 +358,16 @@ static void test_record_swim(void) {
     put_u32(body, 5000);
     swim_lap(body, 5060, 45, 30);
     swim_lap(body, 5125, 48, 28);
-    MiwearWorkoutSummary s = {0};
+    SalusWorkoutSummary s = {0};
     g_assert_true(parse_record(record_file(9, 3, valid, sizeof(valid), body), 9, 3, &s));
     g_assert_cmpuint(s.record_samples->len, ==, 2);
     g_assert_cmpuint(SAMPLE(&s, 0)->offset_sec, ==, 60); /* laps sit at their end */
     g_assert_cmpuint(SAMPLE(&s, 1)->offset_sec, ==, 125);
-    g_assert_cmpfloat(SAMPLE(&s, 1)->v[MIWEAR_SERIES_SWOLF], ==, 48);
-    g_assert_cmpfloat(SAMPLE(&s, 0)->v[MIWEAR_SERIES_STROKE_RATE], ==, 30);
-    g_assert_cmpfloat(SAMPLE(&s, 0)->v[MIWEAR_SERIES_DISTANCE], ==, 25);
-    g_assert_cmpfloat(SAMPLE(&s, 0)->v[MIWEAR_SERIES_PACE], ==, 120);
-    miwear_workout_summary_clear(&s);
+    g_assert_cmpfloat(SAMPLE(&s, 1)->v[SALUS_SERIES_SWOLF], ==, 48);
+    g_assert_cmpfloat(SAMPLE(&s, 0)->v[SALUS_SERIES_STROKE_RATE], ==, 30);
+    g_assert_cmpfloat(SAMPLE(&s, 0)->v[SALUS_SERIES_DISTANCE], ==, 25);
+    g_assert_cmpfloat(SAMPLE(&s, 0)->v[SALUS_SERIES_PACE], ==, 120);
+    salus_workout_summary_clear(&s);
 }
 
 /* Rope skipping v2: GroupSportRecordParser framing (sets + rest records). */
@@ -428,27 +428,27 @@ static void test_record_diving(void) {
     dive_record(body, 105, -15, 1, 12);
     dive_record(body, 110, 210, 0, 8);
     dive_record(body, 112, 205, 2, 5); /* neither up nor down: Mi Fitness reports 0 */
-    MiwearWorkoutSummary s = {0};
+    SalusWorkoutSummary s = {0};
     g_assert_true(parse_record(record_file(25, 1, valid, sizeof(valid), body), 25, 1, &s));
     g_assert_cmpuint(s.record_samples->len, ==, 3);
-    g_assert_cmpfloat_with_epsilon(SAMPLE(&s, 0)->v[MIWEAR_SERIES_DEPTH], 10.5, 1e-5);
-    g_assert_cmpfloat_with_epsilon(SAMPLE(&s, 0)->v[MIWEAR_SERIES_WATER_TEMP], -1.5, 1e-5);
-    g_assert_cmpfloat_with_epsilon(SAMPLE(&s, 0)->v[MIWEAR_SERIES_SPEED], 1.2, 1e-5);
-    g_assert_cmpfloat_with_epsilon(SAMPLE(&s, 1)->v[MIWEAR_SERIES_SPEED], -0.8, 1e-5);
-    g_assert_cmpfloat(SAMPLE(&s, 2)->v[MIWEAR_SERIES_SPEED], ==, 0.0);
-    miwear_workout_summary_clear(&s);
+    g_assert_cmpfloat_with_epsilon(SAMPLE(&s, 0)->v[SALUS_SERIES_DEPTH], 10.5, 1e-5);
+    g_assert_cmpfloat_with_epsilon(SAMPLE(&s, 0)->v[SALUS_SERIES_WATER_TEMP], -1.5, 1e-5);
+    g_assert_cmpfloat_with_epsilon(SAMPLE(&s, 0)->v[SALUS_SERIES_SPEED], 1.2, 1e-5);
+    g_assert_cmpfloat_with_epsilon(SAMPLE(&s, 1)->v[SALUS_SERIES_SPEED], -0.8, 1e-5);
+    g_assert_cmpfloat(SAMPLE(&s, 2)->v[SALUS_SERIES_SPEED], ==, 0.0);
+    salus_workout_summary_clear(&s);
 }
 
 static void test_record_unsupported(void) {
     GByteArray *body = g_byte_array_new();
     put_u32(body, 0);
     put_u32(body, 0);
-    MiwearWorkoutSummary s = {0};
+    SalusWorkoutSummary s = {0};
     const guint8 valid[] = {0};
     /* Triathlon has no record parser in Mi Fitness; a version past the tables has no layout. */
     GByteArray *f = record_file(22, 6, valid, 1, body);
-    g_assert_false(miwear_parse_workout_record(f->data, f->len, 17, 1, &s));
-    g_assert_false(miwear_parse_workout_record(f->data, f->len, 22, 99, &s));
+    g_assert_false(salus_parse_workout_record(f->data, f->len, 17, 1, &s));
+    g_assert_false(salus_parse_workout_record(f->data, f->len, 22, 99, &s));
     g_byte_array_unref(f);
 }
 

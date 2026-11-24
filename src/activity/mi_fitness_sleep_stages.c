@@ -1,11 +1,11 @@
-#include "miwear/activity/mi_fitness_sleep_stages.h"
-#include "miwear/activity/mi_fitness_full_day_sleep.h"
-#include "miwear/activity/activity.h"
-#include "miwear/db/db.h"
-#include "miwear/sleep/mi_sleep_external.h"
-#include "miwear/sleep/mi_sleep_stage.h"
-#include "miwear/app.h"
-#include "miwear/ui/dashboard.h"
+#include "salus/activity/mi_fitness_sleep_stages.h"
+#include "salus/activity/mi_fitness_full_day_sleep.h"
+#include "salus/activity/activity.h"
+#include "salus/db/db.h"
+#include "salus/sleep/mi_sleep_external.h"
+#include "salus/sleep/mi_sleep_stage.h"
+#include "salus/app.h"
+#include "salus/ui/dashboard.h"
 
 #include <json-glib/json-glib.h>
 #include <string.h>
@@ -35,7 +35,7 @@ static const uint8_t *mi_fitness_sleep_src_bytes(const uint8_t *full_payload,
 }
 
 static void persist_stage_timeline(AppState *state,
-                                   const MiwearSleepStageRow *rows,
+                                   const SalusSleepStageRow *rows,
                                    size_t n,
                                    int deep_min,
                                    int light_min,
@@ -45,10 +45,10 @@ static void persist_stage_timeline(AppState *state,
                                    int64_t bed_ms,
                                    int64_t wake_ms) {
     if (n > 0) {
-        (void)miwear_db_replace_sleep_stage_samples(rows, n);
+        (void)salus_db_replace_sleep_stage_samples(rows, n);
     }
     if (bed_ms > 0 && wake_ms > 0) {
-        (void)miwear_db_replace_sleep_details_header(bed_ms,
+        (void)salus_db_replace_sleep_details_header(bed_ms,
                                                      wake_ms,
                                                      1,
                                                      total_min > 0 ? total_min : -1,
@@ -66,10 +66,10 @@ static void persist_stage_timeline(AppState *state,
         append_log(state, detail);
         g_free(detail);
         recorded_rebuild_from_db(state);
-        miwear_dashboard_schedule_refresh(state);
+        salus_dashboard_schedule_refresh(state);
     } else if (bed_ms > 0 && wake_ms > bed_ms) {
         recorded_rebuild_from_db(state);
-        miwear_dashboard_schedule_refresh(state);
+        salus_dashboard_schedule_refresh(state);
     }
 }
 
@@ -92,7 +92,7 @@ void mi_fitness_apply_sleep_stages_from_feature(AppState *state,
         return;
     }
 
-    GArray *stage_rows = g_array_new(FALSE, FALSE, sizeof(MiwearSleepStageRow));
+    GArray *stage_rows = g_array_new(FALSE, FALSE, sizeof(SalusSleepStageRow));
     int deep_min = -1, light_min = -1, rem_min = -1, awake_min = -1, total_min = -1;
 
     gchar *line = g_strdup_printf(
@@ -102,10 +102,10 @@ void mi_fitness_apply_sleep_stages_from_feature(AppState *state,
     append_log(state, line);
     g_free(line);
 
-    MiwearSleepAlgoResult algo = {0};
-    gboolean ok = miwear_sleep_run_mi_fitness_algo(sleep_src, sleep_src_len, bed_sec, wake_sec, &algo);
+    SalusSleepAlgoResult algo = {0};
+    gboolean ok = salus_sleep_run_mi_fitness_algo(sleep_src, sleep_src_len, bed_sec, wake_sec, &algo);
     if (!ok) {
-        ok = miwear_sleep_run_external_algo_cmd(state,
+        ok = salus_sleep_run_external_algo_cmd(state,
                                                 sleep_src,
                                                 sleep_src_len,
                                                 stage_rows,
@@ -138,11 +138,11 @@ void mi_fitness_apply_sleep_stages_from_feature(AppState *state,
         if (algo.log_note != NULL) {
             append_log(state, algo.log_note);
         }
-        miwear_sleep_algo_result_clear(&algo);
+        salus_sleep_algo_result_clear(&algo);
     }
     if (!ok) {
         append_log(state,
-                   "Mi Fitness sleep stages: no embedded stage packets (set MIWEAR_MI_SLEEP_ALGO_CMD "
+                   "Mi Fitness sleep stages: no embedded stage packets (set SALUS_MI_SLEEP_ALGO_CMD "
                    "for an external helper).");
         g_array_unref(stage_rows);
         (void)version;
@@ -150,7 +150,7 @@ void mi_fitness_apply_sleep_stages_from_feature(AppState *state,
     }
 
     persist_stage_timeline(state,
-                           (const MiwearSleepStageRow *)stage_rows->data,
+                           (const SalusSleepStageRow *)stage_rows->data,
                            stage_rows->len,
                            deep_min,
                            light_min,

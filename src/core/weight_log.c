@@ -1,5 +1,5 @@
-#include "miwear/weight_log.h"
-#include "miwear/config.h"
+#include "salus/weight_log.h"
+#include "salus/config.h"
 
 #include <glib/gstdio.h>
 #include <stdlib.h>
@@ -17,8 +17,8 @@ static guint today_yyyymmdd(void) {
 }
 
 static gint weight_entry_newest_first(gconstpointer a, gconstpointer b) {
-    const MiwearWeightEntry *ea = a;
-    const MiwearWeightEntry *eb = b;
+    const SalusWeightEntry *ea = a;
+    const SalusWeightEntry *eb = b;
     if (ea->date_yyyymmdd > eb->date_yyyymmdd) {
         return -1;
     }
@@ -28,7 +28,7 @@ static gint weight_entry_newest_first(gconstpointer a, gconstpointer b) {
     return 0;
 }
 
-static gboolean parse_entry(const char *token, MiwearWeightEntry *out) {
+static gboolean parse_entry(const char *token, SalusWeightEntry *out) {
     if (token == NULL || out == NULL) {
         return FALSE;
     }
@@ -51,7 +51,7 @@ static gboolean parse_entry(const char *token, MiwearWeightEntry *out) {
 static gchar *serialize_log(GArray *entries) {
     GString *s = g_string_new(NULL);
     for (guint i = 0; i < entries->len; i++) {
-        const MiwearWeightEntry *e = &g_array_index(entries, MiwearWeightEntry, i);
+        const SalusWeightEntry *e = &g_array_index(entries, SalusWeightEntry, i);
         if (s->len > 0) {
             g_string_append_c(s, ',');
         }
@@ -64,14 +64,14 @@ static gboolean persist_log(const AppState *state) {
     if (state == NULL || state->weight_log == NULL) {
         return FALSE;
     }
-    const char *cfg_path = miwear_config_default_path();
+    const char *cfg_path = salus_config_default_path();
     GKeyFile *kf = g_key_file_new();
     GError *err = NULL;
     g_key_file_load_from_file(kf, cfg_path, G_KEY_FILE_NONE, &err);
     g_clear_error(&err);
 
     if (state->weight_log->len > 0) {
-        const MiwearWeightEntry *latest = &g_array_index(state->weight_log, MiwearWeightEntry, 0);
+        const SalusWeightEntry *latest = &g_array_index(state->weight_log, SalusWeightEntry, 0);
         g_key_file_set_double(kf, WEIGHT_GROUP, "current_kg", latest->kg);
         g_key_file_set_integer(kf, WEIGHT_GROUP, "current_date", (gint)latest->date_yyyymmdd);
         gchar *log = serialize_log(state->weight_log);
@@ -97,17 +97,17 @@ static gboolean persist_log(const AppState *state) {
     return ok;
 }
 
-void miwear_weight_log_load(AppState *state) {
+void salus_weight_log_load(AppState *state) {
     if (state == NULL) {
         return;
     }
     if (state->weight_log == NULL) {
-        state->weight_log = g_array_new(FALSE, FALSE, sizeof(MiwearWeightEntry));
+        state->weight_log = g_array_new(FALSE, FALSE, sizeof(SalusWeightEntry));
     } else {
         g_array_set_size(state->weight_log, 0);
     }
 
-    const char *cfg_path = miwear_config_default_path();
+    const char *cfg_path = salus_config_default_path();
     GKeyFile *kf = g_key_file_new();
     GError *err = NULL;
     if (!g_key_file_load_from_file(kf, cfg_path, G_KEY_FILE_NONE, &err)) {
@@ -121,7 +121,7 @@ void miwear_weight_log_load(AppState *state) {
     if (log_str != NULL && log_str[0] != '\0') {
         gchar **tokens = g_strsplit(log_str, ",", -1);
         for (gchar **p = tokens; p != NULL && *p != NULL; p++) {
-            MiwearWeightEntry e = {0};
+            SalusWeightEntry e = {0};
             if (parse_entry(*p, &e)) {
                 g_array_append_val(state->weight_log, e);
             }
@@ -137,26 +137,26 @@ void miwear_weight_log_load(AppState *state) {
     state->weight_log_loaded = TRUE;
 }
 
-gboolean miwear_weight_log_has_entries(const AppState *state) {
+gboolean salus_weight_log_has_entries(const AppState *state) {
     return state != NULL && state->weight_log != NULL && state->weight_log->len > 0;
 }
 
-float miwear_weight_log_latest_kg(const AppState *state, guint *date_yyyymmdd_out) {
-    if (!miwear_weight_log_has_entries(state)) {
+float salus_weight_log_latest_kg(const AppState *state, guint *date_yyyymmdd_out) {
+    if (!salus_weight_log_has_entries(state)) {
         if (date_yyyymmdd_out != NULL) {
             *date_yyyymmdd_out = 0;
         }
         return 0.0f;
     }
-    const MiwearWeightEntry *e = &g_array_index(state->weight_log, MiwearWeightEntry, 0);
+    const SalusWeightEntry *e = &g_array_index(state->weight_log, SalusWeightEntry, 0);
     if (date_yyyymmdd_out != NULL) {
         *date_yyyymmdd_out = e->date_yyyymmdd;
     }
     return e->kg;
 }
 
-float miwear_weight_log_band_user_kg(const AppState *state) {
-    const float logged = miwear_weight_log_latest_kg(state, NULL);
+float salus_weight_log_band_user_kg(const AppState *state) {
+    const float logged = salus_weight_log_latest_kg(state, NULL);
     if (logged > 0.0f) {
         return logged;
     }
@@ -166,19 +166,19 @@ float miwear_weight_log_band_user_kg(const AppState *state) {
     return 70.0f;
 }
 
-gboolean miwear_weight_log_add_today(AppState *state, float kg) {
+gboolean salus_weight_log_add_today(AppState *state, float kg) {
     if (state == NULL || kg <= 0.0f || kg > 500.0f) {
         return FALSE;
     }
     if (state->weight_log == NULL) {
-        state->weight_log = g_array_new(FALSE, FALSE, sizeof(MiwearWeightEntry));
+        state->weight_log = g_array_new(FALSE, FALSE, sizeof(SalusWeightEntry));
     }
 
     const guint today = today_yyyymmdd();
-    MiwearWeightEntry entry = {.date_yyyymmdd = today, .kg = kg};
+    SalusWeightEntry entry = {.date_yyyymmdd = today, .kg = kg};
 
     for (guint i = 0; i < state->weight_log->len; i++) {
-        if (g_array_index(state->weight_log, MiwearWeightEntry, i).date_yyyymmdd == today) {
+        if (g_array_index(state->weight_log, SalusWeightEntry, i).date_yyyymmdd == today) {
             g_array_remove_index(state->weight_log, i);
             break;
         }

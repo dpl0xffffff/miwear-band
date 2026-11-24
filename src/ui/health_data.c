@@ -1,7 +1,7 @@
-#include "miwear/ui/health_data.h"
+#include "salus/ui/health_data.h"
 
-#include "miwear/db/db.h"
-#include "miwear/ui/dashboard.h"
+#include "salus/db/db.h"
+#include "salus/ui/dashboard.h"
 
 #include <json-glib/json-glib.h>
 #include <string.h>
@@ -16,7 +16,7 @@ static int sleep_stage_bucket(int stage) {
     }
 }
 
-void miwear_health_aggregate_day(AppState *state, const gchar *day_key, MiwearDayHealthAgg *out) {
+void salus_health_aggregate_day(AppState *state, const gchar *day_key, SalusDayHealthAgg *out) {
     memset(out, 0, sizeof(*out));
     out->day_key = day_key;
     out->steps = -1;
@@ -65,7 +65,7 @@ void miwear_health_aggregate_day(AppState *state, const gchar *day_key, MiwearDa
         }
     }
 
-    const MiwearDailySummaryRow *summary =
+    const SalusDailySummaryRow *summary =
         state->daily_summaries != NULL ? g_hash_table_lookup(state->daily_summaries, day_key) : NULL;
     if (summary != NULL) {
         out->has_summary = TRUE;
@@ -81,7 +81,7 @@ void miwear_health_aggregate_day(AppState *state, const gchar *day_key, MiwearDa
         }
     }
     if (state->sleep_duration_by_day != NULL) {
-        const MiwearSleepDurationSummary *sd = g_hash_table_lookup(state->sleep_duration_by_day, day_key);
+        const SalusSleepDurationSummary *sd = g_hash_table_lookup(state->sleep_duration_by_day, day_key);
         if (sd != NULL && sd->from_db) {
             if (sd->total_asleep > 0) {
                 out->sleep_total_band = sd->total_asleep;
@@ -104,16 +104,16 @@ void miwear_health_aggregate_day(AppState *state, const gchar *day_key, MiwearDa
     g_mutex_unlock(&state->recorded_lock);
 }
 
-gboolean miwear_spo2_value_valid(int spo2) {
+gboolean salus_spo2_value_valid(int spo2) {
     return spo2 > 0 && spo2 <= 100;
 }
 
-gboolean miwear_stress_value_valid(int stress) {
+gboolean salus_stress_value_valid(int stress) {
     return stress > 0 && stress < 255;
 }
 
-const char *miwear_pressure_level_label(int pressure) {
-    if (!miwear_stress_value_valid(pressure)) {
+const char *salus_pressure_level_label(int pressure) {
+    if (!salus_stress_value_valid(pressure)) {
         return "—";
     }
     if (pressure <= 25) {
@@ -139,7 +139,7 @@ static int json_item_cur_pressure(JsonObject *item) {
     return json_object_get_int_member(block, "curPressure");
 }
 
-guint miwear_apply_pressure_from_activity_record_json(AppState *state, JsonNode *decoded, uint32_t base_ts_sec) {
+guint salus_apply_pressure_from_activity_record_json(AppState *state, JsonNode *decoded, uint32_t base_ts_sec) {
     if (state == NULL || decoded == NULL || !JSON_NODE_HOLDS_OBJECT(decoded)) {
         return 0;
     }
@@ -153,7 +153,7 @@ guint miwear_apply_pressure_from_activity_record_json(AppState *state, JsonNode 
     }
     JsonArray *arr = json_node_get_array(body_node);
     const guint n = json_array_get_length(arr);
-    GArray *rows = g_array_new(FALSE, FALSE, sizeof(MiwearXiaomiActivityRow));
+    GArray *rows = g_array_new(FALSE, FALSE, sizeof(SalusXiaomiActivityRow));
 
     for (guint i = 0; i < n; i++) {
         JsonNode *el = json_array_get_element(arr, i);
@@ -161,10 +161,10 @@ guint miwear_apply_pressure_from_activity_record_json(AppState *state, JsonNode 
             continue;
         }
         const int pressure = json_item_cur_pressure(json_node_get_object(el));
-        if (!miwear_stress_value_valid(pressure)) {
+        if (!salus_stress_value_valid(pressure)) {
             continue;
         }
-        MiwearXiaomiActivityRow r = {0};
+        SalusXiaomiActivityRow r = {0};
         r.timestamp_sec = base_ts_sec > 0 ? (int32_t)(base_ts_sec + (uint32_t)i * 60u) : (int32_t)(i * 60);
         r.stress = pressure;
         r.heart_rate = -1;
@@ -174,16 +174,16 @@ guint miwear_apply_pressure_from_activity_record_json(AppState *state, JsonNode 
     }
 
     if (rows->len > 0) {
-        (void)miwear_db_replace_xiaomi_activity_batch((const MiwearXiaomiActivityRow *)rows->data, rows->len);
-        recorded_merge_xiaomi_activity_rows(state, (const MiwearXiaomiActivityRow *)rows->data, rows->len);
-        miwear_dashboard_schedule_refresh(state);
+        (void)salus_db_replace_xiaomi_activity_batch((const SalusXiaomiActivityRow *)rows->data, rows->len);
+        recorded_merge_xiaomi_activity_rows(state, (const SalusXiaomiActivityRow *)rows->data, rows->len);
+        salus_dashboard_schedule_refresh(state);
     }
     const guint count = rows->len;
     g_array_unref(rows);
     return count;
 }
 
-guint miwear_standing_display_value(int standing_field) {
+guint salus_standing_display_value(int standing_field) {
     if (standing_field <= 0) {
         return 0;
     }
@@ -200,7 +200,7 @@ guint miwear_standing_display_value(int standing_field) {
     return hours > 0 ? hours : (guint)standing_field;
 }
 
-guint miwear_activity_goal_default(void) {
+guint salus_activity_goal_default(void) {
     return 30;
 }
 
@@ -209,10 +209,10 @@ guint miwear_activity_goal_default(void) {
  * (activeStreng, daily activity record) is moderate (3) or higher (4 high, 5 intense).
  * Checked against the band: 10 minutes at intensity 3 → band shows 10.
  */
-#define MIWEAR_ACTIVE_INTENSITY_MIN 3
-#define MIWEAR_ACTIVE_INTENSITY_MAX 5
+#define SALUS_ACTIVE_INTENSITY_MIN 3
+#define SALUS_ACTIVE_INTENSITY_MAX 5
 
-guint miwear_count_activity_minutes_from_timeline(AppState *state, const gchar *day_key) {
+guint salus_count_activity_minutes_from_timeline(AppState *state, const gchar *day_key) {
     if (state == NULL || day_key == NULL) {
         return 0;
     }
@@ -223,7 +223,7 @@ guint miwear_count_activity_minutes_from_timeline(AppState *state, const gchar *
     if (arr != NULL) {
         for (guint i = 0; i < arr->len; i++) {
             const RecordedSample *s = &g_array_index(arr, RecordedSample, i);
-            if (s->intensity >= MIWEAR_ACTIVE_INTENSITY_MIN && s->intensity <= MIWEAR_ACTIVE_INTENSITY_MAX) {
+            if (s->intensity >= SALUS_ACTIVE_INTENSITY_MIN && s->intensity <= SALUS_ACTIVE_INTENSITY_MAX) {
                 count++;
             }
         }
@@ -232,8 +232,8 @@ guint miwear_count_activity_minutes_from_timeline(AppState *state, const gchar *
     return count;
 }
 
-guint miwear_standing_hours_from_bitmap(int standing_raw) {
-    return miwear_standing_display_value(standing_raw);
+guint salus_standing_hours_from_bitmap(int standing_raw) {
+    return salus_standing_display_value(standing_raw);
 }
 
 static int json_item_active_strength(JsonObject *item) {
@@ -247,7 +247,7 @@ static int json_item_active_strength(JsonObject *item) {
     return json_object_get_int_member(strength_obj, "activeStreng");
 }
 
-guint miwear_count_moderate_activity_minutes_json(JsonNode *decoded) {
+guint salus_count_moderate_activity_minutes_json(JsonNode *decoded) {
     if (decoded == NULL || !JSON_NODE_HOLDS_OBJECT(decoded)) {
         return 0;
     }
@@ -276,7 +276,7 @@ guint miwear_count_moderate_activity_minutes_json(JsonNode *decoded) {
     return 0;
 }
 
-float miwear_profile_bmi_kg_m2(float weight_kg, guint height_cm) {
+float salus_profile_bmi_kg_m2(float weight_kg, guint height_cm) {
     if (weight_kg <= 0.0f || height_cm == 0) {
         return 0.0f;
     }
@@ -284,7 +284,7 @@ float miwear_profile_bmi_kg_m2(float weight_kg, guint height_cm) {
     return weight_kg / (h_m * h_m);
 }
 
-int miwear_hr_zone_index(int hr_bpm, int max_hr) {
+int salus_hr_zone_index(int hr_bpm, int max_hr) {
     if (hr_bpm <= 0 || max_hr <= 0) {
         return 0;
     }
@@ -304,7 +304,7 @@ int miwear_hr_zone_index(int hr_bpm, int max_hr) {
     return 5;
 }
 
-const char *miwear_hr_zone_label(int zone) {
+const char *salus_hr_zone_label(int zone) {
     switch (zone) {
     case 1: return "Warm-up";
     case 2: return "Fat burn";
@@ -325,7 +325,7 @@ static GDate *date_from_yyyymmdd(guint yyyymmdd) {
     return g_date_new_dmy(d, m, y);
 }
 
-int miwear_cycle_day_of_period(GDate *today, guint last_period_yyyymmdd, guint cycle_length_days) {
+int salus_cycle_day_of_period(GDate *today, guint last_period_yyyymmdd, guint cycle_length_days) {
     if (today == NULL || last_period_yyyymmdd == 0 || cycle_length_days < 20 || cycle_length_days > 45) {
         return 0;
     }
@@ -342,7 +342,7 @@ int miwear_cycle_day_of_period(GDate *today, guint last_period_yyyymmdd, guint c
     return (int)(days % cycle_length_days) + 1;
 }
 
-const char *miwear_cycle_phase_label(int cycle_day, guint cycle_length_days) {
+const char *salus_cycle_phase_label(int cycle_day, guint cycle_length_days) {
     if (cycle_day <= 0 || cycle_length_days == 0) {
         return "Set cycle in config";
     }
