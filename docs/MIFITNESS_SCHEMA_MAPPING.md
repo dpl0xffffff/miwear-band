@@ -47,7 +47,7 @@ FitnessDataParser.parse(dataId, bytes)
 
 ### How miwear-band decodes workout summaries
 
-`src/activity/mi_fitness_sport_report.c` follows `FitnessDataParser.parse` for every sport type 1–26:
+`src/devices/xiaomi/mi_fitness_sport_report.c` follows `FitnessDataParser.parse` for every sport type 1–26:
 
 1. If `index.json` has a schema for the exact `(sport, report, version)`, the schema is turned into a
    field table at runtime (field names → report ids via `schema_field_ids.json`).

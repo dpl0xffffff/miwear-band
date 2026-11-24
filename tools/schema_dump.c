@@ -1,4 +1,4 @@
-#include "salus/activity/schema_reader.h"
+#include "salus/devices/xiaomi/schema_reader.h"
 
 #include <stdio.h>
 #include <stdlib.h>

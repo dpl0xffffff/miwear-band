@@ -85,11 +85,11 @@ You can also set MAC and auth key in the UI before connecting.
 
 | Path | Role |
 |------|------|
-| `src/spp/wire.c` | SPP framing, auth, protobuf dispatch |
-| `src/spp/fitness_sync.c` | Mi Fitness–style sync |
+| `src/devices/xiaomi/wire.c` | SPP framing, auth, protobuf dispatch |
+| `src/devices/xiaomi/fitness_sync.c` | Mi Fitness–style sync |
 | `src/ui/` | libadwaita UI: shell + Health (`dashboard.c`), `sleep_view.c`, `workouts_view.c`, `device_view.c`, setup (`ui.c`) |
 | `src/notifications/` | Desktop → band notifications |
-| `src/sleep/` | Sleep stage pipeline (`docs/SLEEP_STAGES.md`) |
+| `src/devices/xiaomi/` | Sleep stage pipeline (`docs/SLEEP_STAGES.md`) |
 | `docs/MIFITNESS_SYNC.md` | APK-derived sync reference |
 
 ## License

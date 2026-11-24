@@ -1,8 +1,8 @@
 /* Decoder tests against synthetic payloads built from the Gadgetbridge layouts. */
 
-#include "salus/activity/daily_details.h"
-#include "salus/activity/mi_fitness_full_day_sleep.h"
-#include "salus/sleep/mi_sleep_packets.h"
+#include "salus/devices/xiaomi/daily_details.h"
+#include "salus/devices/xiaomi/mi_fitness_full_day_sleep.h"
+#include "salus/devices/xiaomi/mi_sleep_packets.h"
 
 #include <glib.h>
 #include <string.h>

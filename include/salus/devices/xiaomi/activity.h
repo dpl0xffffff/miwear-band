@@ -1,0 +1,11 @@
+#ifndef SALUS_ACTIVITY_H
+#define SALUS_ACTIVITY_H
+
+#include "salus/app.h"
+
+void handle_activity_payload(AppState *state, const uint8_t *payload, size_t payload_len);
+const char *activity_subtype_name(int type, int subtype);
+
+#include "salus/devices/xiaomi/mi_sleep_packets.h"
+
+#endif

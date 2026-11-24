@@ -3,11 +3,11 @@
 #include "salus/config.h"
 #include "salus/find_phone.h"
 #include "salus/notifications/notifications.h"
-#include "salus/spp/fitness_sync.h"
-#include "salus/spp/weather.h"
-#include "salus/spp/workout_gps.h"
-#include "salus/spp/wire.h"
-#include "salus/spp/wire_internal.h"
+#include "salus/devices/xiaomi/fitness_sync.h"
+#include "salus/devices/xiaomi/weather.h"
+#include "salus/devices/xiaomi/workout_gps.h"
+#include "salus/devices/xiaomi/wire.h"
+#include "salus/devices/xiaomi/wire_internal.h"
 
 #include <string.h>
 

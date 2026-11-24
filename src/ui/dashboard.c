@@ -1,8 +1,8 @@
 #include "ui_private.h"
 
 #include "salus/profile.h"
-#include "salus/spp/fitness_sync.h"
-#include "salus/spp/wire.h"
+#include "salus/devices/xiaomi/fitness_sync.h"
+#include "salus/devices/xiaomi/wire.h"
 #include "salus/weight_log.h"
 
 #include <math.h>

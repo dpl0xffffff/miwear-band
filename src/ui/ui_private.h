@@ -5,7 +5,7 @@
 
 #include "salus/app.h"
 #include "salus/ui/dashboard.h"
-#include "salus/ui/health_data.h"
+#include "salus/store/health_data.h"
 
 #include <adwaita.h>
 #include <cairo.h>

@@ -1,6 +1,6 @@
 #include "salus/notifications/notifications.h"
 #include "salus/config.h"
-#include "salus/spp/wire_internal.h"
+#include "salus/devices/xiaomi/wire_internal.h"
 #include "salus/ui/dashboard.h"
 
 #include <string.h>

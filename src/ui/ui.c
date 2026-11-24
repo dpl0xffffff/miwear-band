@@ -1,19 +1,18 @@
 #include "salus/app.h"
-#include "salus/activity/activity.h"
 #include "salus/config.h"
-#include "salus/spp/fitness_sync.h"
-#include "salus/spp/wire.h"
+#include "salus/devices/xiaomi/fitness_sync.h"
+#include "salus/devices/xiaomi/wire.h"
 #include "salus/ui/ui.h"
-#include "salus/activity/workout_types.h"
+#include "salus/store/workout.h"
 #include "salus/notifications/notifications.h"
 #include "salus/find_phone.h"
 #include "salus/ui/dashboard.h"
 #include "ui_private.h"
-#include "salus/ui/health_data.h"
-#include "salus/sleep/mi_sleep_duration.h"
-#include "salus/db/db.h"
+#include "salus/store/health_data.h"
+#include "salus/store/sleep.h"
+#include "salus/store/db.h"
 #include "salus/local_time.h"
-#include "salus/spp/weather.h"
+#include "salus/devices/xiaomi/weather.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -886,7 +885,7 @@ static gboolean rebuild_sleep_time_cb(const SalusSleepTimeRow *r, gpointer user_
      * any) still give the breakdown. Never invent a timeline from the totals. */
     if (!rebuild_session_has_markers(ctx, bed_sec, wake_sec)) {
         for (gint64 sec = bed_sec; sec < wake_sec; sec += 60) {
-            rebuild_set_sleep_minute(ctx, sec, SALUS_SLEEP_STAGE_UNSPEC);
+            rebuild_set_sleep_minute(ctx, sec, SALUS_SLEEP_STAGE_UNKNOWN);
         }
     }
     return TRUE;

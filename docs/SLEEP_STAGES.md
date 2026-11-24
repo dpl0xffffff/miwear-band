@@ -1,6 +1,6 @@
 # Sleep stages (Mi Fitness parity)
 
-In-process pipeline under `src/sleep/`:
+In-process pipeline under `src/devices/xiaomi/`:
 
 | File | Role |
 |------|------|
@@ -9,7 +9,7 @@ In-process pipeline under `src/sleep/`:
 | `mi_sleep_duration.c` | Normalize stage durations (minutes vs seconds) |
 | `mi_sleep_external.c` | Optional `SALUS_MI_SLEEP_ALGO_CMD` JSON helper override |
 
-Full-day sleep binary layout (v5/v6) lives in `src/activity/mi_fitness_full_day_sleep.c`
+Full-day sleep binary layout (v5/v6) lives in `src/devices/xiaomi/mi_fitness_full_day_sleep.c`
 (`salus_full_day_sleep_layout`), following Mi Fitness's `full_day_sleep_report_v5/v6` schemas:
 
 | | v5 | v6 |

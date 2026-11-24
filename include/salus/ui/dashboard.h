@@ -2,7 +2,7 @@
 #define SALUS_UI_DASHBOARD_H
 
 #include "salus/app.h"
-#include "salus/activity/workout_summary.h"
+#include "salus/store/workout.h"
 
 typedef struct SalusDashboardUi SalusDashboardUi;
 
@@ -19,14 +19,18 @@ void salus_dashboard_update_device_state(AppState *state,
                                           const gchar *wearing,
                                           const gchar *sleep);
 
+/* Adds or updates a workout. @name labels it when @summary is NULL or has no sport_name. */
 void salus_sport_add_entry(AppState *state,
-                            uint32_t ts,
-                            int type,
-                            int subtype,
-                            const SalusWorkoutSummary *summary);
+                           uint32_t ts,
+                           int type,
+                           int subtype,
+                           const SalusWorkoutSummary *summary,
+                           const char *name);
 void salus_sport_load_from_db(AppState *state);
 /* Frees all sport entries (and closes a workout detail view that points into them). */
 void salus_sport_entries_clear(AppState *state);
+/* Attaches a record/GPS track (@patch->record_samples / gps_track) to a workout, creating it
+ * (named @patch->sport_name) when its summary hasn't arrived yet. */
 void salus_sport_merge_attachment(AppState *state,
                                    uint32_t ts,
                                    int subtype,

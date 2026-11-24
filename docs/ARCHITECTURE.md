@@ -27,8 +27,8 @@
 | Directory | Contents |
 |-----------|----------|
 | `include/salus/` | `app.h`, `util.h`, module headers |
-| `src/spp/` | Transport, auth, Mi Fitness sync orchestration |
-| `src/activity/` | Activity file parsers |
+| `src/devices/xiaomi/` | Transport, auth, Mi Fitness sync orchestration |
+| `src/devices/xiaomi/` | Activity file parsers |
 | `src/ui/` | GTK4 UI |
 | `src/db/` | SQLite (Mi Fitness / GB-style schema) |
 | `src/proto/` | `xiaomi.pb-c` generated code |

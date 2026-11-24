@@ -1,6 +1,6 @@
 #include "ui_private.h"
 
-#include "salus/sleep/mi_sleep_duration.h"
+#include "salus/store/sleep.h"
 
 #include <math.h>
 #include <string.h>

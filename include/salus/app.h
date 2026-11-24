@@ -11,7 +11,7 @@
 #include <protobuf-c/protobuf-c.h>
 
 #include "salus/util.h"
-#include "salus/db/db.h"
+#include "salus/store/db.h"
 
 typedef struct SalusDashboardUi SalusDashboardUi;
 
@@ -207,9 +207,6 @@ void health_apply_daily_summary(AppState *state, const SalusDailySummaryRow *row
 void recorded_rebuild_from_db(AppState *state);
 /* Coalesced rebuild on the next idle (several requests before it runs → one rebuild). */
 void recorded_schedule_rebuild(AppState *state);
-
-void handle_activity_payload(AppState *state, const uint8_t *payload, size_t payload_len);
-const char *activity_subtype_name(int type, int subtype);
 
 gchar *format_hex(const uint8_t *data, size_t len);
 gboolean looks_printable(const uint8_t *data, size_t len);

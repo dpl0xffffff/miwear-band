@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate src/activity/mi_fitness_report_tables.c from the extracted Mi Fitness data.
+"""Generate src/devices/xiaomi/mi_fitness_report_tables.c from the extracted Mi Fitness data.
 
 Inputs (third_party/mi-fitness-tables/):
   sport_reports.json    report and record field tables (+ validity lengths, which mi_fitness_validity.c already has)

@@ -6,14 +6,14 @@ Source artifact: `com.xiaomi.wearable` **base.apk** 3.59.x (JADX static analysis
 
 | Layer | Mi Fitness class | miwear-band module |
 |-------|------------------|-------------------|
-| RFCOMM | `com.xiaomi.wearable.connection.SppConnection` | `src/spp/bluez.c`, `src/spp/wire.c` |
+| RFCOMM | `com.xiaomi.wearable.connection.SppConnection` | `src/core/bluez.c`, `src/devices/xiaomi/wire.c` |
 | Framing | `transport.TransportV2`, `SppTaskQueueV2` | `wire.c` SPP v2 |
-| Auth | `wear.api.WearAuthV2`, label `salus-auth` | `src/spp/crypto.c` |
+| Auth | `wear.api.WearAuthV2`, label `salus-auth` | `src/devices/xiaomi/crypto.c` |
 | Protobuf | `xiaomi` Command (same as Gadgetbridge proto) | `src/proto/xiaomi.pb-c.*` |
-| Fitness pull | `FitnessDeviceSyncManager` + `FitnessWearSender` | `src/spp/fitness_sync.c` |
-| Binary parse | `FitnessDataProcessor` / `FitnessDataParser` | `src/activity/activity.c` (+ `manual.c`, `workout_summary.c`) |
+| Fitness pull | `FitnessDeviceSyncManager` + `FitnessWearSender` | `src/devices/xiaomi/fitness_sync.c` |
+| Binary parse | `FitnessDataProcessor` / `FitnessDataParser` | `src/devices/xiaomi/activity.c` (+ `manual.c`, `workout_summary.c`) |
 | Schema map | `assets/schemas.zip` + `SchemaFilesUtilsKt` | `third_party/mi-fitness-schemas/`, **`docs/MIFITNESS_SCHEMA_MAPPING.md`** |
-| Persistence | Room / `ISyncDB` | `src/db/db.c` |
+| Persistence | Room / `ISyncDB` | `src/store/db.c` |
 
 ## Pull sequence (Mi Fitness)
 

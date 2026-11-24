@@ -1,5 +1,5 @@
 #include "salus/profile.h"
-#include "salus/ui/health_data.h"
+#include "salus/store/health_data.h"
 
 guint salus_gender_config_to_proto(guint config_gender) {
     return config_gender == SALUS_GENDER_FEMALE ? 2u : 1u;

@@ -1,5 +1,5 @@
 #include "salus/find_phone.h"
-#include "salus/spp/wire_internal.h"
+#include "salus/devices/xiaomi/wire_internal.h"
 #include "salus/ui/dashboard.h"
 
 #include <gio/gio.h>

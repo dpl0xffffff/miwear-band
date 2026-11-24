@@ -40,43 +40,43 @@ add_executable(salus
     src/core/profile.c
     src/core/find_phone.c
     src/core/weight_log.c
-    src/spp/crypto.c
-    src/spp/bluez.c
-    src/spp/wire.c
-    src/spp/fitness_sync.c
-    src/spp/weather.c
+    src/devices/xiaomi/crypto.c
+    src/core/bluez.c
+    src/devices/xiaomi/wire.c
+    src/devices/xiaomi/fitness_sync.c
+    src/devices/xiaomi/weather.c
     src/notifications/notifications.c
-    src/activity/activity.c
-    src/activity/daily_details.c
-    src/activity/manual.c
-    src/activity/workout_summary.c
-    src/activity/workout_record.c
-    src/activity/workout_types.c
-    src/activity/schema_reader.c
-    src/activity/mi_fitness_data.c
-    src/activity/mi_fitness_validity.c
-    src/activity/mi_fitness_oneden.c
-    src/activity/mi_fitness_dispatch.c
-    src/activity/mi_fitness_full_day_sleep.c
-    src/activity/mi_fitness_health.c
-    src/activity/mi_fitness_sleep_stages.c
-    src/sleep/mi_sleep_duration.c
-    src/sleep/mi_sleep_packets.c
-    src/sleep/mi_sleep_pipeline.c
-    src/spp/workout_gps.c
-    src/sleep/mi_sleep_external.c
-    src/activity/mi_fitness_sport_report.c
-    src/activity/mi_fitness_sport_record.c
-    src/activity/mi_fitness_report_tables.c
+    src/devices/xiaomi/activity.c
+    src/devices/xiaomi/daily_details.c
+    src/devices/xiaomi/manual.c
+    src/devices/xiaomi/workout_summary.c
+    src/devices/xiaomi/workout_record.c
+    src/store/workout.c
+    src/devices/xiaomi/schema_reader.c
+    src/devices/xiaomi/mi_fitness_data.c
+    src/devices/xiaomi/mi_fitness_validity.c
+    src/devices/xiaomi/mi_fitness_oneden.c
+    src/devices/xiaomi/mi_fitness_dispatch.c
+    src/devices/xiaomi/mi_fitness_full_day_sleep.c
+    src/devices/xiaomi/mi_fitness_health.c
+    src/devices/xiaomi/mi_fitness_sleep_stages.c
+    src/store/sleep.c
+    src/devices/xiaomi/mi_sleep_packets.c
+    src/devices/xiaomi/mi_sleep_pipeline.c
+    src/devices/xiaomi/workout_gps.c
+    src/devices/xiaomi/mi_sleep_external.c
+    src/devices/xiaomi/mi_fitness_sport_report.c
+    src/devices/xiaomi/mi_fitness_sport_record.c
+    src/devices/xiaomi/mi_fitness_report_tables.c
     src/ui/ui.c
     src/ui/dashboard.c
     src/ui/widgets.c
     src/ui/sleep_view.c
     src/ui/workouts_view.c
     src/ui/device_view.c
-    src/ui/health_data.c
-    src/db/db.c
-    src/db/workout_store.c
+    src/store/health_data.c
+    src/store/db.c
+    src/store/workout_store.c
     src/proto/xiaomi.pb-c.c
 )
 
@@ -107,12 +107,12 @@ target_compile_definitions(salus PRIVATE
 add_dependencies(salus salus_schemas)
 
 add_executable(salus-schema-dump tools/schema_dump.c
-    src/activity/schema_reader.c
-    src/activity/mi_fitness_data.c
-    src/activity/mi_fitness_validity.c
-    src/activity/mi_fitness_oneden.c
-    src/activity/workout_types.c
-    src/activity/mi_fitness_report_tables.c
+    src/devices/xiaomi/schema_reader.c
+    src/devices/xiaomi/mi_fitness_data.c
+    src/devices/xiaomi/mi_fitness_validity.c
+    src/devices/xiaomi/mi_fitness_oneden.c
+    src/store/workout.c
+    src/devices/xiaomi/mi_fitness_report_tables.c
 )
 target_include_directories(salus-schema-dump PRIVATE include)
 target_link_libraries(salus-schema-dump PRIVATE PkgConfig::GLIB PkgConfig::JSON m)
@@ -124,10 +124,10 @@ add_dependencies(salus-schema-dump salus_schemas)
 enable_testing()
 add_executable(salus-parser-test
     test/parser_test.c
-    src/activity/daily_details.c
-    src/sleep/mi_sleep_packets.c
-    src/sleep/mi_sleep_duration.c
-    src/activity/mi_fitness_full_day_sleep.c
+    src/devices/xiaomi/daily_details.c
+    src/devices/xiaomi/mi_sleep_packets.c
+    src/store/sleep.c
+    src/devices/xiaomi/mi_fitness_full_day_sleep.c
 )
 target_include_directories(salus-parser-test PRIVATE include)
 target_link_libraries(salus-parser-test PRIVATE PkgConfig::GLIB PkgConfig::GTK PkgConfig::ADW PkgConfig::PROTOBUF_C
@@ -136,16 +136,16 @@ add_test(NAME parsers COMMAND salus-parser-test)
 
 add_executable(salus-report-test
     test/report_test.c
-    src/activity/mi_fitness_sport_report.c
-    src/activity/mi_fitness_sport_record.c
-    src/activity/mi_fitness_report_tables.c
-    src/activity/mi_fitness_oneden.c
-    src/activity/mi_fitness_validity.c
-    src/activity/mi_fitness_data.c
-    src/activity/schema_reader.c
-    src/activity/workout_types.c
-    src/activity/workout_record.c
-    src/db/workout_store.c
+    src/devices/xiaomi/mi_fitness_sport_report.c
+    src/devices/xiaomi/mi_fitness_sport_record.c
+    src/devices/xiaomi/mi_fitness_report_tables.c
+    src/devices/xiaomi/mi_fitness_oneden.c
+    src/devices/xiaomi/mi_fitness_validity.c
+    src/devices/xiaomi/mi_fitness_data.c
+    src/devices/xiaomi/schema_reader.c
+    src/store/workout.c
+    src/devices/xiaomi/workout_record.c
+    src/store/workout_store.c
 )
 target_include_directories(salus-report-test PRIVATE include)
 target_link_libraries(salus-report-test PRIVATE PkgConfig::GLIB PkgConfig::JSON m)

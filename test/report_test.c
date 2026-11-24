@@ -1,13 +1,13 @@
 /* Workout report decoding against the tables extracted from Mi Fitness. */
 
-#include "salus/activity/mi_fitness_report_tables.h"
-#include "salus/activity/mi_fitness_sport_report.h"
-#include "salus/activity/mi_fitness_validity.h"
-#include "salus/activity/mi_fitness_data.h"
-#include "salus/activity/schema_reader.h"
-#include "salus/activity/mi_fitness_sport_record.h"
-#include "salus/activity/workout_record.h"
-#include "salus/db/workout_store.h"
+#include "salus/devices/xiaomi/mi_fitness_report_tables.h"
+#include "salus/devices/xiaomi/mi_fitness_sport_report.h"
+#include "salus/devices/xiaomi/mi_fitness_validity.h"
+#include "salus/devices/xiaomi/mi_fitness_data.h"
+#include "salus/devices/xiaomi/schema_reader.h"
+#include "salus/devices/xiaomi/mi_fitness_sport_record.h"
+#include "salus/devices/xiaomi/workout_record.h"
+#include "salus/store/workout_store.h"
 
 #include <math.h>
 

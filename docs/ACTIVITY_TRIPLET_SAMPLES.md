@@ -14,7 +14,7 @@ How the app gets each value today (connected, viewing today):
   distance theory.
 - **Calories**: RealTimeStats field 2, used as is (`src/ui/dashboard.c:1252`).
 - **Active minutes**: worked out from `rt3` and `rt5` by `salus_activity_time_from_realtime()`
-  (`src/ui/health_data.c:362`). `rt3` up to 180 counts as minutes; above that it is divided by
+  (`src/store/health_data.c:362`). `rt3` up to 180 counts as minutes; above that it is divided by
   92 and rounded. `rt5` (≤ 600) counts as minutes. The rule for choosing between them was guessed.
 
 | # | Date / time | Band steps | Band kcal | Band active min | App steps | App kcal | App active min | rt steps | rt calories | rt3 | rt5 | Notes |
@@ -43,7 +43,7 @@ How the app gets each value today (connected, viewing today):
 - **Active minutes are probably counted from the per-minute activity record**, whose `activeStreng` field
   (bits 7–5 of the `activeStrengthAndSportType` byte) gives an intensity level for each minute:
   0 still, 1 very light, 2 light, 3 moderate, 4 high, 5 intense, 7 unknown.
-  `src/activity/daily_details.c` decodes it now; it skipped it before.
+  `src/devices/xiaomi/daily_details.c` decodes it now; it skipped it before.
 
 ## Raw live packet (row 8)
 
@@ -61,7 +61,7 @@ file. The `Daily report (schema)` line now prints both `totalCalories` and `tota
 
 ## Daily summary file (ACTIVITY_DAILY, detail=1)
 
-The Gadgetbridge-style parser (`parse_daily_summary_for_log`, `src/activity/activity.c`) skipped the 3 bytes
+The Gadgetbridge-style parser (`parse_daily_summary_for_log`, `src/devices/xiaomi/activity.c`) skipped the 3 bytes
 after `totalSteps` as unknown. Mi Fitness's `daily_activity_report` schema says they are
 `totalactiveCalories` (u16) and the current heart rate (u8). The field it read as `calories` is
 `totalCalories`. Both are logged now, on the `Daily summary … (v5):` line.

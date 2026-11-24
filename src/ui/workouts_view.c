@@ -1,8 +1,6 @@
 #include "ui_private.h"
 
-#include "salus/activity/activity.h"
-#include "salus/activity/workout_summary.h"
-#include "salus/db/workout_store.h"
+#include "salus/store/workout_store.h"
 
 #include <math.h>
 #include <string.h>
@@ -21,7 +19,7 @@ static SalusSportEntry *sport_find_entry(AppState *state, uint32_t ts, int subty
     return NULL;
 }
 
-static void sport_entry_apply_summary(SalusSportEntry *e, const SalusWorkoutSummary *summary) {
+static void sport_entry_apply_summary(SalusSportEntry *e, const SalusWorkoutSummary *summary, const char *name) {
     if (e == NULL || summary == NULL) {
         return;
     }
@@ -32,8 +30,7 @@ static void sport_entry_apply_summary(SalusSportEntry *e, const SalusWorkoutSumm
     e->calories = summary->calories;
     e->hr_avg = summary->hr_avg;
     g_free(e->label);
-    e->label = g_strdup(summary->sport_name != NULL ? summary->sport_name
-                                                    : salus_sport_subtype_name(e->sport_subtype));
+    e->label = g_strdup(summary->sport_name != NULL ? summary->sport_name : name != NULL ? name : "Workout");
     if (e->detail != NULL) {
         salus_workout_summary_clear(e->detail);
         g_free(e->detail);
@@ -95,7 +92,7 @@ static gboolean sport_load_row_cb(const SalusDbSportWorkoutRow *row, gpointer us
     e->ts_sec = row->file_ts;
     e->sport_type = sport_type > 0 ? sport_type : row->sport_type;
     e->sport_subtype = row->sport_subtype;
-    sport_entry_apply_summary(e, &sum);
+    sport_entry_apply_summary(e, &sum, NULL);
     if ((e->sport_subtype == 22 || e->sport_subtype == 2) && e->detail != NULL && !e->detail->has_walk_detail &&
         (e->detail->duration_sec > 0 || e->detail->distance_m > 0)) {
         e->detail->has_walk_detail = TRUE;
@@ -121,7 +118,8 @@ void salus_sport_load_from_db(AppState *state) {
     salus_sport_rebuild_list(state);
 }
 
-void salus_sport_add_entry(AppState *state, uint32_t ts, int type, int subtype, const SalusWorkoutSummary *summary) {
+void salus_sport_add_entry(AppState *state, uint32_t ts, int type, int subtype, const SalusWorkoutSummary *summary,
+                           const char *name) {
     SalusSportEntry *e = sport_find_entry(state, ts, subtype);
     if (e == NULL) {
         e = g_new0(SalusSportEntry, 1);
@@ -129,13 +127,13 @@ void salus_sport_add_entry(AppState *state, uint32_t ts, int type, int subtype, 
         e->sport_type = type;
         e->sport_subtype = subtype;
         if (summary != NULL) {
-            sport_entry_apply_summary(e, summary);
+            sport_entry_apply_summary(e, summary, name);
         } else {
-            e->label = g_strdup(activity_subtype_name(type, subtype));
+            e->label = g_strdup(name != NULL ? name : "Workout");
         }
         state->sport_entries = g_list_prepend(state->sport_entries, e);
     } else if (summary != NULL) {
-        sport_entry_apply_summary(e, summary);
+        sport_entry_apply_summary(e, summary, name);
     }
     if (summary != NULL && state->selected_address != NULL && state->selected_address[0] != '\0') {
         if (salus_db_ensure_device(state->selected_address)) {
@@ -151,7 +149,7 @@ void salus_sport_merge_attachment(AppState *state, uint32_t ts, int subtype, Sal
     }
     SalusSportEntry *e = sport_find_entry(state, ts, subtype);
     if (e == NULL) {
-        salus_sport_add_entry(state, ts, 1, subtype, NULL);
+        salus_sport_add_entry(state, ts, 1, subtype, NULL, patch->sport_name);
         e = sport_find_entry(state, ts, subtype);
     }
     if (e == NULL) {
@@ -161,7 +159,7 @@ void salus_sport_merge_attachment(AppState *state, uint32_t ts, int subtype, Sal
         e->detail = g_new0(SalusWorkoutSummary, 1);
         e->detail->sport_subtype = subtype;
         e->detail->file_ts_sec = ts;
-        e->detail->sport_name = g_strdup(salus_sport_subtype_name(subtype));
+        e->detail->sport_name = g_strdup(e->label);
     }
     SalusWorkoutSummary *d = e->detail;
     if (patch->record_samples != NULL && patch->record_samples->len > 0) {
