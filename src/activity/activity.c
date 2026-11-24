@@ -363,7 +363,8 @@ static void parse_daily_summary_for_log(AppState *state,
         append_log(state, "Daily summary parser: unsupported version.");
         return;
     }
-    if (payload_len < (size_t)(8 + header_size + 30)) {
+    /* steps … spo2Avg below is 41 bytes, then the CRC. */
+    if (payload_len < (size_t)(8 + header_size + 41 + 4)) {
         append_log(state, "Daily summary parser: payload too short.");
         return;
     }
@@ -395,7 +396,7 @@ static void parse_daily_summary_for_log(AppState *state,
 
     gboolean has_training = FALSE;
     int t_day = 0, t_week = 0, t_level = 0, v_light = 0, v_mod = 0, v_high = 0, v_cur = 0;
-    if (version > 3 && off + 10 <= payload_len) {
+    if (version > 3 && off + 10 <= payload_len - 4) {
         t_day = (int)miwear_read_u16_le(payload + off);
         off += 2;
         t_week = (int)miwear_read_u16_le(payload + off);

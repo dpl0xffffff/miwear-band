@@ -54,39 +54,11 @@ static int json_obj_int_opt(JsonObject *obj, const char *key) {
 }
 
 static int stress_from_manual_item(JsonObject *item) {
-    if (item == NULL) {
+    if (item == NULL || !json_object_has_member(item, "stressObj")) {
         return -1;
     }
-    if (json_object_has_member(item, "stressObj")) {
-        JsonObject *st = json_object_get_object_member(item, "stressObj");
-        const int v = json_obj_int_opt(st, "stress");
-        if (miwear_stress_value_valid(v)) {
-            return v;
-        }
-    }
-    if (json_object_has_member(item, "stress")) {
-        const int v = json_obj_int_opt(item, "stress");
-        if (miwear_stress_value_valid(v)) {
-            return v;
-        }
-    }
-    if (json_object_has_member(item, "measurementType")) {
-        JsonNode *mt = json_object_get_member(item, "measurementType");
-        int mtype = -1;
-        if (mt != NULL && JSON_NODE_HOLDS_OBJECT(mt)) {
-            mtype = json_obj_int_opt(json_node_get_object(mt), "type");
-        } else if (mt != NULL && JSON_NODE_HOLDS_VALUE(mt)) {
-            mtype = (int)json_node_get_int(mt);
-        }
-        if (mtype == MEASURE_STRESS && json_object_has_member(item, "stressObj")) {
-            JsonObject *st = json_object_get_object_member(item, "stressObj");
-            const int v = json_obj_int_opt(st, "stress");
-            if (miwear_stress_value_valid(v)) {
-                return v;
-            }
-        }
-    }
-    return -1;
+    const int v = json_obj_int_opt(json_object_get_object_member(item, "stressObj"), "stress");
+    return miwear_stress_value_valid(v) ? v : -1;
 }
 
 static void commit_manual_rows(AppState *state, uint32_t file_day_ts, GArray *act_rows, const char *log_tag) {
@@ -186,33 +158,6 @@ static void json_harvest_manual_row(JsonObject *item, int32_t fallback_ts, GArra
     }
 }
 
-static void json_harvest_manual_recursive(JsonNode *node, int32_t fallback_ts, GArray *act_rows, AppState *state) {
-    if (node == NULL || act_rows == NULL) {
-        return;
-    }
-    if (JSON_NODE_HOLDS_OBJECT(node)) {
-        JsonObject *obj = json_node_get_object(node);
-        json_harvest_manual_row(obj, fallback_ts, act_rows, state);
-        GList *members = json_object_get_members(obj);
-        for (GList *l = members; l != NULL; l = l->next) {
-            const char *name = l->data;
-            JsonNode *child = json_object_get_member(obj, name);
-            if (child != NULL && (JSON_NODE_HOLDS_ARRAY(child) || JSON_NODE_HOLDS_OBJECT(child))) {
-                json_harvest_manual_recursive(child, fallback_ts, act_rows, state);
-            }
-        }
-        g_list_free(members);
-        return;
-    }
-    if (JSON_NODE_HOLDS_ARRAY(node)) {
-        JsonArray *arr = json_node_get_array(node);
-        const guint n = json_array_get_length(arr);
-        for (guint i = 0; i < n; i++) {
-            json_harvest_manual_recursive(json_array_get_element(arr, i), fallback_ts, act_rows, state);
-        }
-    }
-}
-
 guint miwear_apply_manual_measurement_json(AppState *state, uint32_t file_day_ts, JsonNode *decoded) {
     if (state == NULL || decoded == NULL || !JSON_NODE_HOLDS_OBJECT(decoded)) {
         return 0;
@@ -220,32 +165,27 @@ guint miwear_apply_manual_measurement_json(AppState *state, uint32_t file_day_ts
     JsonObject *root = json_node_get_object(decoded);
     GArray *act_rows = g_array_new(FALSE, FALSE, sizeof(MiwearXiaomiActivityRow));
 
-    if (json_object_has_member(root, "body")) {
-        JsonNode *body_node = json_object_get_member(root, "body");
-        if (body_node != NULL && JSON_NODE_HOLDS_ARRAY(body_node)) {
-            JsonArray *body = json_node_get_array(body_node);
-            for (guint i = 0; i < json_array_get_length(body); i++) {
-                JsonNode *el = json_array_get_element(body, i);
-                if (el != NULL && JSON_NODE_HOLDS_OBJECT(el)) {
-                    json_harvest_manual_row(json_node_get_object(el), (int32_t)file_day_ts, act_rows, state);
-                }
+    /* manual_measurement_record_v2: body = array of {timestamp, measurementType, heartRateObj |
+     * spo2Obj | stressObj | temperature | bloodPressure}. Only the items themselves carry a
+     * timestamp, so nested objects are never harvested on their own. */
+    JsonNode *body_node = json_object_has_member(root, "body") ? json_object_get_member(root, "body") : NULL;
+    if (body_node != NULL && JSON_NODE_HOLDS_ARRAY(body_node)) {
+        JsonArray *body = json_node_get_array(body_node);
+        for (guint i = 0; i < json_array_get_length(body); i++) {
+            JsonNode *el = json_array_get_element(body, i);
+            if (el != NULL && JSON_NODE_HOLDS_OBJECT(el)) {
+                json_harvest_manual_row(json_node_get_object(el), (int32_t)file_day_ts, act_rows, state);
             }
-        } else if (body_node != NULL) {
-            json_harvest_manual_recursive(body_node, (int32_t)file_day_ts, act_rows, state);
         }
     }
-    json_harvest_manual_recursive(decoded, (int32_t)file_day_ts, act_rows, state);
 
     const guint n = act_rows->len;
-    if (n == 0 && json_object_has_member(root, "body")) {
-        JsonNode *body_node = json_object_get_member(root, "body");
-        if (body_node != NULL && JSON_NODE_HOLDS_ARRAY(body_node)) {
-            gchar *line = g_strdup_printf(
-                "Manual samples (schema): decoded body array len=%u but no HR/SpO₂/stress values matched.",
-                json_array_get_length(json_node_get_array(body_node)));
-            append_log(state, line);
-            g_free(line);
-        }
+    if (n == 0 && body_node != NULL && JSON_NODE_HOLDS_ARRAY(body_node)) {
+        gchar *line = g_strdup_printf(
+            "Manual samples (schema): decoded body array len=%u but no HR/SpO₂/stress values matched.",
+            json_array_get_length(json_node_get_array(body_node)));
+        append_log(state, line);
+        g_free(line);
     }
     if (n > 0) {
         commit_manual_rows(state, file_day_ts, act_rows, "Manual samples (schema)");
@@ -289,36 +229,37 @@ static guint scan_legacy_manual_records(AppState *state,
                                         size_t body_off,
                                         GArray *act_rows) {
     guint found = 0;
-    for (size_t off = body_off; off + 5 <= body_len; off++) {
+    for (size_t off = body_off; off + 6 <= body_len; off++) {
         const uint32_t sample_ts = miwear_read_u32_le(payload + off);
         if (sample_ts < 1000000000u || sample_ts > 2000000000u) {
             continue;
         }
         const uint8_t typ = payload[off + 4];
-        int value = -1;
-        if (typ == TYPE_STRESS || typ == (uint8_t)(MEASURE_STRESS | (1u << 4))) {
-            value = payload[off + 5];
-        } else if (typ == 0x63 || (typ & 0x0F) == MEASURE_STRESS) {
-            value = payload[off + 5];
-        } else if (typ == TYPE_HR || (typ & 0x0F) == MEASURE_HR) {
-            value = payload[off + 5];
-            if (value > 0 && value < 255) {
-                MiwearXiaomiActivityRow r = manual_row_template((int32_t)sample_ts);
-                r.heart_rate = value;
-                g_array_append_val(act_rows, r);
-                found++;
+        const int value = payload[off + 5];
+        MiwearXiaomiActivityRow r = manual_row_template((int32_t)sample_ts);
+        if (typ == TYPE_HR || (typ & 0x0F) == MEASURE_HR) {
+            if (value <= 0 || value >= 255) {
+                continue;
             }
-            continue;
+            r.heart_rate = value;
+        } else if (typ == TYPE_SPO2 || (typ & 0x0F) == MEASURE_SPO2) {
+            if (!miwear_spo2_value_valid(value)) {
+                continue;
+            }
+            r.spo2 = value;
+        } else if (typ == TYPE_STRESS || (typ & 0x0F) == MEASURE_STRESS) {
+            if (!miwear_stress_value_valid(value)) {
+                continue;
+            }
+            r.stress = value;
         } else {
             continue;
         }
-        if (!miwear_stress_value_valid(value)) {
-            continue;
-        }
-        MiwearXiaomiActivityRow r = manual_row_template((int32_t)sample_ts);
-        r.stress = value;
         g_array_append_val(act_rows, r);
         found++;
+        if (r.stress < 0) {
+            continue;
+        }
         if (state != NULL) {
             gchar *line = g_strdup_printf(
                 "Manual stress sample (legacy scan): ts=%u value=%d at off=%zu typ=0x%02X",
