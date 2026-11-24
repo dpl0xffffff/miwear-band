@@ -202,6 +202,10 @@ void salus_app_set_device(SalusApp *app, SalusDeviceConfig *cfg) {
     app->selected_address = cfg != NULL ? g_strdup(cfg->address) : NULL;
     g_free(app->device_display_name);
     app->device_display_name = cfg != NULL ? salus_device_config_display_name(cfg) : NULL;
+    /* Data is stored per device: point the store at this one. */
+    if (driver != NULL && salus_db_ensure_device(cfg->address)) {
+        (void)salus_db_describe_device(app->device_display_name, driver->vendor, driver->id);
+    }
     salus_device_config_free(cfg);
 }
 

@@ -156,6 +156,7 @@ static gboolean ensure_schema(sqlite3 *db) {
         }
     }
     ensure_column(db, "XIAOMI_DAILY_SUMMARY_SAMPLE", "activeCalories", "INTEGER");
+    ensure_column(db, "DEVICE", "driver", "TEXT");
     return TRUE;
 }
 
@@ -282,7 +283,7 @@ gboolean salus_db_ensure_device(const char *bluetooth_address) {
         if (sqlite3_prepare_v2(
                 s_db,
                 "INSERT INTO \"DEVICE\" (\"name\",\"manufacturer\",\"identifier\",\"type\",\"typeName\") "
-                "VALUES ('Mi Band 10','Xiaomi',?,0,'XIAOMI');",
+                "VALUES ('Device','',?,0,'');",
                 -1,
                 &st,
                 NULL) != SQLITE_OK) {
@@ -305,6 +306,27 @@ gboolean salus_db_ensure_device(const char *bluetooth_address) {
     g_free(id);
     g_mutex_unlock(&s_lock);
     return did > 0;
+}
+
+gboolean salus_db_describe_device(const char *name, const char *vendor, const char *driver_id) {
+    g_mutex_lock(&s_lock);
+    sqlite3_stmt *st = NULL;
+    gboolean ok = s_db != NULL && s_device_id > 0 &&
+                  sqlite3_prepare_v2(s_db,
+                                     "UPDATE \"DEVICE\" SET \"name\" = ?, \"manufacturer\" = ?, \"typeName\" = ?, "
+                                     "\"driver\" = ? WHERE \"_id\" = ?;",
+                                     -1, &st, NULL) == SQLITE_OK;
+    if (ok) {
+        sqlite3_bind_text(st, 1, name != NULL ? name : "Device", -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 2, vendor != NULL ? vendor : "", -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 3, driver_id != NULL ? driver_id : "", -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 4, driver_id != NULL ? driver_id : "", -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(st, 5, s_device_id);
+        ok = sqlite3_step(st) == SQLITE_DONE;
+    }
+    sqlite3_finalize(st);
+    g_mutex_unlock(&s_lock);
+    return ok;
 }
 
 static gboolean can_write(void) {

@@ -1,3 +1,4 @@
+#include "salus/devices/xiaomi/crypto.h"
 #include "salus/devices/xiaomi/xiaomi.h"
 #include "salus/app.h"
 #include "salus/devices/xiaomi/activity.h"

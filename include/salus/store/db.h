@@ -83,6 +83,8 @@ void salus_db_close(void);
 
 /* Register paired device (Bluetooth address). Required before inserts; safe from any thread. */
 gboolean salus_db_ensure_device(const char *bluetooth_address);
+/* Records the current device's name, vendor and driver in its DEVICE row. */
+gboolean salus_db_describe_device(const char *name, const char *vendor, const char *driver_id);
 
 gboolean salus_db_replace_xiaomi_activity_batch(const SalusXiaomiActivityRow *rows, size_t n);
 

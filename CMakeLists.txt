@@ -82,6 +82,7 @@ add_executable(salus
     src/ui/workouts_view.c
     src/ui/device_view.c
     src/store/health_data.c
+    src/store/timeline.c
     src/store/db.c
     src/store/workout_store.c
     src/proto/xiaomi.pb-c.c
@@ -159,6 +160,21 @@ target_link_libraries(salus-report-test PRIVATE PkgConfig::GLIB PkgConfig::JSON 
 target_compile_definitions(salus-report-test PRIVATE SALUS_SCHEMA_DIR="${SALUS_SCHEMA_EXTRACT_DIR}")
 add_dependencies(salus-report-test salus_schemas)
 add_test(NAME reports COMMAND salus-report-test)
+add_executable(salus-driver-test
+    test/driver_test.c
+    src/core/device.c
+    src/core/config.c
+    src/core/migrate.c
+    src/core/weight_log.c
+    src/store/db.c
+    src/store/workout_store.c
+    src/store/workout.c
+)
+target_include_directories(salus-driver-test PRIVATE include)
+target_link_libraries(salus-driver-test PRIVATE PkgConfig::GLIB PkgConfig::GTK PkgConfig::ADW PkgConfig::JSON
+    PkgConfig::SQLITE3 m)
+add_test(NAME driver COMMAND salus-driver-test)
+
 add_executable(salus-local-time-test test/local_time_test.c src/core/local_time.c)
 target_include_directories(salus-local-time-test PRIVATE include)
 target_link_libraries(salus-local-time-test PRIVATE PkgConfig::GLIB)
