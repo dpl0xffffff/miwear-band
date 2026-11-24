@@ -14,10 +14,6 @@
  * Transport/auth: com.xiaomi.wearable.spp + wear.api.WearAuthV2 (miwear-auth), same protobuf Command.
  */
 
-static void sync_wear_sport_status(AppState *state) {
-    append_log(state, "Mi Fitness: syncWearSportStatus (pre-sync sport state probe).");
-}
-
 void miwear_fitness_sync_on_auth(AppState *state) {
     if (!state->auth_initialized || state->sock_fd < 0) {
         return;
@@ -25,7 +21,6 @@ void miwear_fitness_sync_on_auth(AppState *state) {
     /* No rebuild here: switch_to_dashboard() (queued just before this on auth) already rebuilt
      * the timelines from the DB, and no file data arrives before begin_file_sync below. */
     append_log(state, "Mi Fitness sync: startSyncWithDevice → requestData (today, then history).");
-    sync_wear_sport_status(state);
     miwear_wire_send_device_bootstrap(state);
     miwear_notifications_on_connect(state);
     miwear_wire_begin_file_sync(state, "Mi Fitness today file IDs");
