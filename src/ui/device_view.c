@@ -198,8 +198,8 @@ GtkWidget *mi_device_page_new(AppState *state, MiwearDashboardUi *dash) {
     GtkWidget *share = adw_switch_row_new();
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(share), "Share Location for Workouts");
     adw_action_row_set_subtitle(ADW_ACTION_ROW(share),
-                                "When an outdoor workout starts, send this device's location to the band, "
-                                "like the phone app does");
+                                "When an outdoor workout starts, send this device's location to the band, like "
+                                "the phone app does. Needs a GPS receiver; otherwise the band uses its own GPS");
     adw_switch_row_set_active(ADW_SWITCH_ROW(share), state->share_location_with_band);
     g_signal_connect(share, "notify::active", G_CALLBACK(on_share_location_toggled), state);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(location), share);

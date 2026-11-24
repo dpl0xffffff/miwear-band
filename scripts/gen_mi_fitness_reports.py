@@ -2,7 +2,7 @@
 """Generate src/activity/mi_fitness_report_tables.c from the extracted Mi Fitness data.
 
 Inputs (third_party/mi-fitness-tables/):
-  sport_reports.json    report field tables (+ validity lengths, which mi_fitness_validity.c already has)
+  sport_reports.json    report and record field tables (+ validity lengths, which mi_fitness_validity.c already has)
   sport_types.json      FitnessSportType id -> English name
   schema_field_ids.json Mi Fitness schema field name -> report field id (SportReportBaseParser.ReportType)
 """
@@ -67,6 +67,82 @@ out.append("            if (count) *count = 0;")
 out.append("            if (parser) *parser = NULL;")
 out.append("            return NULL;")
 out.append("    }")
+out.append("}")
+out.append("")
+
+# ---- Record parsers (file type 0) --------------------------------------------------------------
+def one_rows(fields):
+    rows = []
+    for t, bc, sv, fl, uns, cnt, dep in fields:
+        if dep:
+            vals = dep[1][:4]
+            dv = ", ".join(str(v) for v in vals) + ", 0" * (4 - len(vals))
+            rows.append(f"    {{{t}, {bc}, {sv}, {fl}, {uns}, {cnt}, 1, 0, {dep[0]}, {len(vals)}, {{{dv}}}}},")
+        else:
+            rows.append(f"    {{{t}, {bc}, {sv}, {fl}, {uns}, {cnt}, 0, 0, 0, 0, {{0, 0, 0, 0}}}},")
+    return rows
+
+
+def item_len(l):
+    return "{0, 0, 0, 0}" if l is None else f"{{1, {l[0]}, {l[1]}, {l[2]}}}"
+
+
+def tid(v):
+    return "MI_FITNESS_NO_TYPE" if v is None else str(v)
+
+
+for r in reports["records"]:
+    base = "r_" + r["parser"].replace("RecordParser", "").replace("RecordRarser", "").lower()
+    for key, name in (("init", "init"), ("it_summary", "it")):
+        if r[key]:
+            out.append(f"static const MiFitnessOneDimenField {base}_{name}[] = {{")
+            out += one_rows(r[key])
+            out.append("};")
+    for an, a in r["arrays"].items():
+        if a["kind"] == "one":
+            out.append(f"static const MiFitnessOneDimenField {base}_{an}[] = {{")
+            out += one_rows(a["fields"])
+        else:
+            out.append(f"static const MiFitnessFourDimenField {base}_{an}[] = {{")
+            for dt, bs, h, m, l, sv, dyn, uns, mx in a["fields"]:
+                assert dt is not None and dyn is None and bs in (1, 2, 4), (r["parser"], dt)
+                out.append(f"    {{{tid(dt[0])}, {tid(dt[1])}, {tid(dt[2])}, {bs}, {item_len(h)}, {item_len(m)}, "
+                           f"{item_len(l)}, {sv}, {mx}, {uns}}},")
+        out.append("};")
+    maxv = max(int(v) for v in r["versions"])
+    out.append(f"static const MiFitnessRecordLayout {base}_layouts[{maxv}] = {{")
+    for v in range(1, maxv + 1):
+        an = r["versions"].get(str(v))
+        if an is None:
+            out.append("    {0, NULL, NULL, 0},")
+        elif r["arrays"][an]["kind"] == "four":
+            out.append(f"    {{1, {base}_{an}, NULL, sizeof({base}_{an}) / sizeof({base}_{an}[0])}},")
+        else:
+            out.append(f"    {{0, NULL, {base}_{an}, sizeof({base}_{an}) / sizeof({base}_{an}[0])}},")
+    out.append("};")
+    init = f"{base}_init, sizeof({base}_init) / sizeof({base}_init[0])" if r["init"] else "NULL, 0"
+    it = f"{base}_it, sizeof({base}_it) / sizeof({base}_it[0])" if r["it_summary"] else "NULL, 0"
+    out.append(f'static const MiFitnessRecordParser {base} = {{"{r["parser"]}", {int(r["group"])}, '
+               f'{int(r["swimming"])}, {r["distance_times"]}, {init}, {it}, {base}_layouts, {maxv}}};')
+    out.append("")
+
+out.append("const MiFitnessRecordParser *mi_fitness_record_parser(int sport_type) {")
+out.append("    switch (sport_type) {")
+for r in reports["records"]:
+    base = "r_" + r["parser"].replace("RecordParser", "").replace("RecordRarser", "").lower()
+    for s_ in r["sports"]:
+        out.append(f"        case {s_}:")
+    out.append(f"            return &{base};")
+out.append("        default:")
+out.append("            return NULL;")
+out.append("    }")
+out.append("}")
+out.append("")
+out.append("const MiFitnessRecordLayout *mi_fitness_record_layout(const MiFitnessRecordParser *p, int version) {")
+out.append("    if (p == NULL || version < 1 || version > p->max_version || p->layouts[version - 1].count == 0) {")
+out.append("        return NULL;")
+out.append("    }")
+out.append("    return &p->layouts[version - 1];")
 out.append("}")
 out.append("")
 

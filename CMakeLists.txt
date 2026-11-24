@@ -65,6 +65,7 @@ add_executable(miwear-band
     src/spp/workout_gps.c
     src/sleep/mi_sleep_external.c
     src/activity/mi_fitness_sport_report.c
+    src/activity/mi_fitness_sport_record.c
     src/activity/mi_fitness_report_tables.c
     src/ui/ui.c
     src/ui/dashboard.c
@@ -134,12 +135,15 @@ add_test(NAME parsers COMMAND miwear-parser-test)
 add_executable(miwear-report-test
     test/report_test.c
     src/activity/mi_fitness_sport_report.c
+    src/activity/mi_fitness_sport_record.c
     src/activity/mi_fitness_report_tables.c
     src/activity/mi_fitness_oneden.c
     src/activity/mi_fitness_validity.c
     src/activity/mi_fitness_data.c
     src/activity/schema_reader.c
     src/activity/workout_types.c
+    src/activity/workout_record.c
+    src/db/workout_store.c
 )
 target_include_directories(miwear-report-test PRIVATE include)
 target_link_libraries(miwear-report-test PRIVATE PkgConfig::GLIB PkgConfig::JSON m)

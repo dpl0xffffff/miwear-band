@@ -154,6 +154,7 @@ typedef struct {
 
     gboolean notifications_enabled;
     gboolean share_location_with_band; /* send this computer's location during outdoor workouts */
+    gchar *location_unavailable_reply;  /* "none" (default), "denied" or "ok": answer when there's no usable fix */
     guint notifications_min_interval_ms;
     guint32 notification_next_id;
     gint64 notification_last_sent_ms;

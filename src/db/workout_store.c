@@ -1,4 +1,6 @@
 #include "miwear/db/workout_store.h"
+
+#include <math.h>
 #include <stdlib.h>
 
 #include "miwear/activity/workout_record.h"
@@ -37,6 +39,26 @@ static void json_add_hr_zones(JsonBuilder *b, const MiwearWorkoutHrZones *z) {
 static void json_add_series(JsonBuilder *b, const MiwearWorkoutSummary *summary) {
     json_builder_set_member_name(b, "record_interval_sec");
     json_builder_add_int_value(b, summary->record_interval_sec);
+    /* Rows are [offset, hr, steps, <record_series values…>]; only series present in some sample
+     * get a column, a missing value is null. */
+    int cols[MIWEAR_SERIES_COUNT];
+    int ncols = 0;
+    if (summary->record_samples != NULL) {
+        for (int k = 0; k < MIWEAR_SERIES_COUNT; k++) {
+            for (guint i = 0; i < summary->record_samples->len; i++) {
+                if (!isnan(g_array_index(summary->record_samples, MiwearWorkoutSample, i).v[k])) {
+                    cols[ncols++] = k;
+                    break;
+                }
+            }
+        }
+    }
+    json_builder_set_member_name(b, "record_series");
+    json_builder_begin_array(b);
+    for (int c = 0; c < ncols; c++) {
+        json_builder_add_string_value(b, miwear_series_key((MiwearRecordSeries)cols[c]));
+    }
+    json_builder_end_array(b);
     json_builder_set_member_name(b, "record_samples");
     json_builder_begin_array(b);
     if (summary->record_samples != NULL) {
@@ -46,6 +68,14 @@ static void json_add_series(JsonBuilder *b, const MiwearWorkoutSummary *summary)
             json_builder_add_int_value(b, (gint64)s->offset_sec);
             json_builder_add_int_value(b, (gint64)s->hr);
             json_builder_add_int_value(b, (gint64)s->steps_delta);
+            for (int c = 0; c < ncols; c++) {
+                const float v = s->v[cols[c]];
+                if (isnan(v)) {
+                    json_builder_add_null_value(b);
+                } else {
+                    json_builder_add_double_value(b, round((double)v * 100.0) / 100.0);
+                }
+            }
             json_builder_end_array(b);
         }
     }
@@ -69,6 +99,14 @@ static void read_series(JsonObject *o, MiwearWorkoutSummary *summary) {
     if (json_object_has_member(o, "record_interval_sec")) {
         summary->record_interval_sec = (int)json_object_get_int_member(o, "record_interval_sec");
     }
+    int cols[MIWEAR_SERIES_COUNT];
+    guint ncols = 0;
+    if (json_object_has_member(o, "record_series")) {
+        JsonArray *keys = json_object_get_array_member(o, "record_series");
+        for (guint c = 0; keys != NULL && c < json_array_get_length(keys) && ncols < MIWEAR_SERIES_COUNT; c++) {
+            cols[ncols++] = miwear_series_from_key(json_array_get_string_element(keys, c)); /* -1: skip */
+        }
+    }
     if (json_object_has_member(o, "record_samples")) {
         JsonArray *arr = json_object_get_array_member(o, "record_samples");
         if (arr != NULL && json_array_get_length(arr) > 0) {
@@ -78,10 +116,15 @@ static void read_series(JsonObject *o, MiwearWorkoutSummary *summary) {
                 if (row == NULL || json_array_get_length(row) < 3) {
                     continue;
                 }
-                MiwearWorkoutSample s = {0};
-                s.offset_sec = (uint32_t)json_array_get_int_element(row, 0);
+                MiwearWorkoutSample s = miwear_workout_sample_init((uint32_t)json_array_get_int_element(row, 0));
                 s.hr = (uint8_t)json_array_get_int_element(row, 1);
                 s.steps_delta = (uint16_t)json_array_get_int_element(row, 2);
+                for (guint c = 0; c < ncols && 3 + c < json_array_get_length(row); c++) {
+                    JsonNode *n = json_array_get_element(row, 3 + c);
+                    if (cols[c] >= 0 && n != NULL && !JSON_NODE_HOLDS_NULL(n)) {
+                        s.v[cols[c]] = (float)json_node_get_double(n);
+                    }
+                }
                 g_array_append_val(summary->record_samples, s);
             }
         }

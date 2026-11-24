@@ -89,5 +89,102 @@ import kotlin.jvm.internal.DefaultConstructorMarker;
 public final class {name} extends FitnessDataBaseParser {{
 """ + "\n".join(decls) + "\n" + ctor + "\n}\n")
 
+# ---- Record parsers ---------------------------------------------------------------------------
+def extract_block(src, start):
+    """Text of the brace-delimited block that begins at `start`."""
+    k, depth = src.index("{", start), 0
+    while True:
+        depth += {"{": 1, "}": -1}.get(src[k], 0)
+        if depth == 0:
+            return src[start:k + 1]
+        k += 1
+
+
+rbase = open(f"{JADX}/com.xiaomi.fit.fitness.parser.sport.base.SportRecordBaseParser.java").read()
+item_type = re.search(r"(    public static final class DataItemType \{.*?\n    \})\n", rbase, re.S).group(1)
+item_type = item_type.replace("@NotNull", "").replace("@Nullable", "")
+with open(f"{WORK}/com/xiaomi/fit/fitness/parser/sport/base/SportRecordBaseParser.java", "w") as f:
+    f.write("""package com.xiaomi.fit.fitness.parser.sport.base;
+import com.xiaomi.fit.fitness.parser.base.FitnessDataBaseParser;
+import com.xiaomi.fit.fitness.parser.data.FitnessBinaryData;
+import com.xiaomi.fit.fitness.parser.data.SportRecord;
+import java.util.List;
+/* Stub: parseFourDimenData / parseOneDimenData only record which layout parseRecord chose. */
+public abstract class SportRecordBaseParser extends FitnessDataBaseParser {
+    public static String chosenKind;
+    public static Object chosenArray;
+    public List<SportRecord> parseFourDimenData(FitnessBinaryData b, FitnessDataBaseParser.FourDimenDataInfo[] a) { chosenKind = "four"; chosenArray = a; return null; }
+    public List<SportRecord> parseOneDimenData(FitnessBinaryData b, FitnessDataBaseParser.OneDimenDataType[] a) { chosenKind = "one"; chosenArray = a; return null; }
+    public FitnessDataBaseParser.OneDimenDataType[] getITSummaryDataType() { return null; }
+    public FitnessDataBaseParser.OneDimenDataType[] getInitDataTypeArray() { return null; }
+    public boolean isSwimmingSport() { return false; }
+    public int getDistanceRecordTimes() { return 10; }
+    public abstract List<SportRecord> parseRecord(FitnessBinaryData b);
+""" + item_type + "\n}\n")
+with open(f"{WORK}/com/xiaomi/fit/fitness/parser/sport/base/GroupSportRecordParser.java", "w") as f:
+    f.write("""package com.xiaomi.fit.fitness.parser.sport.base;
+public abstract class GroupSportRecordParser extends SportRecordBaseParser {}
+""")
+
+NULL_DECL = re.compile(
+    r"^\s*(?:final\s+)?[\w.<>\[\]]+ (\w+) = (?:null|null == true \? 1 : 0|0 == true \? 1 : 0|0);\n", re.M)
+
+
+def inline_null_registers(code):
+    """jadx reuses Dalvik registers that hold null across unrelated types (an `Object[]` "1 : 0"
+    local passed as a DataItemLen, a marker passed as a dependency). A local initialised to
+    null (or that idiom) and never reassigned is just `null`: inline it."""
+    while True:
+        changed = False
+        for m in NULL_DECL.finditer(code):
+            name = m.group(1)
+            rest = code[:m.start()] + code[m.end():]
+            if re.search(r"\b" + name + r"\s*=[^=]", rest):
+                continue  # reassigned later: keep
+            if m.group(0).strip().startswith(("int ", "long ", "boolean ", "float ")) and not m.group(0).rstrip().endswith("null;"):
+                continue  # a real primitive zero
+            code = re.sub(r"\b" + name + r"\b", "null", rest)
+            changed = True
+            break
+        if not changed:
+            return code
+
+
+KEEP = ["parseRecord", "getInitDataTypeArray", "getITSummaryDataType", "isSwimmingSport", "getDistanceRecordTimes"]
+rec_dir = f"{WORK}/com/xiaomi/fit/fitness/parser/sport/record"
+os.makedirs(rec_dir, exist_ok=True)
+for path in glob.glob(f"{JADX}/com.xiaomi.fit.fitness.parser.sport.record.*.java"):
+    name = path.split(".")[-2]
+    if name in ("TriathlonRecordParser", "RecoverRateRecordParser"):
+        continue  # not a time series of the workout (triathlon is unimplemented in Mi Fitness too)
+    s = open(path).read()
+    base = "GroupSportRecordParser" if "extends GroupSportRecordParser" in s else "SportRecordBaseParser"
+    decls = re.findall(r"    private final FitnessDataBaseParser\.\w+(?:\[\])? \w+(?: = .*?)?;\n", s)
+    parts = list(decls)
+    head = f"    public {name}() {{"
+    if head in s:
+        parts.append(extract_block(s, s.index(head)))
+    for m in KEEP:
+        mm = re.search(r"\n(    public [\w.<>\[\]]+ " + m + r"\()", s)
+        if mm:
+            parts.append(extract_block(s, mm.start(1)))
+    body = "\n".join(parts)
+    body = inline_null_registers(body).replace("null == true ? 1 : 0", "null")
+    body = re.sub(r"([0-9]+) == true \? 1 : 0", r"\1", body)
+    body = body.replace("@NotNull", "").replace("@Nullable", "")
+    body = re.sub(r"\s*Intrinsics\.checkNotNullParameter\([^;]*\);", "", body)
+    with open(f"{rec_dir}/{name}.java", "w") as f:
+        f.write(f"""package com.xiaomi.fit.fitness.parser.sport.record;
+import com.xiaomi.fit.fitness.parser.base.FitnessDataBaseParser;
+import com.xiaomi.fit.fitness.parser.sport.base.*;
+import com.xiaomi.fit.fitness.parser.data.FitnessBinaryData;
+import com.xiaomi.fit.fitness.parser.data.SportRecord;
+import kotlin.jvm.internal.DefaultConstructorMarker;
+import java.util.List;
+public final class {name} extends {base} {{
+{body}
+}}
+""")
+
 shutil.copy(f"{JADX}/com.xiaomi.fit.data.common.data.mi.FitnessDataValidity.java",
             f"{WORK}/com/xiaomi/fit/data/common/data/mi/FitnessDataValidity.java")

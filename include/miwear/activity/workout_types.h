@@ -17,11 +17,41 @@ typedef struct MiwearWorkoutHrZones {
     int zone5_lower_bpm;
 } MiwearWorkoutHrZones;
 
+/* Per-record series besides heart rate and steps (Mi Fitness OneSportRecord fields). */
+typedef enum {
+    MIWEAR_SERIES_PACE,          /* s/km */
+    MIWEAR_SERIES_SPEED,         /* km/h (diving: signed vertical speed, unit not documented) */
+    MIWEAR_SERIES_CADENCE,       /* steps/min, rpm (cycling), strokes/min (rowing), jumps/min */
+    MIWEAR_SERIES_STRIDE,        /* cm */
+    MIWEAR_SERIES_POWER,         /* W */
+    MIWEAR_SERIES_ALTITUDE,      /* m */
+    MIWEAR_SERIES_DISTANCE,      /* m in this record */
+    MIWEAR_SERIES_CALORIES,      /* kcal in this record */
+    MIWEAR_SERIES_SPO2,          /* % */
+    MIWEAR_SERIES_STRESS,        /* 0–100 */
+    MIWEAR_SERIES_SWOLF,
+    MIWEAR_SERIES_STROKE_RATE,   /* strokes/min */
+    MIWEAR_SERIES_GROUND_CONTACT,/* ms */
+    MIWEAR_SERIES_VERTICAL_OSC,  /* cm */
+    MIWEAR_SERIES_DEPTH,         /* m */
+    MIWEAR_SERIES_WATER_TEMP,    /* °C */
+    MIWEAR_SERIES_COUNT
+} MiwearRecordSeries;
+
 typedef struct {
-    uint32_t offset_sec;
-    uint8_t hr;
+    uint32_t offset_sec; /* from the first record segment's start */
+    uint8_t hr;          /* 0 = none */
     uint16_t steps_delta;
+    float v[MIWEAR_SERIES_COUNT]; /* NAN = not recorded */
 } MiwearWorkoutSample;
+
+/* Stable key of a series (persistence), and its display name and unit. */
+const char *miwear_series_key(MiwearRecordSeries s);
+int miwear_series_from_key(const char *key); /* -1 if unknown */
+const char *miwear_series_title(MiwearRecordSeries s);
+const char *miwear_series_unit(MiwearRecordSeries s);
+/* A sample with no extra series set. */
+MiwearWorkoutSample miwear_workout_sample_init(uint32_t offset_sec);
 
 typedef struct {
     double lat;

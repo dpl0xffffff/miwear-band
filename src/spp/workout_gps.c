@@ -16,6 +16,10 @@
 
 #define GEOCLUE_DESKTOP_ID "com.miwear.band"
 
+/* Coarser fixes (Wi-Fi/IP location on a computer without GPS) would pull the band's track off
+ * course, so they are never sent. */
+#define MAX_ACCURACY_M 50.0
+
 typedef struct {
     AppState *state;
     GCancellable *cancel;
@@ -46,8 +50,31 @@ static void send_open_reply(AppState *state, gboolean have_location) {
                                                         : "Workout GPS: replied without computer location");
 }
 
-static void send_location(WorkoutGps *g, GClueLocation *loc) {
+static gboolean location_usable(GClueLocation *loc) {
     if (loc == NULL) {
+        return FALSE;
+    }
+    const double acc = gclue_location_get_accuracy(loc);
+    return isfinite(acc) && acc >= 0 && acc <= MAX_ACCURACY_M;
+}
+
+/* No usable location. By default the app stays silent, as before connected GPS existed: the
+ * "no permission" reply makes the band show "grant location permission on your phone". */
+static void reply_unavailable(AppState *state, const char *why) {
+    const char *mode = state->location_unavailable_reply != NULL ? state->location_unavailable_reply : "none";
+    gchar *line = g_strdup_printf("Workout GPS: no usable location on this computer (%s); reply_when_unavailable=%s.",
+                                  why, mode);
+    append_log(state, line);
+    g_free(line);
+    if (g_strcmp0(mode, "denied") == 0) {
+        send_open_reply(state, FALSE);
+    } else if (g_strcmp0(mode, "ok") == 0) {
+        send_open_reply(state, TRUE); /* experiment: claim location, send none */
+    }
+}
+
+static void send_location(WorkoutGps *g, GClueLocation *loc) {
+    if (!location_usable(loc)) {
         return;
     }
     Xiaomi__WorkoutLocation wl = XIAOMI__WORKOUT_LOCATION__INIT;
@@ -122,17 +149,22 @@ static void on_simple_ready(GObject *source, GAsyncResult *res, gpointer user_da
     if (simple == NULL) {
         const gboolean cancelled = g_error_matches(err, G_IO_ERROR, G_IO_ERROR_CANCELLED);
         if (!cancelled) {
-            gchar *line = g_strdup_printf("Workout GPS: location unavailable (%s); the band uses its own GPS.",
-                                          err != NULL ? err->message : "unknown error");
-            append_log(g->state, line);
-            g_free(line);
-            send_open_reply(g->state, FALSE);
+            reply_unavailable(g->state, err != NULL ? err->message : "GeoClue error");
             miwear_workout_gps_stop(g->state, NULL);
         }
         g_clear_error(&err);
         return; /* when cancelled, @g was already freed by stop() */
     }
     g->simple = simple;
+    GClueLocation *first = gclue_simple_get_location(simple);
+    if (!location_usable(first)) {
+        gchar *why = first != NULL ? g_strdup_printf("best fix ±%.0f m", gclue_location_get_accuracy(first))
+                                   : g_strdup("no fix");
+        reply_unavailable(g->state, why);
+        g_free(why);
+        miwear_workout_gps_stop(g->state, NULL);
+        return;
+    }
     send_open_reply(g->state, TRUE);
     append_log(g->state, "Workout GPS: sharing this computer's location with the band.");
     g->location_handler = g_signal_connect(simple, "notify::location", G_CALLBACK(on_location_changed), g);
@@ -141,16 +173,17 @@ static void on_simple_ready(GObject *source, GAsyncResult *res, gpointer user_da
 
 static void start(AppState *state, uint32_t sport) {
     if (s_gps != NULL) {
-        /* Already sharing (e.g. the band asked again): just confirm. */
-        send_open_reply(state, s_gps->simple != NULL);
+        /* Already sharing (the band asked again): confirm. Still starting: the answer follows. */
+        if (s_gps->simple != NULL) {
+            send_open_reply(state, TRUE);
+        }
         return;
     }
     gchar *line = g_strdup_printf("Workout GPS: band started an outdoor workout (sport %u) and asked for location.", sport);
     append_log(state, line);
     g_free(line);
     if (!state->share_location_with_band) {
-        append_log(state, "Workout GPS: location sharing is off (Device page); the band uses its own GPS.");
-        send_open_reply(state, FALSE);
+        reply_unavailable(state, "sharing is off on the Device page");
         return;
     }
     WorkoutGps *g = g_new0(WorkoutGps, 1);

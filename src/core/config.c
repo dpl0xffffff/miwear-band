@@ -82,6 +82,11 @@ gboolean miwear_config_load(AppState *state, const char *path) {
     state->share_location_with_band =
         !g_key_file_has_key(kf, LOCATION_GROUP, "share_with_band", NULL) ||
         g_key_file_get_boolean(kf, LOCATION_GROUP, "share_with_band", NULL);
+    g_free(state->location_unavailable_reply);
+    state->location_unavailable_reply = g_key_file_get_string(kf, LOCATION_GROUP, "reply_when_unavailable", NULL);
+    if (state->location_unavailable_reply == NULL) {
+        state->location_unavailable_reply = g_strdup("none");
+    }
 
     state->profile_height_cm = (guint)g_key_file_get_integer(kf, PROFILE_GROUP, "height_cm", NULL);
     state->profile_weight_kg = (float)g_key_file_get_double(kf, PROFILE_GROUP, "weight_kg", NULL);
@@ -137,6 +142,9 @@ gboolean miwear_config_save(const AppState *state, const char *path) {
     g_key_file_set_boolean(kf, NOTIF_GROUP, "enabled", state->notifications_enabled);
     g_key_file_set_integer(kf, NOTIF_GROUP, "min_interval_ms", (gint)state->notifications_min_interval_ms);
     g_key_file_set_boolean(kf, LOCATION_GROUP, "share_with_band", state->share_location_with_band);
+    if (state->location_unavailable_reply != NULL) {
+        g_key_file_set_string(kf, LOCATION_GROUP, "reply_when_unavailable", state->location_unavailable_reply);
+    }
 
     if (state->profile_height_cm > 0) {
         g_key_file_set_integer(kf, PROFILE_GROUP, "height_cm", (gint)state->profile_height_cm);

@@ -1,7 +1,58 @@
 #include "miwear/activity/workout_types.h"
 #include "miwear/activity/mi_fitness_report_tables.h"
 
+#include <math.h>
 #include <string.h>
+
+static const struct {
+    const char *key, *title, *unit;
+} k_series[MIWEAR_SERIES_COUNT] = {
+    [MIWEAR_SERIES_PACE] = {"pace", "Pace", "/km"},
+    [MIWEAR_SERIES_SPEED] = {"speed", "Speed", "km/h"},
+    [MIWEAR_SERIES_CADENCE] = {"cadence", "Cadence", "/min"},
+    [MIWEAR_SERIES_STRIDE] = {"stride", "Stride", "cm"},
+    [MIWEAR_SERIES_POWER] = {"power", "Power", "W"},
+    [MIWEAR_SERIES_ALTITUDE] = {"altitude", "Altitude", "m"},
+    [MIWEAR_SERIES_DISTANCE] = {"distance", "Distance", "m"},
+    [MIWEAR_SERIES_CALORIES] = {"calories", "Calories", "kcal"},
+    [MIWEAR_SERIES_SPO2] = {"spo2", "SpO₂", "%"},
+    [MIWEAR_SERIES_STRESS] = {"stress", "Stress", ""},
+    [MIWEAR_SERIES_SWOLF] = {"swolf", "SWOLF", ""},
+    [MIWEAR_SERIES_STROKE_RATE] = {"stroke_rate", "Stroke rate", "/min"},
+    [MIWEAR_SERIES_GROUND_CONTACT] = {"ground_contact", "Ground contact", "ms"},
+    [MIWEAR_SERIES_VERTICAL_OSC] = {"vertical_osc", "Vertical oscillation", "cm"},
+    [MIWEAR_SERIES_DEPTH] = {"depth", "Depth", "m"},
+    [MIWEAR_SERIES_WATER_TEMP] = {"water_temp", "Water temperature", "°C"},
+};
+
+const char *miwear_series_key(MiwearRecordSeries s) {
+    return (unsigned)s < MIWEAR_SERIES_COUNT ? k_series[s].key : NULL;
+}
+
+int miwear_series_from_key(const char *key) {
+    for (int i = 0; key != NULL && i < MIWEAR_SERIES_COUNT; i++) {
+        if (strcmp(k_series[i].key, key) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+const char *miwear_series_title(MiwearRecordSeries s) {
+    return (unsigned)s < MIWEAR_SERIES_COUNT ? k_series[s].title : "";
+}
+
+const char *miwear_series_unit(MiwearRecordSeries s) {
+    return (unsigned)s < MIWEAR_SERIES_COUNT ? k_series[s].unit : "";
+}
+
+MiwearWorkoutSample miwear_workout_sample_init(uint32_t offset_sec) {
+    MiwearWorkoutSample s = {.offset_sec = offset_sec};
+    for (int i = 0; i < MIWEAR_SERIES_COUNT; i++) {
+        s.v[i] = NAN;
+    }
+    return s;
+}
 
 void miwear_workout_summary_free_series(MiwearWorkoutSummary *s) {
     if (s == NULL) {

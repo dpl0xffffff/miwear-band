@@ -1251,6 +1251,503 @@ const MiFitnessOneDimenField *mi_fitness_report_fields(int sport_type, size_t *c
     }
 }
 
+static const MiFitnessOneDimenField r_outdoorsport_init[] = {
+    {0, 4, 1, 1, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessOneDimenField r_outdoorsport_it[] = {
+    {41, 1, 2, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessFourDimenField r_outdoorsport_four0[] = {
+    {2, 4, MI_FITNESS_NO_TYPE, 1, {1, 0, 4, 4}, {1, 0, 0, 4}, {0, 0, 0, 0}, 1, -1, 1},
+    {5, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {6, 7, 8, 1, {1, 0, 7, 1}, {1, 0, 6, 1}, {1, 0, 0, 6}, 1, -1, 1},
+    {9, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+};
+static const MiFitnessRecordLayout r_outdoorsport_layouts[2] = {
+    {1, r_outdoorsport_four0, NULL, sizeof(r_outdoorsport_four0) / sizeof(r_outdoorsport_four0[0])},
+    {1, r_outdoorsport_four0, NULL, sizeof(r_outdoorsport_four0) / sizeof(r_outdoorsport_four0[0])},
+};
+static const MiFitnessRecordParser r_outdoorsport = {"OutdoorSportRecordParser", 0, 0, 10, r_outdoorsport_init, sizeof(r_outdoorsport_init) / sizeof(r_outdoorsport_init[0]), r_outdoorsport_it, sizeof(r_outdoorsport_it) / sizeof(r_outdoorsport_it[0]), r_outdoorsport_layouts, 2};
+
+static const MiFitnessOneDimenField r_indoorrun_it[] = {
+    {41, 1, 2, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {43, 4, 4, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {78, 4, 8, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {55, 2, 7, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessFourDimenField r_indoorrun_four0[] = {
+    {2, 4, MI_FITNESS_NO_TYPE, 1, {1, 0, 4, 4}, {1, 0, 0, 4}, {0, 0, 0, 0}, 1, -1, 1},
+    {5, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {9, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {40, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 3, -1, 1},
+    {44, 45, 46, 4, {1, 0, 26, 6}, {1, 0, 13, 13}, {1, 0, 0, 13}, 5, -1, 1},
+    {48, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 6, -1, 1},
+    {49, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 6, -1, 1},
+    {12, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 6, -1, 1},
+    {57, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 7, -1, 1},
+    {79, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 9, -1, 1},
+    {80, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 9, -1, 1},
+};
+static const MiFitnessRecordLayout r_indoorrun_layouts[10] = {
+    {1, r_indoorrun_four0, NULL, sizeof(r_indoorrun_four0) / sizeof(r_indoorrun_four0[0])},
+    {1, r_indoorrun_four0, NULL, sizeof(r_indoorrun_four0) / sizeof(r_indoorrun_four0[0])},
+    {1, r_indoorrun_four0, NULL, sizeof(r_indoorrun_four0) / sizeof(r_indoorrun_four0[0])},
+    {1, r_indoorrun_four0, NULL, sizeof(r_indoorrun_four0) / sizeof(r_indoorrun_four0[0])},
+    {1, r_indoorrun_four0, NULL, sizeof(r_indoorrun_four0) / sizeof(r_indoorrun_four0[0])},
+    {1, r_indoorrun_four0, NULL, sizeof(r_indoorrun_four0) / sizeof(r_indoorrun_four0[0])},
+    {1, r_indoorrun_four0, NULL, sizeof(r_indoorrun_four0) / sizeof(r_indoorrun_four0[0])},
+    {1, r_indoorrun_four0, NULL, sizeof(r_indoorrun_four0) / sizeof(r_indoorrun_four0[0])},
+    {1, r_indoorrun_four0, NULL, sizeof(r_indoorrun_four0) / sizeof(r_indoorrun_four0[0])},
+    {1, r_indoorrun_four0, NULL, sizeof(r_indoorrun_four0) / sizeof(r_indoorrun_four0[0])},
+};
+static const MiFitnessRecordParser r_indoorrun = {"IndoorRunRecordParser", 0, 0, 10, NULL, 0, r_indoorrun_it, sizeof(r_indoorrun_it) / sizeof(r_indoorrun_it[0]), r_indoorrun_layouts, 10};
+
+static const MiFitnessOneDimenField r_outdoorbiking_init[] = {
+    {0, 4, 1, 1, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessOneDimenField r_outdoorbiking_it[] = {
+    {41, 1, 2, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessFourDimenField r_outdoorbiking_four0[] = {
+    {2, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {5, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {6, 7, 8, 1, {1, 0, 7, 1}, {1, 0, 6, 1}, {1, 0, 0, 6}, 1, -1, 1},
+};
+static const MiFitnessRecordLayout r_outdoorbiking_layouts[2] = {
+    {1, r_outdoorbiking_four0, NULL, sizeof(r_outdoorbiking_four0) / sizeof(r_outdoorbiking_four0[0])},
+    {1, r_outdoorbiking_four0, NULL, sizeof(r_outdoorbiking_four0) / sizeof(r_outdoorbiking_four0[0])},
+};
+static const MiFitnessRecordParser r_outdoorbiking = {"OutdoorBikingRecordParser", 0, 0, 10, r_outdoorbiking_init, sizeof(r_outdoorbiking_init) / sizeof(r_outdoorbiking_init[0]), r_outdoorbiking_it, sizeof(r_outdoorbiking_it) / sizeof(r_outdoorbiking_it[0]), r_outdoorbiking_layouts, 2};
+
+static const MiFitnessOneDimenField r_indoorbiking_it[] = {
+    {41, 1, 3, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {43, 4, 4, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessOneDimenField r_indoorbiking_one0[] = {
+    {5, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {2, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessFourDimenField r_indoorbiking_four1[] = {
+    {2, 10, MI_FITNESS_NO_TYPE, 1, {1, 0, 4, 4}, {1, 0, 0, 4}, {0, 0, 0, 0}, 2, -1, 1},
+    {5, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 2, -1, 1},
+    {9, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 2, -1, 1},
+    {23, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 2, -1, 1},
+    {47, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 5, -1, 1},
+    {51, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 6, -1, 1},
+    {50, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 6, -1, 1},
+};
+static const MiFitnessRecordLayout r_indoorbiking_layouts[6] = {
+    {0, NULL, r_indoorbiking_one0, sizeof(r_indoorbiking_one0) / sizeof(r_indoorbiking_one0[0])},
+    {1, r_indoorbiking_four1, NULL, sizeof(r_indoorbiking_four1) / sizeof(r_indoorbiking_four1[0])},
+    {1, r_indoorbiking_four1, NULL, sizeof(r_indoorbiking_four1) / sizeof(r_indoorbiking_four1[0])},
+    {1, r_indoorbiking_four1, NULL, sizeof(r_indoorbiking_four1) / sizeof(r_indoorbiking_four1[0])},
+    {1, r_indoorbiking_four1, NULL, sizeof(r_indoorbiking_four1) / sizeof(r_indoorbiking_four1[0])},
+    {1, r_indoorbiking_four1, NULL, sizeof(r_indoorbiking_four1) / sizeof(r_indoorbiking_four1[0])},
+};
+static const MiFitnessRecordParser r_indoorbiking = {"IndoorBikingRecordParser", 0, 0, 10, NULL, 0, r_indoorbiking_it, sizeof(r_indoorbiking_it) / sizeof(r_indoorbiking_it[0]), r_indoorbiking_layouts, 6};
+
+static const MiFitnessOneDimenField r_freetraining_it[] = {
+    {41, 1, 2, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {78, 4, 4, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {89, 2, 5, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {90, 2, 5, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {91, 2, 5, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessOneDimenField r_freetraining_one0[] = {
+    {5, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {2, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessFourDimenField r_freetraining_four1[] = {
+    {5, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 3, -1, 1},
+    {2, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 3, -1, 1},
+    {38, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 3, -1, 1},
+    {39, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 3, -1, 1},
+};
+static const MiFitnessRecordLayout r_freetraining_layouts[6] = {
+    {0, NULL, r_freetraining_one0, sizeof(r_freetraining_one0) / sizeof(r_freetraining_one0[0])},
+    {0, NULL, r_freetraining_one0, sizeof(r_freetraining_one0) / sizeof(r_freetraining_one0[0])},
+    {1, r_freetraining_four1, NULL, sizeof(r_freetraining_four1) / sizeof(r_freetraining_four1[0])},
+    {1, r_freetraining_four1, NULL, sizeof(r_freetraining_four1) / sizeof(r_freetraining_four1[0])},
+    {1, r_freetraining_four1, NULL, sizeof(r_freetraining_four1) / sizeof(r_freetraining_four1[0])},
+    {1, r_freetraining_four1, NULL, sizeof(r_freetraining_four1) / sizeof(r_freetraining_four1[0])},
+};
+static const MiFitnessRecordParser r_freetraining = {"FreeTrainingRecordParser", 0, 0, 10, NULL, 0, r_freetraining_it, sizeof(r_freetraining_it) / sizeof(r_freetraining_it[0]), r_freetraining_layouts, 6};
+
+static const MiFitnessOneDimenField r_swimming_one0[] = {
+    {-1, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {1, 4, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {11, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {12, 2, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {13, 2, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {9, 2, 1, 0, 1, -1, 1, 0, -1, 1, {0, 0, 0, 0}},
+    {2, 2, 1, 0, 1, -1, 1, 0, -1, 1, {0, 0, 0, 0}},
+    {16, 2, 1, 0, 1, -1, 1, 0, -1, 1, {0, 0, 0, 0}},
+    {10, 2, 1, 0, 1, -1, 1, 0, -1, 1, {0, 0, 0, 0}},
+    {17, 1, 1, 0, 1, -1, 1, 0, -1, 1, {0, 0, 0, 0}},
+    {18, 1, 1, 0, 1, -1, 1, 0, -1, 1, {0, 0, 0, 0}},
+    {19, 1, 1, 0, 1, -1, 1, 0, -1, 1, {0, 0, 0, 0}},
+    {20, 1, 1, 0, 1, -1, 1, 0, -1, 1, {0, 0, 0, 0}},
+    {21, 1, 1, 0, 1, -1, 1, 0, -1, 1, {0, 0, 0, 0}},
+    {22, 1, 1, 0, 1, -1, 1, 0, -1, 1, {0, 0, 0, 0}},
+    {3, 2, 2, 0, 1, -1, 1, 0, -1, 1, {0, 0, 0, 0}},
+    {81, 1, 3, 0, 1, -1, 1, 0, -1, 1, {0, 0, 0, 0}},
+    {82, 1, 3, 0, 1, -1, 1, 0, -1, 1, {0, 0, 0, 0}},
+    {83, 1, 3, 0, 1, -1, 1, 0, -1, 1, {0, 0, 0, 0}},
+    {84, 2, 3, 0, 1, -1, 1, 0, -1, 1, {0, 0, 0, 0}},
+    {85, 4, 3, 0, 1, -1, 1, 0, -1, 1, {0, 0, 0, 0}},
+    {86, 1, 3, 0, 1, 85, 1, 0, -1, 1, {0, 0, 0, 0}},
+};
+static const MiFitnessRecordLayout r_swimming_layouts[3] = {
+    {0, NULL, r_swimming_one0, sizeof(r_swimming_one0) / sizeof(r_swimming_one0[0])},
+    {0, NULL, r_swimming_one0, sizeof(r_swimming_one0) / sizeof(r_swimming_one0[0])},
+    {0, NULL, r_swimming_one0, sizeof(r_swimming_one0) / sizeof(r_swimming_one0[0])},
+};
+static const MiFitnessRecordParser r_swimming = {"SwimmingRecordParser", 0, 1, 1, NULL, 0, NULL, 0, r_swimming_layouts, 3};
+
+static const MiFitnessOneDimenField r_ellipticalmachine_it[] = {
+    {41, 1, 2, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessFourDimenField r_ellipticalmachine_four0[] = {
+    {2, 4, MI_FITNESS_NO_TYPE, 1, {1, 0, 4, 4}, {1, 0, 0, 4}, {0, 0, 0, 0}, 1, -1, 1},
+    {5, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {49, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 3, -1, 1},
+};
+static const MiFitnessRecordLayout r_ellipticalmachine_layouts[3] = {
+    {1, r_ellipticalmachine_four0, NULL, sizeof(r_ellipticalmachine_four0) / sizeof(r_ellipticalmachine_four0[0])},
+    {1, r_ellipticalmachine_four0, NULL, sizeof(r_ellipticalmachine_four0) / sizeof(r_ellipticalmachine_four0[0])},
+    {1, r_ellipticalmachine_four0, NULL, sizeof(r_ellipticalmachine_four0) / sizeof(r_ellipticalmachine_four0[0])},
+};
+static const MiFitnessRecordParser r_ellipticalmachine = {"EllipticalMachineRecordParser", 0, 0, 10, NULL, 0, r_ellipticalmachine_it, sizeof(r_ellipticalmachine_it) / sizeof(r_ellipticalmachine_it[0]), r_ellipticalmachine_layouts, 3};
+
+static const MiFitnessOneDimenField r_yoga_one0[] = {
+    {5, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {2, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessRecordLayout r_yoga_layouts[6] = {
+    {0, NULL, r_yoga_one0, sizeof(r_yoga_one0) / sizeof(r_yoga_one0[0])},
+    {0, NULL, r_yoga_one0, sizeof(r_yoga_one0) / sizeof(r_yoga_one0[0])},
+    {0, NULL, r_yoga_one0, sizeof(r_yoga_one0) / sizeof(r_yoga_one0[0])},
+    {0, NULL, r_yoga_one0, sizeof(r_yoga_one0) / sizeof(r_yoga_one0[0])},
+    {0, NULL, r_yoga_one0, sizeof(r_yoga_one0) / sizeof(r_yoga_one0[0])},
+    {0, NULL, r_yoga_one0, sizeof(r_yoga_one0) / sizeof(r_yoga_one0[0])},
+};
+static const MiFitnessRecordParser r_yoga = {"YogaRecordParser", 0, 0, 10, NULL, 0, NULL, 0, r_yoga_layouts, 6};
+
+static const MiFitnessOneDimenField r_rowingmachine_it[] = {
+    {41, 1, 2, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {42, 4, 3, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessFourDimenField r_rowingmachine_four0[] = {
+    {5, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {2, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {24, 25, 26, 1, {1, 0, 7, 1}, {1, 0, 6, 1}, {1, 0, 0, 6}, 1, -1, 1},
+};
+static const MiFitnessFourDimenField r_rowingmachine_four1[] = {
+    {5, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {2, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {52, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 4, -1, 1},
+};
+static const MiFitnessRecordLayout r_rowingmachine_layouts[4] = {
+    {1, r_rowingmachine_four0, NULL, sizeof(r_rowingmachine_four0) / sizeof(r_rowingmachine_four0[0])},
+    {1, r_rowingmachine_four0, NULL, sizeof(r_rowingmachine_four0) / sizeof(r_rowingmachine_four0[0])},
+    {1, r_rowingmachine_four0, NULL, sizeof(r_rowingmachine_four0) / sizeof(r_rowingmachine_four0[0])},
+    {1, r_rowingmachine_four1, NULL, sizeof(r_rowingmachine_four1) / sizeof(r_rowingmachine_four1[0])},
+};
+static const MiFitnessRecordParser r_rowingmachine = {"RowingMachineRecordParser", 1, 0, 10, NULL, 0, r_rowingmachine_it, sizeof(r_rowingmachine_it) / sizeof(r_rowingmachine_it[0]), r_rowingmachine_layouts, 4};
+
+static const MiFitnessOneDimenField r_ropeskipping_it[] = {
+    {41, 1, 3, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {42, 4, 4, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessOneDimenField r_ropeskipping_one0[] = {
+    {5, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {2, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {35, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {36, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {37, 1, 2, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessFourDimenField r_ropeskipping_four1[] = {
+    {5, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 5, -1, 1},
+    {2, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 5, -1, 1},
+    {53, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 5, -1, 1},
+    {36, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 5, -1, 1},
+    {37, 35, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 5, -1, 1},
+};
+static const MiFitnessFourDimenField r_ropeskipping_four2[] = {
+    {5, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 6, -1, 1},
+    {2, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 6, -1, 1},
+    {53, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 6, -1, 1},
+    {36, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 6, -1, 1},
+    {37, 35, MI_FITNESS_NO_TYPE, 1, {1, 0, 6, 2}, {1, 0, 0, 6}, {0, 0, 0, 0}, 6, -1, 1},
+};
+static const MiFitnessRecordLayout r_ropeskipping_layouts[6] = {
+    {0, NULL, r_ropeskipping_one0, sizeof(r_ropeskipping_one0) / sizeof(r_ropeskipping_one0[0])},
+    {0, NULL, r_ropeskipping_one0, sizeof(r_ropeskipping_one0) / sizeof(r_ropeskipping_one0[0])},
+    {0, NULL, r_ropeskipping_one0, sizeof(r_ropeskipping_one0) / sizeof(r_ropeskipping_one0[0])},
+    {0, NULL, r_ropeskipping_one0, sizeof(r_ropeskipping_one0) / sizeof(r_ropeskipping_one0[0])},
+    {1, r_ropeskipping_four1, NULL, sizeof(r_ropeskipping_four1) / sizeof(r_ropeskipping_four1[0])},
+    {1, r_ropeskipping_four2, NULL, sizeof(r_ropeskipping_four2) / sizeof(r_ropeskipping_four2[0])},
+};
+static const MiFitnessRecordParser r_ropeskipping = {"RopeSkippingRecordParser", 1, 0, 10, NULL, 0, r_ropeskipping_it, sizeof(r_ropeskipping_it) / sizeof(r_ropeskipping_it[0]), r_ropeskipping_layouts, 6};
+
+static const MiFitnessOneDimenField r_hitraining_it[] = {
+    {41, 1, 2, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessOneDimenField r_hitraining_one0[] = {
+    {5, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {2, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessRecordLayout r_hitraining_layouts[6] = {
+    {0, NULL, r_hitraining_one0, sizeof(r_hitraining_one0) / sizeof(r_hitraining_one0[0])},
+    {0, NULL, r_hitraining_one0, sizeof(r_hitraining_one0) / sizeof(r_hitraining_one0[0])},
+    {0, NULL, r_hitraining_one0, sizeof(r_hitraining_one0) / sizeof(r_hitraining_one0[0])},
+    {0, NULL, r_hitraining_one0, sizeof(r_hitraining_one0) / sizeof(r_hitraining_one0[0])},
+    {0, NULL, r_hitraining_one0, sizeof(r_hitraining_one0) / sizeof(r_hitraining_one0[0])},
+    {0, NULL, r_hitraining_one0, sizeof(r_hitraining_one0) / sizeof(r_hitraining_one0[0])},
+};
+static const MiFitnessRecordParser r_hitraining = {"HITrainingRecordParser", 1, 0, 10, NULL, 0, r_hitraining_it, sizeof(r_hitraining_it) / sizeof(r_hitraining_it[0]), r_hitraining_layouts, 6};
+
+static const MiFitnessFourDimenField r_ordinaryball_four0[] = {
+    {5, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {2, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {29, 30, MI_FITNESS_NO_TYPE, 1, {1, 0, 4, 4}, {1, 0, 0, 4}, {0, 0, 0, 0}, 1, -1, 1},
+    {9, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+};
+static const MiFitnessRecordLayout r_ordinaryball_layouts[1] = {
+    {1, r_ordinaryball_four0, NULL, sizeof(r_ordinaryball_four0) / sizeof(r_ordinaryball_four0[0])},
+};
+static const MiFitnessRecordParser r_ordinaryball = {"OrdinaryBallRecordParser", 0, 0, 10, NULL, 0, NULL, 0, r_ordinaryball_layouts, 1};
+
+static const MiFitnessFourDimenField r_basketball_four0[] = {
+    {5, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {2, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {27, 28, MI_FITNESS_NO_TYPE, 1, {1, 0, 4, 4}, {1, 0, 0, 4}, {0, 0, 0, 0}, 1, -1, 1},
+    {9, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+};
+static const MiFitnessRecordLayout r_basketball_layouts[1] = {
+    {1, r_basketball_four0, NULL, sizeof(r_basketball_four0) / sizeof(r_basketball_four0[0])},
+};
+static const MiFitnessRecordParser r_basketball = {"BasketballRecordParser", 0, 0, 10, NULL, 0, NULL, 0, r_basketball_layouts, 1};
+
+static const MiFitnessOneDimenField r_golf_one0[] = {
+    {1, 4, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {2, 2, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {3, 2, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {31, 2, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {32, 2, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {33, 2, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {34, 2, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessRecordLayout r_golf_layouts[1] = {
+    {0, NULL, r_golf_one0, sizeof(r_golf_one0) / sizeof(r_golf_one0[0])},
+};
+static const MiFitnessRecordParser r_golf = {"GolfRecordParser", 0, 0, 10, NULL, 0, NULL, 0, r_golf_layouts, 1};
+
+static const MiFitnessOneDimenField r_ski_init[] = {
+    {-2, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {0, 4, 1, 1, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessOneDimenField r_ski_it[] = {
+    {59, 4, 3, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {60, 4, 3, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {61, 2, 3, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {62, 2, 3, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {63, 1, 3, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessFourDimenField r_ski_four0[] = {
+    {2, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {5, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {87, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 4, {1, 4, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 4, -1, 0},
+    {88, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 4, -1, 1},
+    {7, 8, MI_FITNESS_NO_TYPE, 1, {1, 0, 7, 1}, {1, 0, 0, 7}, {0, 0, 0, 0}, 1, 3, 1},
+    {9, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, 3, 1},
+    {51, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 2, -1, 1},
+};
+static const MiFitnessRecordLayout r_ski_layouts[4] = {
+    {1, r_ski_four0, NULL, sizeof(r_ski_four0) / sizeof(r_ski_four0[0])},
+    {1, r_ski_four0, NULL, sizeof(r_ski_four0) / sizeof(r_ski_four0[0])},
+    {1, r_ski_four0, NULL, sizeof(r_ski_four0) / sizeof(r_ski_four0[0])},
+    {1, r_ski_four0, NULL, sizeof(r_ski_four0) / sizeof(r_ski_four0[0])},
+};
+static const MiFitnessRecordParser r_ski = {"SkiRecordParser", 0, 0, 1, r_ski_init, sizeof(r_ski_init) / sizeof(r_ski_init[0]), r_ski_it, sizeof(r_ski_it) / sizeof(r_ski_it[0]), r_ski_layouts, 4};
+
+static const MiFitnessOneDimenField r_outdoorstep_init[] = {
+    {0, 4, 1, 1, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessOneDimenField r_outdoorstep_it[] = {
+    {41, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {43, 4, 3, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {78, 4, 7, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {54, 4, 6, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {55, 2, 6, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessFourDimenField r_outdoorstep_four0[] = {
+    {2, 4, MI_FITNESS_NO_TYPE, 1, {1, 0, 4, 4}, {1, 0, 0, 4}, {0, 0, 0, 0}, 1, -1, 1},
+    {5, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {87, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 4, {1, 4, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 9, -1, 0},
+    {6, 9, MI_FITNESS_NO_TYPE, 2, {1, 0, 15, 1}, {1, 0, 0, 15}, {0, 0, 0, 0}, 9, -1, 1},
+    {6, 7, 8, 1, {1, 0, 7, 1}, {1, 0, 6, 1}, {1, 0, 0, 6}, 1, 8, 1},
+    {9, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, 8, 1},
+    {40, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 2, -1, 1},
+    {44, 45, 46, 4, {1, 0, 26, 6}, {1, 0, 13, 13}, {1, 0, 0, 13}, 4, -1, 1},
+    {48, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 5, -1, 1},
+    {49, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 5, -1, 1},
+    {12, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 5, -1, 1},
+    {56, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 6, -1, 1},
+    {57, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 6, -1, 1},
+    {79, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 8, -1, 1},
+    {80, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 8, -1, 1},
+};
+static const MiFitnessRecordLayout r_outdoorstep_layouts[9] = {
+    {1, r_outdoorstep_four0, NULL, sizeof(r_outdoorstep_four0) / sizeof(r_outdoorstep_four0[0])},
+    {1, r_outdoorstep_four0, NULL, sizeof(r_outdoorstep_four0) / sizeof(r_outdoorstep_four0[0])},
+    {1, r_outdoorstep_four0, NULL, sizeof(r_outdoorstep_four0) / sizeof(r_outdoorstep_four0[0])},
+    {1, r_outdoorstep_four0, NULL, sizeof(r_outdoorstep_four0) / sizeof(r_outdoorstep_four0[0])},
+    {1, r_outdoorstep_four0, NULL, sizeof(r_outdoorstep_four0) / sizeof(r_outdoorstep_four0[0])},
+    {1, r_outdoorstep_four0, NULL, sizeof(r_outdoorstep_four0) / sizeof(r_outdoorstep_four0[0])},
+    {1, r_outdoorstep_four0, NULL, sizeof(r_outdoorstep_four0) / sizeof(r_outdoorstep_four0[0])},
+    {1, r_outdoorstep_four0, NULL, sizeof(r_outdoorstep_four0) / sizeof(r_outdoorstep_four0[0])},
+    {1, r_outdoorstep_four0, NULL, sizeof(r_outdoorstep_four0) / sizeof(r_outdoorstep_four0[0])},
+};
+static const MiFitnessRecordParser r_outdoorstep = {"OutdoorStepRecordParser", 0, 0, 10, r_outdoorstep_init, sizeof(r_outdoorstep_init) / sizeof(r_outdoorstep_init[0]), r_outdoorstep_it, sizeof(r_outdoorstep_it) / sizeof(r_outdoorstep_it[0]), r_outdoorstep_layouts, 9};
+
+static const MiFitnessOneDimenField r_outdoornostep_init[] = {
+    {0, 4, 1, 1, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessOneDimenField r_outdoornostep_it[] = {
+    {41, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {43, 4, 2, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {78, 4, 5, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {58, 2, 4, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessFourDimenField r_outdoornostep_four0[] = {
+    {2, 10, MI_FITNESS_NO_TYPE, 1, {1, 0, 4, 4}, {1, 0, 0, 4}, {0, 0, 0, 0}, 1, -1, 1},
+    {5, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {87, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 4, {1, 4, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 6, -1, 0},
+    {6, 9, MI_FITNESS_NO_TYPE, 2, {1, 0, 15, 1}, {1, 0, 0, 15}, {0, 0, 0, 0}, 6, -1, 1},
+    {6, 7, 8, 1, {1, 0, 7, 1}, {1, 0, 6, 1}, {1, 0, 0, 6}, 1, 5, 1},
+    {9, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, 5, 1},
+    {51, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 3, -1, 1},
+    {50, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 3, -1, 1},
+};
+static const MiFitnessRecordLayout r_outdoornostep_layouts[7] = {
+    {1, r_outdoornostep_four0, NULL, sizeof(r_outdoornostep_four0) / sizeof(r_outdoornostep_four0[0])},
+    {1, r_outdoornostep_four0, NULL, sizeof(r_outdoornostep_four0) / sizeof(r_outdoornostep_four0[0])},
+    {1, r_outdoornostep_four0, NULL, sizeof(r_outdoornostep_four0) / sizeof(r_outdoornostep_four0[0])},
+    {1, r_outdoornostep_four0, NULL, sizeof(r_outdoornostep_four0) / sizeof(r_outdoornostep_four0[0])},
+    {1, r_outdoornostep_four0, NULL, sizeof(r_outdoornostep_four0) / sizeof(r_outdoornostep_four0[0])},
+    {1, r_outdoornostep_four0, NULL, sizeof(r_outdoornostep_four0) / sizeof(r_outdoornostep_four0[0])},
+    {1, r_outdoornostep_four0, NULL, sizeof(r_outdoornostep_four0) / sizeof(r_outdoornostep_four0[0])},
+};
+static const MiFitnessRecordParser r_outdoornostep = {"OutdoorNoStepRecordParser", 0, 0, 1, r_outdoornostep_init, sizeof(r_outdoornostep_init) / sizeof(r_outdoornostep_init[0]), r_outdoornostep_it, sizeof(r_outdoornostep_it) / sizeof(r_outdoornostep_it[0]), r_outdoornostep_layouts, 7};
+
+static const MiFitnessOneDimenField r_rockclimbing_init[] = {
+    {0, 4, 1, 1, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessFourDimenField r_rockclimbing_four0[] = {
+    {5, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {2, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {7, 8, MI_FITNESS_NO_TYPE, 1, {1, 0, 7, 1}, {1, 0, 0, 7}, {0, 0, 0, 0}, 1, 1, 1},
+    {87, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 4, {1, 4, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 2, -1, 0},
+};
+static const MiFitnessRecordLayout r_rockclimbing_layouts[2] = {
+    {1, r_rockclimbing_four0, NULL, sizeof(r_rockclimbing_four0) / sizeof(r_rockclimbing_four0[0])},
+    {1, r_rockclimbing_four0, NULL, sizeof(r_rockclimbing_four0) / sizeof(r_rockclimbing_four0[0])},
+};
+static const MiFitnessRecordParser r_rockclimbing = {"RockClimbingRecordParser", 0, 0, 10, r_rockclimbing_init, sizeof(r_rockclimbing_init) / sizeof(r_rockclimbing_init[0]), NULL, 0, r_rockclimbing_layouts, 2};
+
+static const MiFitnessOneDimenField r_diving_it[] = {
+    {64, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {65, 4, 1, 0, 1, -1, 1, 0, 64, 1, {1, 0, 0, 0}},
+    {66, 4, 1, 0, 1, -1, 1, 0, 64, 1, {1, 0, 0, 0}},
+    {67, 2, 1, 0, 1, -1, 1, 0, 64, 1, {1, 0, 0, 0}},
+    {68, 2, 1, 0, 1, -1, 1, 0, 64, 1, {1, 0, 0, 0}},
+    {69, 2, 1, 0, 0, -1, 1, 0, 64, 1, {1, 0, 0, 0}},
+    {75, 2, 2, 0, 0, -1, 1, 0, 64, 1, {1, 0, 0, 0}},
+    {76, 2, 2, 0, 1, -1, 1, 0, 64, 1, {1, 0, 0, 0}},
+    {77, 2, 2, 0, 1, -1, 1, 0, 64, 1, {1, 0, 0, 0}},
+};
+static const MiFitnessFourDimenField r_diving_four0[] = {
+    {70, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 1, {1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {71, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 1},
+    {72, MI_FITNESS_NO_TYPE, MI_FITNESS_NO_TYPE, 2, {1, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1, -1, 0},
+    {73, 74, MI_FITNESS_NO_TYPE, 2, {1, 0, 14, 2}, {1, 0, 0, 14}, {0, 0, 0, 0}, 1, -1, 1},
+};
+static const MiFitnessRecordLayout r_diving_layouts[2] = {
+    {1, r_diving_four0, NULL, sizeof(r_diving_four0) / sizeof(r_diving_four0[0])},
+    {1, r_diving_four0, NULL, sizeof(r_diving_four0) / sizeof(r_diving_four0[0])},
+};
+static const MiFitnessRecordParser r_diving = {"DivingRecordParser", 0, 0, 10, NULL, 0, r_diving_it, sizeof(r_diving_it) / sizeof(r_diving_it[0]), r_diving_layouts, 2};
+
+static const MiFitnessOneDimenField r_gamemode_one0[] = {
+    {5, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {2, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+    {39, 1, 1, 0, 1, -1, 0, 0, 0, 0, {0, 0, 0, 0}},
+};
+static const MiFitnessRecordLayout r_gamemode_layouts[1] = {
+    {0, NULL, r_gamemode_one0, sizeof(r_gamemode_one0) / sizeof(r_gamemode_one0[0])},
+};
+static const MiFitnessRecordParser r_gamemode = {"GameModeRecordRarser", 0, 0, 10, NULL, 0, NULL, 0, r_gamemode_layouts, 1};
+
+const MiFitnessRecordParser *mi_fitness_record_parser(int sport_type) {
+    switch (sport_type) {
+        case 1:
+        case 2:
+        case 4:
+        case 5:
+        case 15:
+            return &r_outdoorsport;
+        case 3:
+            return &r_indoorrun;
+        case 6:
+            return &r_outdoorbiking;
+        case 7:
+            return &r_indoorbiking;
+        case 8:
+            return &r_freetraining;
+        case 9:
+        case 10:
+            return &r_swimming;
+        case 11:
+            return &r_ellipticalmachine;
+        case 12:
+            return &r_yoga;
+        case 13:
+            return &r_rowingmachine;
+        case 14:
+            return &r_ropeskipping;
+        case 16:
+            return &r_hitraining;
+        case 18:
+            return &r_ordinaryball;
+        case 19:
+            return &r_basketball;
+        case 20:
+            return &r_golf;
+        case 21:
+            return &r_ski;
+        case 22:
+            return &r_outdoorstep;
+        case 23:
+            return &r_outdoornostep;
+        case 24:
+            return &r_rockclimbing;
+        case 25:
+            return &r_diving;
+        case 26:
+            return &r_gamemode;
+        default:
+            return NULL;
+    }
+}
+
+const MiFitnessRecordLayout *mi_fitness_record_layout(const MiFitnessRecordParser *p, int version) {
+    if (p == NULL || version < 1 || version > p->max_version || p->layouts[version - 1].count == 0) {
+        return NULL;
+    }
+    return &p->layouts[version - 1];
+}
+
 typedef struct {
     const char *name;
     int id;

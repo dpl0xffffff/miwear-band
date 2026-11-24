@@ -205,6 +205,11 @@ bool mi_fitness_oneden_parse_one_record(const MiFitnessOneDimenField *fields,
         if (scratch_count >= MI_FITNESS_FIELD_VALUE_MAX) {
             break;
         }
+        /* OneDimenDataParser.parseOneRecord: a field that no longer fits ends the record, keeping
+         * what was read ("no available bytes"). A repeated block that overruns is an error. */
+        if (off + f->byte_count > body_len) {
+            break;
+        }
         if (!read_value(f, valid, repeat, body, body_len, &off, &scratch[scratch_count])) {
             return false;
         }

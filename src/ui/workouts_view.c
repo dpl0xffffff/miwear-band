@@ -544,6 +544,11 @@ static int zone_for_hr(const MiwearWorkoutHrZones *z, int hr) {
     return zone;
 }
 
+#define DETAIL_BINS_MAX 240
+#define DETAIL_STEPS (-1)
+#define DETAIL_HR (-2)
+static guint detail_bins(const MiwearWorkoutSummary *d, int series, guint nbins, double *out, uint32_t *t_end);
+
 static void draw_detail_hr(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
     MiwearDashboardUi *dash = user_data;
     GtkWidget *w = GTK_WIDGET(area);
@@ -591,28 +596,26 @@ static void draw_detail_hr(GtkDrawingArea *area, cairo_t *cr, int width, int hei
         mi_draw_text(cr, w, t, CLAMP(DX(m * 60), left + 8, left + pw - 8), top + ph + 16, 10.5, 0.55, 0.5);
     }
 
-    /* Line coloured by heart-rate zone. */
+    /* Bucket averages (about 2 px each), coloured by heart-rate zone, broken where nothing was
+     * recorded (pauses). */
+    double bins[DETAIL_BINS_MAX];
+    uint32_t t_bins = 1;
+    const guint nb = detail_bins(d, DETAIL_HR, (guint)(pw / 2), bins, &t_bins);
     cairo_set_line_width(cr, 2.2);
     cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
-    const MiwearWorkoutSample *prev = NULL;
-    for (guint i = 0; i < n; i++) {
-        const MiwearWorkoutSample *s = &g_array_index(d->record_samples, MiwearWorkoutSample, i);
-        if (s->hr == 0) {
-            prev = NULL;
+    for (guint b = 1; b < nb; b++) {
+        if (isnan(bins[b]) || isnan(bins[b - 1])) {
             continue;
         }
-        if (prev != NULL) {
-            const int z = zone_for_hr(&d->hr_zones, s->hr);
-            if (z >= 0) {
-                mi_cairo_set_color(cr, zone_colors[z], 1.0);
-            } else {
-                mi_cairo_set_color(cr, MI_COLOR_HR, 1.0);
-            }
-            cairo_move_to(cr, DX(prev->offset_sec), DY(prev->hr));
-            cairo_line_to(cr, DX(s->offset_sec), DY(s->hr));
-            cairo_stroke(cr);
+        const int z = zone_for_hr(&d->hr_zones, (int)lround(bins[b]));
+        if (z >= 0) {
+            mi_cairo_set_color(cr, zone_colors[z], 1.0);
+        } else {
+            mi_cairo_set_color(cr, MI_COLOR_HR, 1.0);
         }
-        prev = s;
+        cairo_move_to(cr, left + pw * (b - 0.5) / nb, DY(bins[b - 1]));
+        cairo_line_to(cr, left + pw * (b + 0.5) / nb, DY(bins[b]));
+        cairo_stroke(cr);
     }
     if (d->hr_avg > 0) {
         const double dashes[] = {4, 4};
@@ -628,6 +631,44 @@ static void draw_detail_hr(GtkDrawingArea *area, cairo_t *cr, int width, int hei
 #undef DY
 }
 
+/* Time buckets over the record: steps are summed, other series averaged (NAN = no data). */
+static guint detail_bins(const MiwearWorkoutSummary *d, int series, guint nbins, double *out, uint32_t *t_end) {
+    const guint n = d->record_samples->len;
+    *t_end = MAX(g_array_index(d->record_samples, MiwearWorkoutSample, n - 1).offset_sec, 1u);
+    nbins = CLAMP(nbins, 1u, DETAIL_BINS_MAX);
+    int cnt[DETAIL_BINS_MAX] = {0};
+    for (guint b = 0; b < nbins; b++) {
+        out[b] = 0;
+    }
+    for (guint i = 0; i < n; i++) {
+        const MiwearWorkoutSample *smp = &g_array_index(d->record_samples, MiwearWorkoutSample, i);
+        const guint b = MIN(nbins - 1, (guint)((double)smp->offset_sec / *t_end * nbins));
+        const double v = series == DETAIL_STEPS ? smp->steps_delta
+                         : series == DETAIL_HR   ? (smp->hr > 0 ? smp->hr : NAN)
+                                                 : smp->v[series];
+        if (!isnan(v)) {
+            out[b] += v;
+            cnt[b]++;
+        }
+    }
+    for (guint b = 0; b < nbins; b++) {
+        if (series != DETAIL_STEPS) {
+            out[b] = cnt[b] > 0 ? out[b] / cnt[b] : NAN;
+        }
+    }
+    return nbins;
+}
+
+static void draw_time_axis(cairo_t *cr, GtkWidget *w, double left, double pw, double y, uint32_t t_end) {
+    const int minutes = (int)(t_end / 60);
+    const int step = minutes > 90 ? 30 : minutes > 40 ? 15 : minutes > 15 ? 5 : 1;
+    for (int m = 0; m <= minutes; m += step) {
+        gchar t[16];
+        g_snprintf(t, sizeof(t), "%d′", m);
+        mi_draw_text(cr, w, t, CLAMP(left + pw * m * 60.0 / t_end, left + 8, left + pw - 8), y, 10.5, 0.55, 0.5);
+    }
+}
+
 static void draw_detail_steps(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
     MiwearDashboardUi *dash = user_data;
     GtkWidget *w = GTK_WIDGET(area);
@@ -635,28 +676,164 @@ static void draw_detail_steps(GtkDrawingArea *area, cairo_t *cr, int width, int 
     if (d == NULL || d->record_samples == NULL || d->record_samples->len == 0 || width < 80) {
         return;
     }
-    const guint n = d->record_samples->len;
-    int smax = 1;
-    for (guint i = 0; i < n; i++) {
-        smax = MAX(smax, (int)g_array_index(d->record_samples, MiwearWorkoutSample, i).steps_delta);
-    }
-    const double left = 34, top = 6, bottom = 8;
+    const double left = 34, top = 6, bottom = 22;
     const double pw = width - left, ph = height - top - bottom;
+    double bins[DETAIL_BINS_MAX];
+    uint32_t t_end = 1;
+    const guint nb = detail_bins(d, DETAIL_STEPS, (guint)(pw / 6), bins, &t_end);
+    double smax = 1;
+    for (guint b = 0; b < nb; b++) {
+        smax = MAX(smax, bins[b]);
+    }
     gchar t[16];
-    g_snprintf(t, sizeof(t), "%d", smax);
+    g_snprintf(t, sizeof(t), "%.0f", smax);
     mi_draw_text(cr, w, t, left - 6, top + 8, 10.5, 0.55, 1.0);
     mi_draw_text(cr, w, "0", left - 6, top + ph, 10.5, 0.55, 1.0);
-    const double bw = pw / n;
+    draw_time_axis(cr, w, left, pw, top + ph + 16, t_end);
+    const double bw = pw / nb;
     mi_cairo_set_color(cr, MI_COLOR_STEPS, 0.9);
-    for (guint i = 0; i < n; i++) {
-        const int v = g_array_index(d->record_samples, MiwearWorkoutSample, i).steps_delta;
-        if (v <= 0) {
+    for (guint b = 0; b < nb; b++) {
+        if (bins[b] <= 0) {
             continue;
         }
-        const double bh = ph * v / smax;
-        mi_rounded_rect(cr, left + bw * i + bw * 0.1, top + ph - bh, MAX(bw * 0.8, 1), bh, MIN(2.5, bw * 0.4));
+        const double bh = ph * bins[b] / smax;
+        mi_rounded_rect(cr, left + bw * b + bw * 0.1, top + ph - bh, MAX(bw * 0.8, 1), bh, MIN(2.5, bw * 0.4));
         cairo_fill(cr);
     }
+}
+
+static MiColor series_color(int k) {
+    switch (k) {
+        case MIWEAR_SERIES_PACE:
+        case MIWEAR_SERIES_SPEED:
+            return MI_COLOR_ACTIVE;
+        case MIWEAR_SERIES_CADENCE:
+        case MIWEAR_SERIES_STRIDE:
+            return MI_COLOR_STEPS;
+        case MIWEAR_SERIES_POWER:
+            return MI_COLOR_CALORIES;
+        case MIWEAR_SERIES_ALTITUDE:
+            return MI_COLOR_VITALITY;
+        case MIWEAR_SERIES_SPO2:
+            return MI_COLOR_SPO2;
+        case MIWEAR_SERIES_STRESS:
+            return MI_COLOR_STRESS;
+        case MIWEAR_SERIES_WATER_TEMP:
+            return MI_COLOR_HR;
+        case MIWEAR_SERIES_GROUND_CONTACT:
+        case MIWEAR_SERIES_VERTICAL_OSC:
+            return MI_COLOR_CYCLES;
+        default:
+            return MI_COLOR_SLEEP;
+    }
+}
+
+static void format_series_value(int k, double v, gchar *buf, gsize len) {
+    if (k == MIWEAR_SERIES_PACE) {
+        const int sec = (int)lround(v);
+        g_snprintf(buf, len, "%d′%02d″", sec / 60, sec % 60);
+    } else if (k == MIWEAR_SERIES_SPEED || k == MIWEAR_SERIES_ALTITUDE || k == MIWEAR_SERIES_DEPTH ||
+               k == MIWEAR_SERIES_WATER_TEMP || k == MIWEAR_SERIES_VERTICAL_OSC) {
+        g_snprintf(buf, len, "%.1f", v);
+    } else {
+        g_snprintf(buf, len, "%.0f", v);
+    }
+}
+
+static void draw_detail_series(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
+    MiwearDashboardUi *dash = user_data;
+    GtkWidget *w = GTK_WIDGET(area);
+    const int k = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(area), "series"));
+    const MiwearWorkoutSummary *d = entry_detail(dash->sport_detail_entry);
+    if (d == NULL || d->record_samples == NULL || d->record_samples->len < 2 || width < 80) {
+        return;
+    }
+    const double left = 44, right = 6, top = 8, bottom = 22;
+    const double pw = width - left - right, ph = height - top - bottom;
+    double bins[DETAIL_BINS_MAX];
+    uint32_t t_end = 1;
+    const guint nb = detail_bins(d, k, (guint)(pw / 3), bins, &t_end);
+    double lo = INFINITY, hi = -INFINITY;
+    for (guint b = 0; b < nb; b++) {
+        if (!isnan(bins[b])) {
+            lo = MIN(lo, bins[b]);
+            hi = MAX(hi, bins[b]);
+        }
+    }
+    if (!isfinite(lo)) {
+        return;
+    }
+    const double pad = MAX((hi - lo) * 0.1, k == MIWEAR_SERIES_PACE ? 10 : 1);
+    lo -= pad;
+    hi += pad;
+    const gboolean invert = k == MIWEAR_SERIES_PACE; /* faster (lower) pace up, as Mi Fitness does */
+#define SX(b) (left + pw * ((b) + 0.5) / nb)
+#define SY(v) (top + ph * (invert ? ((v) - lo) / (hi - lo) : 1.0 - ((v) - lo) / (hi - lo)))
+    for (int g = 0; g <= 3; g++) {
+        const double v = lo + (hi - lo) * g / 3;
+        mi_cairo_set_fg(cr, w, g == (invert ? 3 : 0) ? 0.18 : 0.07);
+        cairo_set_line_width(cr, 1);
+        cairo_move_to(cr, left, round(SY(v)) + 0.5);
+        cairo_line_to(cr, left + pw, round(SY(v)) + 0.5);
+        cairo_stroke(cr);
+        gchar t[24];
+        format_series_value(k, v, t, sizeof(t));
+        mi_draw_text(cr, w, t, left - 6, SY(v) + 3.5, 10.5, 0.55, 1.0);
+    }
+    draw_time_axis(cr, w, left, pw, top + ph + 16, t_end);
+
+    /* Filled runs between gaps, then the line on top. */
+    const double base = top + ph;
+    for (int pass = 0; pass < 2; pass++) {
+        gboolean open = FALSE;
+        double first_x = 0, last_x = 0;
+        for (guint b = 0; b <= nb; b++) {
+            const gboolean have = b < nb && !isnan(bins[b]);
+            if (have) {
+                if (!open) {
+                    cairo_move_to(cr, SX(b), SY(bins[b]));
+                    first_x = SX(b);
+                    open = TRUE;
+                } else {
+                    cairo_line_to(cr, SX(b), SY(bins[b]));
+                }
+                last_x = SX(b);
+            } else if (open) {
+                if (pass == 0) {
+                    cairo_line_to(cr, last_x, base);
+                    cairo_line_to(cr, first_x, base);
+                    cairo_close_path(cr);
+                    mi_cairo_set_color(cr, series_color(k), 0.14);
+                    cairo_fill(cr);
+                } else {
+                    mi_cairo_set_color(cr, series_color(k), 1.0);
+                    cairo_set_line_width(cr, 2.0);
+                    cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+                    cairo_stroke(cr);
+                }
+                open = FALSE;
+            }
+        }
+    }
+#undef SX
+#undef SY
+}
+
+/* avg / max (min for pace) of a series, FALSE when it was never recorded. */
+static gboolean series_stats(const MiwearWorkoutSummary *d, int k, double *avg, double *best) {
+    double sum = 0;
+    guint n = 0;
+    *best = k == MIWEAR_SERIES_PACE ? INFINITY : -INFINITY;
+    for (guint i = 0; i < d->record_samples->len; i++) {
+        const double v = g_array_index(d->record_samples, MiwearWorkoutSample, i).v[k];
+        if (!isnan(v)) {
+            sum += v;
+            n++;
+            *best = k == MIWEAR_SERIES_PACE ? MIN(*best, v) : MAX(*best, v);
+        }
+    }
+    *avg = n > 0 ? sum / n : 0;
+    return n > 1;
 }
 
 static void draw_detail_route(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
@@ -1014,26 +1191,60 @@ static void open_detail(AppState *state, MiwearSportEntry *e) {
     }
 
     if (d != NULL && d->record_samples != NULL && d->record_samples->len >= 2) {
+        gboolean any_hr = FALSE, any_steps = FALSE;
+        for (guint i = 0; i < d->record_samples->len; i++) {
+            const MiwearWorkoutSample *smp = &g_array_index(d->record_samples, MiwearWorkoutSample, i);
+            any_hr |= smp->hr > 0;
+            any_steps |= smp->steps_delta > 0;
+        }
         GtkWidget *sub = NULL;
-        GtkWidget *card = mi_card_new(&inner, 10);
-        gtk_box_append(GTK_BOX(inner), mi_card_header("Heart Rate", &sub, NULL));
-        g_snprintf(buf, sizeof(buf), "avg %d · max %d · min %d bpm · dashed line = average", d->hr_avg, d->hr_max,
-                   d->hr_min);
-        gtk_label_set_text(GTK_LABEL(sub), buf);
-        GtkWidget *area = gtk_drawing_area_new();
-        gtk_widget_set_size_request(area, -1, 190);
-        gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), draw_detail_hr, dash, NULL);
-        gtk_box_append(GTK_BOX(inner), area);
-        gtk_box_append(GTK_BOX(box), card);
+        GtkWidget *card = NULL;
+        GtkWidget *area = NULL;
+        if (any_hr) {
+            card = mi_card_new(&inner, 10);
+            gtk_box_append(GTK_BOX(inner), mi_card_header("Heart Rate", &sub, NULL));
+            g_snprintf(buf, sizeof(buf), "avg %d · max %d · min %d bpm · dashed line = average", d->hr_avg, d->hr_max,
+                       d->hr_min);
+            gtk_label_set_text(GTK_LABEL(sub), buf);
+            area = gtk_drawing_area_new();
+            gtk_widget_set_size_request(area, -1, 190);
+            gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), draw_detail_hr, dash, NULL);
+            gtk_box_append(GTK_BOX(inner), area);
+            gtk_box_append(GTK_BOX(box), card);
+        }
 
-        card = mi_card_new(&inner, 10);
-        gtk_box_append(GTK_BOX(inner), mi_card_header("Steps", &sub, NULL));
-        gtk_label_set_text(GTK_LABEL(sub), "Steps per recording interval");
-        area = gtk_drawing_area_new();
-        gtk_widget_set_size_request(area, -1, 110);
-        gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), draw_detail_steps, dash, NULL);
-        gtk_box_append(GTK_BOX(inner), area);
-        gtk_box_append(GTK_BOX(box), card);
+        /* One chart per series the band recorded (distance and calories are per-second deltas). */
+        for (int k = 0; k < MIWEAR_SERIES_COUNT; k++) {
+            double avg = 0, best = 0;
+            if (k == MIWEAR_SERIES_DISTANCE || k == MIWEAR_SERIES_CALORIES || !series_stats(d, k, &avg, &best)) {
+                continue;
+            }
+            gchar a[24], m[24];
+            format_series_value(k, avg, a, sizeof(a));
+            format_series_value(k, best, m, sizeof(m));
+            card = mi_card_new(&inner, 10);
+            gtk_box_append(GTK_BOX(inner), mi_card_header(miwear_series_title(k), &sub, NULL));
+            g_snprintf(buf, sizeof(buf), "avg %s · %s %s %s", a, k == MIWEAR_SERIES_PACE ? "best" : "max", m,
+                       miwear_series_unit(k));
+            gtk_label_set_text(GTK_LABEL(sub), buf);
+            area = gtk_drawing_area_new();
+            gtk_widget_set_size_request(area, -1, 140);
+            g_object_set_data(G_OBJECT(area), "series", GINT_TO_POINTER(k));
+            gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), draw_detail_series, dash, NULL);
+            gtk_box_append(GTK_BOX(inner), area);
+            gtk_box_append(GTK_BOX(box), card);
+        }
+
+        if (any_steps) {
+            card = mi_card_new(&inner, 10);
+            gtk_box_append(GTK_BOX(inner), mi_card_header("Steps", &sub, NULL));
+            gtk_label_set_text(GTK_LABEL(sub), "Steps over the workout");
+            area = gtk_drawing_area_new();
+            gtk_widget_set_size_request(area, -1, 120);
+            gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), draw_detail_steps, dash, NULL);
+            gtk_box_append(GTK_BOX(inner), area);
+            gtk_box_append(GTK_BOX(box), card);
+        }
     }
     if (d != NULL) {
         GtkWidget *zc = zones_card(&d->hr_zones);
