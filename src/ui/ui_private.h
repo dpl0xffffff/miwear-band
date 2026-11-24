@@ -57,12 +57,16 @@ void mi_format_thousands(long v, gchar *buf, gsize len);
 void mi_format_minutes(int minutes, gchar *buf, gsize len); /* "7h 05m" / "42 min" */
 void mi_format_clock(int minute_of_day, gchar *buf, gsize len); /* "07:05" */
 void mi_clear_box(GtkWidget *box);
+/* Vertically scrolling page whose content is centred and at most @max_width wide. */
+GtkWidget *mi_page_scroll(GtkWidget *content, int max_width);
 
 /* ---- Drawing helpers ---------------------------------------------------------------------- */
 
 void mi_rounded_rect(cairo_t *cr, double x, double y, double w, double h, double r);
 void mi_draw_text(cairo_t *cr, GtkWidget *widget, const char *text, double x, double y,
                   double size, double alpha, double xalign);
+/* Hover bubble right of @x (left of it when it would pass @right), its top at @top. */
+void mi_draw_tooltip(cairo_t *cr, GtkWidget *widget, const char *text, double x, double top, double right);
 /* Activity rings: values/goals for up to 3 rings, outermost first. */
 void mi_draw_rings(cairo_t *cr, double cx, double cy, double radius, double thickness,
                    const double *ratios, const MiColor *colors, int n);

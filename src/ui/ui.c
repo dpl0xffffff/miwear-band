@@ -285,12 +285,7 @@ static GtkWidget *build_setup_page(AppState *state) {
     gtk_box_append(GTK_BOX(actions), state->label_status);
     gtk_box_append(GTK_BOX(box), actions);
 
-    GtkWidget *clamp = adw_clamp_new();
-    adw_clamp_set_maximum_size(ADW_CLAMP(clamp), 560);
-    adw_clamp_set_child(ADW_CLAMP(clamp), box);
-    GtkWidget *scroll = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), clamp);
+    GtkWidget *scroll = mi_page_scroll(box, 560);
 
     GtkWidget *header = adw_header_bar_new();
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), adw_window_title_new("Set Up", NULL));
@@ -317,19 +312,20 @@ void miwear_ui_show_setup(AppState *state) {
 
 static gboolean ui_flush_log_queue_idle(gpointer user_data) {
     AppState *state = user_data;
-    GString *chunk = g_string_new(NULL);
-
     g_mutex_lock(&state->log_lock);
-    while (state->log_queue != NULL && g_queue_get_length(state->log_queue) > 0) {
-        gchar *ln = g_queue_pop_head(state->log_queue);
-        g_mutex_unlock(&state->log_lock);
-        g_string_append(chunk, ln);
-        g_string_append_c(chunk, '\n');
-        g_free(ln);
-        g_mutex_lock(&state->log_lock);
-    }
+    GQueue *lines = state->log_queue;
+    state->log_queue = NULL;
     state->log_flush_id = 0;
     g_mutex_unlock(&state->log_lock);
+
+    GString *chunk = g_string_new(NULL);
+    for (GList *l = lines != NULL ? lines->head : NULL; l != NULL; l = l->next) {
+        g_string_append(chunk, l->data);
+        g_string_append_c(chunk, '\n');
+    }
+    if (lines != NULL) {
+        g_queue_free_full(lines, g_free);
+    }
 
     if (chunk->len > 0 && state->log_buffer != NULL) {
         GtkTextIter end;
@@ -346,12 +342,6 @@ static gboolean ui_flush_log_queue_idle(gpointer user_data) {
         gtk_text_buffer_end_user_action(state->log_buffer);
     }
     g_string_free(chunk, TRUE);
-
-    g_mutex_lock(&state->log_lock);
-    if (state->log_queue != NULL && g_queue_get_length(state->log_queue) > 0 && state->log_flush_id == 0) {
-        state->log_flush_id = g_idle_add(ui_flush_log_queue_idle, state);
-    }
-    g_mutex_unlock(&state->log_lock);
     return G_SOURCE_REMOVE;
 }
 
@@ -1006,6 +996,19 @@ void switch_to_pairing(AppState *state) {
     }
 }
 
+/* BlueZ's name for the selected band, else its address. */
+static void update_device_display_name(AppState *state) {
+    if (state->selected_address == NULL || state->selected_address[0] == '\0') {
+        return;
+    }
+    g_free(state->device_display_name);
+    state->device_display_name = bluez_device_display_name(state->selected_address);
+    if (state->device_display_name == NULL || state->device_display_name[0] == '\0') {
+        g_free(state->device_display_name);
+        state->device_display_name = g_strdup(state->selected_address);
+    }
+}
+
 void start_connect_for_address(AppState *state, const gchar *raw_address) {
     set_connect_busy(state, TRUE);
     disconnect_socket(state);
@@ -1037,12 +1040,7 @@ void start_connect_for_address(AppState *state, const gchar *raw_address) {
 
     g_free(state->selected_address);
     state->selected_address = g_strdup(normalized);
-    g_free(state->device_display_name);
-    state->device_display_name = bluez_device_display_name(normalized);
-    if (state->device_display_name == NULL || state->device_display_name[0] == '\0') {
-        g_free(state->device_display_name);
-        state->device_display_name = g_strdup(normalized);
-    }
+    update_device_display_name(state);
     miwear_dashboard_update_device_state(state, NULL, NULL, NULL);
     (void)miwear_config_save(state, NULL);
 
@@ -1148,14 +1146,7 @@ void miwear_activate(GApplication *application, gpointer user_data) {
     gtk_window_set_default_size(GTK_WINDOW(state->window), 980, 820);
     gtk_widget_set_size_request(state->window, 360, 480);
 
-    if (state->selected_address != NULL && state->selected_address[0] != '\0') {
-        g_free(state->device_display_name);
-        state->device_display_name = bluez_device_display_name(state->selected_address);
-        if (state->device_display_name == NULL || state->device_display_name[0] == '\0') {
-            g_free(state->device_display_name);
-            state->device_display_name = g_strdup(state->selected_address);
-        }
-    }
+    update_device_display_name(state);
 
     state->dash_ui = miwear_dashboard_ui_new();
     state->page_dashboard = miwear_dashboard_build(state, state->dash_ui);

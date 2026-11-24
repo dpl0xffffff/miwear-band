@@ -225,6 +225,17 @@ void mi_format_clock(int minute_of_day, gchar *buf, gsize len) {
     g_snprintf(buf, len, "%02d:%02d", minute_of_day / 60, minute_of_day % 60);
 }
 
+GtkWidget *mi_page_scroll(GtkWidget *content, int max_width) {
+    GtkWidget *clamp = adw_clamp_new();
+    adw_clamp_set_maximum_size(ADW_CLAMP(clamp), max_width);
+    adw_clamp_set_tightening_threshold(ADW_CLAMP(clamp), MIN(600, max_width));
+    adw_clamp_set_child(ADW_CLAMP(clamp), content);
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), clamp);
+    return scroll;
+}
+
 void mi_clear_box(GtkWidget *box) {
     GtkWidget *child;
     while ((child = gtk_widget_get_first_child(box)) != NULL) {
@@ -262,6 +273,24 @@ void mi_draw_text(cairo_t *cr, GtkWidget *widget, const char *text, double x, do
     cairo_text_extents(cr, text, &ext);
     mi_cairo_set_fg(cr, widget, alpha);
     cairo_move_to(cr, x - ext.x_advance * xalign, y);
+    cairo_show_text(cr, text);
+}
+
+void mi_draw_tooltip(cairo_t *cr, GtkWidget *widget, const char *text, double x, double top, double right) {
+    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, 11.5);
+    cairo_text_extents_t ext;
+    cairo_text_extents(cr, text, &ext);
+    const double bw = ext.x_advance + 18;
+    const double bx = x + 10 + bw > right ? x - 10 - bw : x + 10;
+    const gboolean dark = mi_is_dark();
+    cairo_set_source_rgba(cr, dark ? 0.25 : 1, dark ? 0.25 : 1, dark ? 0.27 : 1, 0.97);
+    mi_rounded_rect(cr, bx, top, bw, 24, 8);
+    cairo_fill_preserve(cr);
+    mi_cairo_set_fg(cr, widget, 0.12);
+    cairo_stroke(cr);
+    mi_cairo_set_fg(cr, widget, 0.9);
+    cairo_move_to(cr, bx + 9, top + 16);
     cairo_show_text(cr, text);
 }
 

@@ -978,24 +978,7 @@ static void draw_trend(GtkDrawingArea *area, cairo_t *cr, int width, int height,
             } else {
                 g_snprintf(tip, sizeof(tip), "%s   %s", c0, vt);
             }
-            cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
-            cairo_set_font_size(cr, 11.5);
-            cairo_text_extents_t ext;
-            cairo_text_extents(cr, tip, &ext);
-            const double bw = ext.x_advance + 18, bh = 24;
-            double bx = x + 10;
-            if (bx + bw > left + pw) {
-                bx = x - 10 - bw;
-            }
-            const gboolean dark = mi_is_dark();
-            cairo_set_source_rgba(cr, dark ? 0.25 : 1, dark ? 0.25 : 1, dark ? 0.27 : 1, 0.97);
-            mi_rounded_rect(cr, bx, top, bw, bh, 8);
-            cairo_fill_preserve(cr);
-            mi_cairo_set_fg(cr, w, 0.12);
-            cairo_stroke(cr);
-            mi_cairo_set_fg(cr, w, 0.9);
-            cairo_move_to(cr, bx + 9, top + 16);
-            cairo_show_text(cr, tip);
+            mi_draw_tooltip(cr, w, tip, x, top, left + pw);
         }
     }
 #undef TX
@@ -1157,13 +1140,7 @@ static AdwNavigationPage *build_metric_page(AppState *state, MiwearDashboardUi *
     gtk_box_append(GTK_BOX(box), mi_date_nav_new(state, dash));
     gtk_box_append(GTK_BOX(box), build_trend_card(state, dash));
 
-    GtkWidget *clamp = adw_clamp_new();
-    adw_clamp_set_maximum_size(ADW_CLAMP(clamp), 960);
-    adw_clamp_set_tightening_threshold(ADW_CLAMP(clamp), 600);
-    adw_clamp_set_child(ADW_CLAMP(clamp), box);
-    GtkWidget *scroll = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), clamp);
+    GtkWidget *scroll = mi_page_scroll(box, 960);
 
     GtkWidget *tb = adw_toolbar_view_new();
     adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(tb), adw_header_bar_new());
@@ -1234,13 +1211,7 @@ GtkWidget *mi_today_page_new(AppState *state, MiwearDashboardUi *dash) {
     gtk_box_append(GTK_BOX(box), flow);
     dash->metric_page = build_metric_page(state, dash);
 
-    GtkWidget *clamp = adw_clamp_new();
-    adw_clamp_set_maximum_size(ADW_CLAMP(clamp), 960);
-    adw_clamp_set_tightening_threshold(ADW_CLAMP(clamp), 600);
-    adw_clamp_set_child(ADW_CLAMP(clamp), box);
-    GtkWidget *scroll = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), clamp);
+    GtkWidget *scroll = mi_page_scroll(box, 960);
     return scroll;
 }
 

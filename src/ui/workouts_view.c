@@ -549,6 +549,16 @@ static int zone_for_hr(const MiwearWorkoutHrZones *z, int hr) {
 #define DETAIL_HR (-2)
 static guint detail_bins(const MiwearWorkoutSummary *d, int series, guint nbins, double *out, uint32_t *t_end);
 
+static void draw_time_axis(cairo_t *cr, GtkWidget *w, double left, double pw, double y, uint32_t t_end) {
+    const int minutes = (int)(t_end / 60);
+    const int step = minutes > 90 ? 30 : minutes > 40 ? 15 : minutes > 15 ? 5 : 1;
+    for (int m = 0; m <= minutes; m += step) {
+        gchar t[16];
+        g_snprintf(t, sizeof(t), "%d′", m);
+        mi_draw_text(cr, w, t, CLAMP(left + pw * m * 60.0 / t_end, left + 8, left + pw - 8), y, 10.5, 0.55, 0.5);
+    }
+}
+
 static void draw_detail_hr(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
     MiwearDashboardUi *dash = user_data;
     GtkWidget *w = GTK_WIDGET(area);
@@ -573,8 +583,6 @@ static void draw_detail_hr(GtkDrawingArea *area, cairo_t *cr, int width, int hei
     const double left = 34, right = 6, top = 6, bottom = 22;
     const double pw = width - left - right, ph = height - top - bottom;
     const uint32_t t_end = g_array_index(d->record_samples, MiwearWorkoutSample, n - 1).offset_sec;
-    const double tspan = MAX((double)t_end, 1.0);
-#define DX(t) (left + pw * (double)(t) / tspan)
 #define DY(v) (top + ph * (1.0 - ((double)(v) - lo) / (double)(hi - lo)))
 
     for (int k = 0; k <= 4; k++) {
@@ -588,13 +596,7 @@ static void draw_detail_hr(GtkDrawingArea *area, cairo_t *cr, int width, int hei
         g_snprintf(t, sizeof(t), "%d", v);
         mi_draw_text(cr, w, t, left - 6, DY(v) + 3.5, 10.5, 0.55, 1.0);
     }
-    const int minutes = (int)(t_end / 60);
-    const int step = minutes > 90 ? 30 : minutes > 40 ? 15 : minutes > 15 ? 5 : 1;
-    for (int m = 0; m <= minutes; m += step) {
-        gchar t[16];
-        g_snprintf(t, sizeof(t), "%d′", m);
-        mi_draw_text(cr, w, t, CLAMP(DX(m * 60), left + 8, left + pw - 8), top + ph + 16, 10.5, 0.55, 0.5);
-    }
+    draw_time_axis(cr, w, left, pw, top + ph + 16, t_end);
 
     /* Bucket averages (about 2 px each), coloured by heart-rate zone, broken where nothing was
      * recorded (pauses). */
@@ -627,7 +629,6 @@ static void draw_detail_hr(GtkDrawingArea *area, cairo_t *cr, int width, int hei
         cairo_stroke(cr);
         cairo_set_dash(cr, NULL, 0, 0);
     }
-#undef DX
 #undef DY
 }
 
@@ -657,16 +658,6 @@ static guint detail_bins(const MiwearWorkoutSummary *d, int series, guint nbins,
         }
     }
     return nbins;
-}
-
-static void draw_time_axis(cairo_t *cr, GtkWidget *w, double left, double pw, double y, uint32_t t_end) {
-    const int minutes = (int)(t_end / 60);
-    const int step = minutes > 90 ? 30 : minutes > 40 ? 15 : minutes > 15 ? 5 : 1;
-    for (int m = 0; m <= minutes; m += step) {
-        gchar t[16];
-        g_snprintf(t, sizeof(t), "%d′", m);
-        mi_draw_text(cr, w, t, CLAMP(left + pw * m * 60.0 / t_end, left + 8, left + pw - 8), y, 10.5, 0.55, 0.5);
-    }
 }
 
 static void draw_detail_steps(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
@@ -1100,7 +1091,7 @@ static void open_detail(AppState *state, MiwearSportEntry *e) {
     const int hr_avg = d != NULL && d->hr_avg > 0 ? d->hr_avg : e->hr_avg;
     GtkWidget *strip = mi_stat_flow_new();
     GtkWidget *v;
-    gchar buf[48];
+    gchar buf[128];
     mi_stat_flow_append(strip, mi_stat_new("Duration", &v));
     format_duration(duration, buf, sizeof(buf));
     gtk_label_set_text(GTK_LABEL(v), buf);
@@ -1265,13 +1256,7 @@ static void open_detail(AppState *state, MiwearSportEntry *e) {
         gtk_box_append(GTK_BOX(box), card);
     }
 
-    GtkWidget *clamp = adw_clamp_new();
-    adw_clamp_set_maximum_size(ADW_CLAMP(clamp), 960);
-    adw_clamp_set_tightening_threshold(ADW_CLAMP(clamp), 600);
-    adw_clamp_set_child(ADW_CLAMP(clamp), box);
-    GtkWidget *scroll = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), clamp);
+    GtkWidget *scroll = mi_page_scroll(box, 960);
 
     GtkWidget *tb = adw_toolbar_view_new();
     GtkWidget *header = adw_header_bar_new();
@@ -1440,12 +1425,7 @@ GtkWidget *mi_workouts_page_new(AppState *state, MiwearDashboardUi *dash) {
     g_object_set_data(G_OBJECT(dash->sport_list_box), "mi-vo2-box", vo2_box);
     gtk_box_append(GTK_BOX(box), dash->sport_list_box);
 
-    GtkWidget *clamp = adw_clamp_new();
-    adw_clamp_set_maximum_size(ADW_CLAMP(clamp), 960);
-    adw_clamp_set_child(ADW_CLAMP(clamp), box);
-    GtkWidget *scroll = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), clamp);
+    GtkWidget *scroll = mi_page_scroll(box, 960);
     miwear_sport_rebuild_list(state);
     return scroll;
 }
