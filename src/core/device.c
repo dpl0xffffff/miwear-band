@@ -106,6 +106,81 @@ static void device_free(SalusDevice *dev) {
     }
 }
 
+/* ---- Saved devices ---------------------------------------------------------------------- */
+
+static GPtrArray *saved(SalusApp *app) {
+    if (app->saved_devices == NULL) {
+        app->saved_devices = g_ptr_array_new_with_free_func((GDestroyNotify)salus_device_config_free);
+    }
+    return app->saved_devices;
+}
+
+static gint saved_index(SalusApp *app, const char *address) {
+    GPtrArray *list = saved(app);
+    for (guint i = 0; address != NULL && i < list->len; i++) {
+        if (g_ascii_strcasecmp(((SalusDeviceConfig *)g_ptr_array_index(list, i))->address, address) == 0) {
+            return (gint)i;
+        }
+    }
+    return -1;
+}
+
+const SalusDeviceConfig *salus_app_saved_device(SalusApp *app, const char *address) {
+    const gint i = saved_index(app, address);
+    return i >= 0 ? g_ptr_array_index(app->saved_devices, i) : NULL;
+}
+
+void salus_app_save_device(SalusApp *app, const SalusDeviceConfig *cfg) {
+    const gint i = saved_index(app, cfg->address);
+    SalusDeviceConfig *copy = salus_device_config_copy(cfg);
+    if (i >= 0) {
+        salus_device_config_free(g_ptr_array_index(app->saved_devices, i));
+        g_ptr_array_index(app->saved_devices, i) = copy;
+    } else {
+        g_ptr_array_add(saved(app), copy);
+    }
+}
+
+void salus_app_forget_device(SalusApp *app, const char *address) {
+    const gint i = saved_index(app, address);
+    if (i < 0) {
+        return;
+    }
+    const gboolean was_active =
+        app->device != NULL && g_ascii_strcasecmp(app->device->config->address, address) == 0;
+    g_ptr_array_remove_index(app->saved_devices, (guint)i);
+    if (was_active) {
+        if (app->saved_devices->len > 0) {
+            salus_app_activate_device(app, ((SalusDeviceConfig *)g_ptr_array_index(app->saved_devices, 0))->address);
+        } else {
+            salus_app_set_device(app, NULL);
+        }
+    }
+}
+
+gboolean salus_app_activate_device(SalusApp *app, const char *address) {
+    const SalusDeviceConfig *cfg = salus_app_saved_device(app, address);
+    if (cfg == NULL) {
+        return FALSE;
+    }
+    salus_app_set_device(app, salus_device_config_copy(cfg));
+    return TRUE;
+}
+
+gchar *salus_device_config_display_name(const SalusDeviceConfig *cfg) {
+    if (cfg->name != NULL && cfg->name[0] != '\0') {
+        return g_strdup(cfg->name);
+    }
+    gchar *bluez = bluez_device_display_name(cfg->address);
+    if (bluez != NULL && bluez[0] != '\0') {
+        return bluez;
+    }
+    g_free(bluez);
+    return g_strdup(cfg->address);
+}
+
+/* ---- Active device ---------------------------------------------------------------------- */
+
 void salus_app_set_device(SalusApp *app, SalusDeviceConfig *cfg) {
     salus_location_stop(app, NULL);
     if (app->device != NULL) {
@@ -121,6 +196,8 @@ void salus_app_set_device(SalusApp *app, SalusDeviceConfig *cfg) {
     }
     g_free(app->selected_address);
     app->selected_address = cfg != NULL ? g_strdup(cfg->address) : NULL;
+    g_free(app->device_display_name);
+    app->device_display_name = cfg != NULL ? salus_device_config_display_name(cfg) : NULL;
     salus_device_config_free(cfg);
 }
 

@@ -141,6 +141,18 @@ void salus_device_finalize(SalusDevice *dev);
 /* Driver → core events. */
 void salus_device_set_link(SalusDevice *dev, SalusLinkState link, const char *status);
 
+/* Saved devices (SalusApp::saved_devices, persisted by salus_config_save()). */
+const SalusDeviceConfig *salus_app_saved_device(SalusApp *app, const char *address);
+/* Adds @cfg (copied) or replaces the saved device with the same address. */
+void salus_app_save_device(SalusApp *app, const SalusDeviceConfig *cfg);
+/* Forgets a saved device; if it was active, the next saved one (if any) becomes active. */
+void salus_app_forget_device(SalusApp *app, const char *address);
+/* Makes a saved device the active one. FALSE when no such device is saved. */
+gboolean salus_app_activate_device(SalusApp *app, const char *address);
+/* Name to show for a saved device: its name, else BlueZ's, else the address (caller frees). */
+gchar *salus_device_config_display_name(const SalusDeviceConfig *cfg);
+
+/* The active device (all safe with no active device). */
 /* Makes @cfg the active device (taking ownership), replacing and disconnecting the previous one. */
 void salus_app_set_device(SalusApp *app, SalusDeviceConfig *cfg);
 gboolean salus_device_connected(SalusApp *app);

@@ -62,7 +62,8 @@ typedef struct SalusApp {
     gchar *device_status_charging;
     gchar *device_status_sleep;
 
-    /* The active device's driver session (NULL when no device is set up). */
+    /* Saved devices (SalusDeviceConfig *), and the active one's driver session (NULL when none). */
+    GPtrArray *saved_devices;
     SalusDevice *device;
 
     /*

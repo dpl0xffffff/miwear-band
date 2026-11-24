@@ -5,7 +5,9 @@
 #include <glib/gstdio.h>
 #include <string.h>
 
-static const char *CONFIG_GROUP = "device";
+static const char *LEGACY_DEVICE_GROUP = "device"; /* single-device config before Salus */
+static const char *DEVICES_GROUP = "devices";
+#define DEVICE_GROUP_PREFIX "device "
 static const char *WEATHER_GROUP = "weather";
 static const char *NOTIF_GROUP = "notifications";
 static const char *LOCATION_GROUP = "location";
@@ -22,6 +24,67 @@ const char *salus_config_default_path(void) {
     return path;
 }
 
+/* [device AA:BB:…] groups (driver, name, pairing fields) + [devices] active=…; the old single
+ * [device] group (address, auth_key) becomes a Xiaomi band entry. */
+static void load_devices(SalusApp *state, GKeyFile *kf) {
+    gsize n = 0;
+    gchar **groups = g_key_file_get_groups(kf, &n);
+    for (gsize i = 0; i < n; i++) {
+        if (!g_str_has_prefix(groups[i], DEVICE_GROUP_PREFIX)) {
+            continue;
+        }
+        const char *address = groups[i] + strlen(DEVICE_GROUP_PREFIX);
+        gchar *driver = g_key_file_get_string(kf, groups[i], "driver", NULL);
+        SalusDeviceConfig *cfg = salus_device_config_new(address, driver != NULL ? driver : "xiaomi-band");
+        g_free(driver);
+        gchar **keys = g_key_file_get_keys(kf, groups[i], NULL, NULL);
+        for (gchar **k = keys; k != NULL && *k != NULL; k++) {
+            gchar *v = g_key_file_get_string(kf, groups[i], *k, NULL);
+            if (g_strcmp0(*k, "name") == 0) {
+                cfg->name = v;
+                continue;
+            }
+            if (g_strcmp0(*k, "driver") != 0) {
+                salus_device_config_set(cfg, *k, v);
+            }
+            g_free(v);
+        }
+        g_strfreev(keys);
+        salus_app_save_device(state, cfg);
+        salus_device_config_free(cfg);
+    }
+    g_strfreev(groups);
+
+    gchar *address = g_key_file_get_string(kf, LEGACY_DEVICE_GROUP, "address", NULL);
+    if (address != NULL && address[0] != '\0' && salus_app_saved_device(state, address) == NULL) {
+        SalusDeviceConfig *cfg = salus_device_config_new(address, "xiaomi-band");
+        gchar *key = g_key_file_get_string(kf, LEGACY_DEVICE_GROUP, "auth_key", NULL);
+        if (key != NULL) {
+            g_strcanon(key, "0123456789abcdefABCDEF", '\0'); /* in place */
+            if (strlen(key) == 32) {
+                salus_device_config_set(cfg, "auth_key", key);
+            }
+            g_free(key);
+        }
+        salus_app_save_device(state, cfg);
+        salus_device_config_free(cfg);
+    }
+
+    gchar *active = g_key_file_get_string(kf, DEVICES_GROUP, "active", NULL);
+    if (active == NULL || salus_app_saved_device(state, active) == NULL) {
+        g_free(active);
+        active = address != NULL && address[0] != '\0' ? g_strdup(address) : NULL;
+    }
+    if (active == NULL && state->saved_devices->len > 0) {
+        active = g_strdup(((SalusDeviceConfig *)g_ptr_array_index(state->saved_devices, 0))->address);
+    }
+    if (active != NULL) {
+        salus_app_activate_device(state, active);
+    }
+    g_free(active);
+    g_free(address);
+}
+
 gboolean salus_config_load(SalusApp *state, const char *path) {
     const char *cfg_path = path != NULL ? path : salus_config_default_path();
     GKeyFile *kf = g_key_file_new();
@@ -33,22 +96,7 @@ gboolean salus_config_load(SalusApp *state, const char *path) {
         return FALSE;
     }
 
-    gchar *address = g_key_file_get_string(kf, CONFIG_GROUP, "address", NULL);
-    gchar *auth_key = g_key_file_get_string(kf, CONFIG_GROUP, "auth_key", NULL);
-
-    if (address != NULL && address[0] != '\0') {
-        SalusDeviceConfig *dev = salus_device_config_new(address, "xiaomi-band");
-        if (auth_key != NULL) {
-            /* g_strcanon works in place and returns auth_key itself. */
-            gchar *compact = g_strcanon(auth_key, "0123456789abcdefABCDEF", '\0');
-            if (strlen(compact) == 32) {
-                salus_device_config_set(dev, "auth_key", compact);
-            }
-        }
-        salus_app_set_device(state, dev);
-    }
-    g_free(auth_key);
-    g_free(address);
+    load_devices(state, kf);
 
     g_free(state->weather_location_name);
     state->weather_location_name = g_key_file_get_string(kf, WEATHER_GROUP, "location", NULL);
@@ -116,6 +164,38 @@ gboolean salus_config_load(SalusApp *state, const char *path) {
     return TRUE;
 }
 
+static void save_devices(const SalusApp *state, GKeyFile *kf) {
+    gsize n = 0;
+    gchar **groups = g_key_file_get_groups(kf, &n);
+    for (gsize i = 0; i < n; i++) {
+        if (g_str_has_prefix(groups[i], DEVICE_GROUP_PREFIX)) {
+            g_key_file_remove_group(kf, groups[i], NULL);
+        }
+    }
+    g_strfreev(groups);
+    g_key_file_remove_group(kf, LEGACY_DEVICE_GROUP, NULL);
+    g_key_file_remove_group(kf, DEVICES_GROUP, NULL);
+
+    for (guint i = 0; state->saved_devices != NULL && i < state->saved_devices->len; i++) {
+        const SalusDeviceConfig *cfg = g_ptr_array_index(state->saved_devices, i);
+        gchar *group = g_strconcat(DEVICE_GROUP_PREFIX, cfg->address, NULL);
+        g_key_file_set_string(kf, group, "driver", cfg->driver_id);
+        if (cfg->name != NULL) {
+            g_key_file_set_string(kf, group, "name", cfg->name);
+        }
+        GHashTableIter it;
+        gpointer k, v;
+        g_hash_table_iter_init(&it, cfg->fields);
+        while (g_hash_table_iter_next(&it, &k, &v)) {
+            g_key_file_set_string(kf, group, k, v);
+        }
+        g_free(group);
+    }
+    if (state->device != NULL) {
+        g_key_file_set_string(kf, DEVICES_GROUP, "active", state->device->config->address);
+    }
+}
+
 gboolean salus_config_save(const SalusApp *state, const char *path) {
     const char *cfg_path = path != NULL ? path : salus_config_default_path();
     gchar *dir = g_path_get_dirname(cfg_path);
@@ -126,11 +206,11 @@ gboolean salus_config_save(const SalusApp *state, const char *path) {
     }
     g_free(dir);
 
+    /* Start from the file as it is: other parts of the app keep their own groups in it (the
+     * weight log), which a fresh key file would drop. */
     GKeyFile *kf = g_key_file_new();
-    const SalusDeviceConfig *dev = state->device != NULL ? state->device->config : NULL;
-    g_key_file_set_string(kf, CONFIG_GROUP, "address", dev != NULL ? dev->address : "");
-    const char *key = salus_device_config_get(dev, "auth_key");
-    g_key_file_set_string(kf, CONFIG_GROUP, "auth_key", key != NULL ? key : "");
+    g_key_file_load_from_file(kf, cfg_path, G_KEY_FILE_KEEP_COMMENTS, NULL);
+    save_devices(state, kf);
     if (state->weather_location_name != NULL) {
         g_key_file_set_string(kf, WEATHER_GROUP, "location", state->weather_location_name);
     }

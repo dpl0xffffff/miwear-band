@@ -985,19 +985,6 @@ void switch_to_pairing(SalusApp *state) {
     }
 }
 
-/* BlueZ's name for the selected band, else its address. */
-static void update_device_display_name(SalusApp *state) {
-    if (state->selected_address == NULL || state->selected_address[0] == '\0') {
-        return;
-    }
-    g_free(state->device_display_name);
-    state->device_display_name = bluez_device_display_name(state->selected_address);
-    if (state->device_display_name == NULL || state->device_display_name[0] == '\0') {
-        g_free(state->device_display_name);
-        state->device_display_name = g_strdup(state->selected_address);
-    }
-}
-
 void start_connect_for_address(SalusApp *state, const gchar *raw_address) {
     if (raw_address == NULL || raw_address[0] == '\0') {
         set_status(state, "No device selected.");
@@ -1011,9 +998,11 @@ void start_connect_for_address(SalusApp *state, const gchar *raw_address) {
     gchar *address = g_ascii_strup(raw_address, -1);
     SalusDeviceConfig *cfg = salus_device_config_new(address, "xiaomi-band");
     salus_device_config_set(cfg, "auth_key", auth_text);
+    cfg->name = bluez_device_display_name(address);
+    salus_app_save_device(state, cfg);
+    salus_app_activate_device(state, address);
+    salus_device_config_free(cfg);
     g_free(address);
-    salus_app_set_device(state, cfg);
-    update_device_display_name(state);
     salus_dashboard_update_device_state(state, NULL, NULL, NULL);
     (void)salus_config_save(state, NULL);
     salus_device_connect(state);
@@ -1025,6 +1014,7 @@ void salus_app_shutdown(GApplication *app, gpointer user_data) {
     salus_find_phone_shutdown(state);
     salus_weather_shutdown(state);
     salus_app_set_device(state, NULL); /* disconnects and frees the driver session */
+    g_clear_pointer(&state->saved_devices, g_ptr_array_unref);
     if (state->log_flush_id != 0) {
         g_source_remove(state->log_flush_id);
         state->log_flush_id = 0;
@@ -1092,7 +1082,6 @@ void salus_activate(GApplication *application, gpointer user_data) {
     gtk_window_set_default_size(GTK_WINDOW(state->window), 980, 820);
     gtk_widget_set_size_request(state->window, 360, 480);
 
-    update_device_display_name(state);
 
     state->dash_ui = salus_dashboard_ui_new();
     state->page_dashboard = salus_dashboard_build(state, state->dash_ui);
