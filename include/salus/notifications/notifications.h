@@ -5,13 +5,13 @@
 
 struct Xiaomi__Command;
 
-void salus_notifications_on_connect(AppState *state);
-void salus_notifications_on_disconnect(AppState *state);
-void salus_notifications_handle_command(AppState *state, const struct Xiaomi__Command *cmd);
+void salus_notifications_on_connect(SalusApp *state);
+void salus_notifications_on_disconnect(SalusApp *state);
+void salus_notifications_handle_command(SalusApp *state, const struct Xiaomi__Command *cmd);
 
-void salus_notifications_set_enabled(AppState *state, gboolean enabled);
-void salus_notifications_send_test(AppState *state);
+void salus_notifications_set_enabled(SalusApp *state, gboolean enabled);
+void salus_notifications_send_test(SalusApp *state);
 
-void salus_notifications_shutdown(AppState *state);
+void salus_notifications_shutdown(SalusApp *state);
 
 #endif

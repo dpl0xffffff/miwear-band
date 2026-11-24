@@ -61,7 +61,7 @@ static int stress_from_manual_item(JsonObject *item) {
     return salus_stress_value_valid(v) ? v : -1;
 }
 
-static void commit_manual_rows(AppState *state, uint32_t file_day_ts, GArray *act_rows, const char *log_tag) {
+static void commit_manual_rows(SalusApp *state, uint32_t file_day_ts, GArray *act_rows, const char *log_tag) {
     const guint count = act_rows != NULL ? act_rows->len : 0;
     int latest_stress = -1;
     int32_t latest_stress_ts = 0;
@@ -97,7 +97,7 @@ static void commit_manual_rows(AppState *state, uint32_t file_day_ts, GArray *ac
     }
 }
 
-static void manual_log_body_prefix(AppState *state, const uint8_t *payload, size_t body_off, size_t body_len) {
+static void manual_log_body_prefix(SalusApp *state, const uint8_t *payload, size_t body_off, size_t body_len) {
     if (state == NULL || payload == NULL || body_off >= body_len) {
         return;
     }
@@ -112,7 +112,7 @@ static void manual_log_body_prefix(AppState *state, const uint8_t *payload, size
     g_string_free(hex, TRUE);
 }
 
-static void json_harvest_manual_row(JsonObject *item, int32_t fallback_ts, GArray *act_rows, AppState *state) {
+static void json_harvest_manual_row(JsonObject *item, int32_t fallback_ts, GArray *act_rows, SalusApp *state) {
     if (item == NULL || act_rows == NULL) {
         return;
     }
@@ -158,7 +158,7 @@ static void json_harvest_manual_row(JsonObject *item, int32_t fallback_ts, GArra
     }
 }
 
-guint salus_apply_manual_measurement_json(AppState *state, uint32_t file_day_ts, JsonNode *decoded) {
+guint salus_apply_manual_measurement_json(SalusApp *state, uint32_t file_day_ts, JsonNode *decoded) {
     if (state == NULL || decoded == NULL || !JSON_NODE_HOLDS_OBJECT(decoded)) {
         return 0;
     }
@@ -223,7 +223,7 @@ static size_t manual_body_start(const uint8_t *payload, size_t body_len, int ver
     return off;
 }
 
-static guint scan_legacy_manual_records(AppState *state,
+static guint scan_legacy_manual_records(SalusApp *state,
                                         const uint8_t *payload,
                                         size_t body_len,
                                         size_t body_off,
@@ -274,7 +274,7 @@ static guint scan_legacy_manual_records(AppState *state,
     return found;
 }
 
-static gboolean parse_v2_measure_sample(AppState *state,
+static gboolean parse_v2_measure_sample(SalusApp *state,
                                         const uint8_t *payload,
                                         size_t body_len,
                                         size_t *inout_off,
@@ -354,7 +354,7 @@ static gboolean parse_v2_measure_sample(AppState *state,
     return parsed;
 }
 
-static void apply_manual_samples_v2(AppState *state, uint32_t file_day_ts, const uint8_t *payload, size_t payload_len) {
+static void apply_manual_samples_v2(SalusApp *state, uint32_t file_day_ts, const uint8_t *payload, size_t payload_len) {
     const int version = payload_len > 5 ? payload[5] : 0;
     const size_t body_len = payload_len >= 4 ? payload_len - 4 : 0;
     const size_t body_off = manual_body_start(payload, body_len, version);
@@ -390,7 +390,7 @@ static void apply_manual_samples_v2(AppState *state, uint32_t file_day_ts, const
     g_array_unref(act_rows);
 }
 
-void salus_apply_manual_samples(AppState *state, uint32_t file_day_ts, const uint8_t *payload, size_t payload_len) {
+void salus_apply_manual_samples(SalusApp *state, uint32_t file_day_ts, const uint8_t *payload, size_t payload_len) {
     if (payload_len > 5 && payload[5] >= 2) {
         apply_manual_samples_v2(state, file_day_ts, payload, payload_len);
         return;

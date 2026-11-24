@@ -1,3 +1,4 @@
+#include "salus/devices/xiaomi/xiaomi.h"
 #include "salus/devices/xiaomi/weather.h"
 #include "salus/devices/xiaomi/wire_internal.h"
 
@@ -11,7 +12,7 @@
 #include "xiaomi.pb-c.h"
 
 typedef struct {
-    AppState *state;
+    SalusApp *state;
     gchar *location_name;
     gchar *location_code;
 } WeatherPushCtx;
@@ -59,7 +60,7 @@ static gchar *location_key_from_name(const char *name) {
     return g_strdup_printf("accu:%u", h % 1000000u);
 }
 
-static void weather_set_status(AppState *state, const char *msg) {
+static void weather_set_status(SalusApp *state, const char *msg) {
     if (state == NULL || msg == NULL) {
         return;
     }
@@ -124,7 +125,7 @@ static gchar *iso_colon_timestamp(time_t t) {
     return out;
 }
 
-static void send_weather_prefs(AppState *state) {
+static void send_weather_prefs(SalusApp *state) {
     Xiaomi__WeatherPrefs prefs = XIAOMI__WEATHER_PREFS__INIT;
     prefs.has_temperaturescale = TRUE;
     prefs.temperaturescale = 1;
@@ -141,7 +142,7 @@ static void send_weather_prefs(AppState *state) {
     (void)salus_wire_send_xiaomi_command(state, &cmd, "Weather prefs (°C)");
 }
 
-static void send_add_location(AppState *state, const char *code, const char *name) {
+static void send_add_location(SalusApp *state, const char *code, const char *name) {
     Xiaomi__WeatherLocation loc = XIAOMI__WEATHER_LOCATION__INIT;
     loc.code = (gchar *)code;
     loc.name = (gchar *)name;
@@ -158,7 +159,7 @@ static void send_add_location(AppState *state, const char *code, const char *nam
     (void)salus_wire_send_xiaomi_command(state, &cmd, "Weather add location");
 }
 
-static void send_current_weather(AppState *state,
+static void send_current_weather(SalusApp *state,
                                  const char *city,
                                  const char *loc_key,
                                  const MeteoSnapshot *snap) {
@@ -218,7 +219,7 @@ static void send_current_weather(AppState *state,
     g_free(pub);
 }
 
-static void send_daily_forecast(AppState *state,
+static void send_daily_forecast(SalusApp *state,
                                 const char *city,
                                 const char *loc_key,
                                 const MeteoSnapshot *snap) {
@@ -362,7 +363,7 @@ static void weather_push_ctx_free(WeatherPushCtx *ctx) {
 }
 
 /* Main thread: parse the Open-Meteo response (or report the fetch error) and push to the band. */
-static void weather_apply_fetch(AppState *state, WeatherPushCtx *ctx, const gchar *body, GError *err) {
+static void weather_apply_fetch(SalusApp *state, WeatherPushCtx *ctx, const gchar *body, GError *err) {
     WeatherFetchResult *result = NULL;
     GError *parse_err = NULL;
     if (body != NULL) {
@@ -377,7 +378,7 @@ static void weather_apply_fetch(AppState *state, WeatherPushCtx *ctx, const gcha
         }
     }
 
-    if (result != NULL && state->auth_initialized && state->sock_fd >= 0) {
+    if (result != NULL && xiaomi(state)->auth_initialized && xiaomi(state)->sock_fd >= 0) {
         send_weather_prefs(state);
         send_add_location(state, result->location_code, result->location_name);
         send_current_weather(state, result->location_name, result->location_code, &result->snap);
@@ -409,7 +410,7 @@ static void on_weather_curl_done(GObject *source, GAsyncResult *res, gpointer us
     GError *err = NULL;
     const gboolean ok = g_subprocess_communicate_utf8_finish(proc, res, &stdout_buf, &stderr_buf, &err);
     if (g_error_matches(err, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
-        /* App shutdown: AppState may already be torn down. */
+        /* App shutdown: SalusApp may already be torn down. */
         g_subprocess_force_exit(proc);
         g_error_free(err);
         g_free(stdout_buf);
@@ -418,7 +419,7 @@ static void on_weather_curl_done(GObject *source, GAsyncResult *res, gpointer us
         return;
     }
 
-    AppState *state = ctx->state;
+    SalusApp *state = ctx->state;
     state->weather_fetch_inflight = FALSE;
     if (ok && !g_subprocess_get_successful(proc)) {
         err = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED, "%s",
@@ -436,8 +437,8 @@ static void on_weather_curl_done(GObject *source, GAsyncResult *res, gpointer us
  * Fetches Open-Meteo with curl asynchronously. This used to run curl synchronously on the GTK
  * main loop (up to its 20 s timeout), freezing the UI whenever the band asked for weather.
  */
-static void schedule_weather_push(AppState *state) {
-    if (state == NULL || !state->auth_initialized || state->sock_fd < 0) {
+static void schedule_weather_push(SalusApp *state) {
+    if (state == NULL || !xiaomi(state)->auth_initialized || xiaomi(state)->sock_fd < 0) {
         return;
     }
     if (!state->weather_coords_valid) {
@@ -483,7 +484,7 @@ static void schedule_weather_push(AppState *state) {
     g_object_unref(proc); /* the pending operation keeps its own reference */
 }
 
-void salus_weather_shutdown(AppState *state) {
+void salus_weather_shutdown(SalusApp *state) {
     if (state == NULL || state->weather_cancellable == NULL) {
         return;
     }
@@ -492,7 +493,7 @@ void salus_weather_shutdown(AppState *state) {
     state->weather_fetch_inflight = FALSE;
 }
 
-void salus_weather_initialize(AppState *state) {
+void salus_weather_initialize(SalusApp *state) {
     if (state == NULL) {
         return;
     }
@@ -504,11 +505,11 @@ void salus_weather_initialize(AppState *state) {
     schedule_weather_push(state);
 }
 
-void salus_weather_push_cached(AppState *state) {
+void salus_weather_push_cached(SalusApp *state) {
     schedule_weather_push(state);
 }
 
-void salus_weather_handle_command(AppState *state, const Xiaomi__Command *cmd) {
+void salus_weather_handle_command(SalusApp *state, const Xiaomi__Command *cmd) {
     if (state == NULL || cmd == NULL || cmd->type != 10) {
         return;
     }

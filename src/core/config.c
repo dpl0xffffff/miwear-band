@@ -22,7 +22,7 @@ const char *salus_config_default_path(void) {
     return path;
 }
 
-gboolean salus_config_load(AppState *state, const char *path) {
+gboolean salus_config_load(SalusApp *state, const char *path) {
     const char *cfg_path = path != NULL ? path : salus_config_default_path();
     GKeyFile *kf = g_key_file_new();
     GError *err = NULL;
@@ -36,20 +36,19 @@ gboolean salus_config_load(AppState *state, const char *path) {
     gchar *address = g_key_file_get_string(kf, CONFIG_GROUP, "address", NULL);
     gchar *auth_key = g_key_file_get_string(kf, CONFIG_GROUP, "auth_key", NULL);
 
-    if (auth_key != NULL) {
-        /* g_strcanon may return auth_key itself when no chars are stripped. */
-        gchar *compact = g_strcanon(auth_key, "0123456789abcdefABCDEF", '\0');
-        if (strlen(compact) == 32) {
-            g_strlcpy(state->auth_key_hex, compact, sizeof(state->auth_key_hex));
-        }
-        g_free(compact);
-        auth_key = NULL;
-    }
-
     if (address != NULL && address[0] != '\0') {
-        g_free(state->selected_address);
-        state->selected_address = g_strdup(address);
+        SalusDeviceConfig *dev = salus_device_config_new(address, "xiaomi-band");
+        if (auth_key != NULL) {
+            /* g_strcanon works in place and returns auth_key itself. */
+            gchar *compact = g_strcanon(auth_key, "0123456789abcdefABCDEF", '\0');
+            if (strlen(compact) == 32) {
+                salus_device_config_set(dev, "auth_key", compact);
+            }
+        }
+        salus_app_set_device(state, dev);
     }
+    g_free(auth_key);
+    g_free(address);
 
     g_free(state->weather_location_name);
     state->weather_location_name = g_key_file_get_string(kf, WEATHER_GROUP, "location", NULL);
@@ -113,13 +112,11 @@ gboolean salus_config_load(AppState *state, const char *path) {
         state->goal_moving = state->profile_goal_moving;
     }
 
-    g_free(address);
-    g_free(auth_key);
     g_key_file_unref(kf);
     return TRUE;
 }
 
-gboolean salus_config_save(const AppState *state, const char *path) {
+gboolean salus_config_save(const SalusApp *state, const char *path) {
     const char *cfg_path = path != NULL ? path : salus_config_default_path();
     gchar *dir = g_path_get_dirname(cfg_path);
 
@@ -130,9 +127,10 @@ gboolean salus_config_save(const AppState *state, const char *path) {
     g_free(dir);
 
     GKeyFile *kf = g_key_file_new();
-    g_key_file_set_string(kf, CONFIG_GROUP, "address",
-                          state->selected_address != NULL ? state->selected_address : "");
-    g_key_file_set_string(kf, CONFIG_GROUP, "auth_key", state->auth_key_hex);
+    const SalusDeviceConfig *dev = state->device != NULL ? state->device->config : NULL;
+    g_key_file_set_string(kf, CONFIG_GROUP, "address", dev != NULL ? dev->address : "");
+    const char *key = salus_device_config_get(dev, "auth_key");
+    g_key_file_set_string(kf, CONFIG_GROUP, "auth_key", key != NULL ? key : "");
     if (state->weather_location_name != NULL) {
         g_key_file_set_string(kf, WEATHER_GROUP, "location", state->weather_location_name);
     }

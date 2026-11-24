@@ -17,7 +17,7 @@ gboolean salus_parse_workout_summary(const uint8_t *payload,
 /* Sport name for a Mi Fitness sport type id ("Workout" when unknown). */
 const char *xiaomi_sport_name(int subtype);
 
-void salus_apply_workout_file(AppState *state,
+void salus_apply_workout_file(SalusApp *state,
                                uint32_t file_ts,
                                int subtype,
                                int detail,

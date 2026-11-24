@@ -9,7 +9,7 @@ gboolean salus_profile_shows_cycles(guint config_gender) {
     return config_gender == SALUS_GENDER_FEMALE;
 }
 
-void salus_profile_apply_defaults(AppState *state) {
+void salus_profile_apply_defaults(SalusApp *state) {
     if (state == NULL) {
         return;
     }

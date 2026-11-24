@@ -1,3 +1,4 @@
+#include "salus/devices/xiaomi/xiaomi.h"
 #include "salus/app.h"
 #include "salus/devices/xiaomi/daily_details.h"
 #include "salus/ui/dashboard.h"
@@ -61,7 +62,7 @@ static gchar *fmt_unix_ts(uint32_t ts) {
     return out;
 }
 
-static void log_sleep_samples_summary(AppState *state, const char *tag, const GArray *samples) {
+static void log_sleep_samples_summary(SalusApp *state, const char *tag, const GArray *samples) {
     if (samples == NULL || samples->len == 0) {
         gchar *line = g_strdup_printf("%s: no samples", tag);
         append_log(state, line);
@@ -128,7 +129,7 @@ static gboolean day_totals_row(const SalusXiaomiActivityRow *r, gpointer user_da
 
 /* Whole-day sums over every stored minute of the local day that contains @any_sec. The band only
  * sends minutes since the last acked file, so one file's sums never cover the day. */
-static void log_day_activity_totals(AppState *state, gint64 any_sec) {
+static void log_day_activity_totals(SalusApp *state, gint64 any_sec) {
     GDateTime *t = g_date_time_new_from_unix_local(any_sec);
     if (t == NULL) {
         return;
@@ -160,7 +161,7 @@ static void log_day_activity_totals(AppState *state, gint64 any_sec) {
     g_free(day_txt);
 }
 
-static void parse_daily_details_for_log(AppState *state,
+static void parse_daily_details_for_log(SalusApp *state,
                                         uint32_t ts,
                                         int version,
                                         const uint8_t *payload,
@@ -350,7 +351,7 @@ static void parse_daily_details_for_log(AppState *state,
     g_array_unref(raw_levels);
 }
 
-static void parse_daily_summary_for_log(AppState *state,
+static void parse_daily_summary_for_log(SalusApp *state,
                                         uint32_t ts,
                                         int8_t tz,
                                         int version,
@@ -483,7 +484,7 @@ static gboolean sleep_header_valid_bit(const uint8_t *header, size_t header_len,
     return (header[b] & (1u << (7 - (idx % 8)))) != 0;
 }
 
-static void parse_sleep_stages_v2_for_log(AppState *state,
+static void parse_sleep_stages_v2_for_log(SalusApp *state,
                                           uint32_t ts,
                                           const uint8_t *payload,
                                           size_t payload_len) {
@@ -707,7 +708,7 @@ static guint parse_sleep_feature_data(const uint8_t *payload,
     return ctx.stage_packets;
 }
 
-static void finalize_sleep_parse(AppState *state,
+static void finalize_sleep_parse(SalusApp *state,
                                  uint32_t ts,
                                  uint32_t bed_time,
                                  uint32_t wake_time,
@@ -780,7 +781,7 @@ static void finalize_sleep_parse(AppState *state,
     g_free(wake_txt);
 }
 
-static void parse_full_day_sleep_report(AppState *state,
+static void parse_full_day_sleep_report(SalusApp *state,
                                         uint32_t ts,
                                         int version,
                                         const uint8_t *payload,
@@ -854,7 +855,7 @@ static void parse_full_day_sleep_report(AppState *state,
     g_array_unref(pulse_rows);
 }
 
-static void parse_sleep_details_for_log(AppState *state,
+static void parse_sleep_details_for_log(SalusApp *state,
                                         uint32_t ts,
                                         int version,
                                         const uint8_t *payload,
@@ -1004,18 +1005,18 @@ const char *activity_subtype_name(int type, int subtype) {
     }
     return "UNKNOWN";
 }
-void handle_activity_payload(AppState *state, const uint8_t *payload, size_t payload_len) {
+void handle_activity_payload(SalusApp *state, const uint8_t *payload, size_t payload_len) {
     const uint8_t *file_id = NULL; /* first 7 bytes */
     gboolean ack_allowed = FALSE;
     gboolean advance_fetch_queue = FALSE;
 
     if (payload_len >= 7) {
         file_id = payload;
-        if (state->activity_fetch_inflight &&
-            memcmp(file_id, state->activity_fetch_current_id, 7) == 0) {
+        if (xiaomi(state)->activity_fetch_inflight &&
+            memcmp(file_id, xiaomi(state)->activity_fetch_current_id, 7) == 0) {
             advance_fetch_queue = TRUE;
         }
-    } else if (state->activity_fetch_inflight) {
+    } else if (xiaomi(state)->activity_fetch_inflight) {
         /*
          * Corrupted payload with no recoverable file id - avoid deadlocking the fetch queue.
          * This mirrors GB's behavior of moving to the next fetch on malformed payloads.
@@ -1086,29 +1087,29 @@ void handle_activity_payload(AppState *state, const uint8_t *payload, size_t pay
     }
 
 finish:
-    if (state->auth_initialized && ack_allowed && file_id != NULL) {
+    if (xiaomi(state)->auth_initialized && ack_allowed && file_id != NULL) {
         (void)send_activity_fetch_ack(state, file_id, 7);
-        if (state->activity_fetch_inflight &&
-            memcmp(file_id, state->activity_fetch_current_id, 7) != 0) {
+        if (xiaomi(state)->activity_fetch_inflight &&
+            memcmp(file_id, xiaomi(state)->activity_fetch_current_id, 7) != 0) {
             salus_log_fetch_transition(state, "ack-sidecar", file_id);
         } else {
             salus_log_fetch_transition(state, "ack", file_id);
         }
     }
 
-    if (advance_fetch_queue && state->activity_fetch_inflight) {
+    if (advance_fetch_queue && xiaomi(state)->activity_fetch_inflight) {
         salus_log_fetch_transition(state, ack_allowed ? "advance-next" : "drop-next", file_id);
-        if (state->activity_fetch_timeout_source_id != 0) {
-            g_source_remove(state->activity_fetch_timeout_source_id);
-            state->activity_fetch_timeout_source_id = 0;
+        if (xiaomi(state)->activity_fetch_timeout_source_id != 0) {
+            g_source_remove(xiaomi(state)->activity_fetch_timeout_source_id);
+            xiaomi(state)->activity_fetch_timeout_source_id = 0;
         }
-        state->activity_fetch_inflight = FALSE;
-        memset(state->activity_fetch_current_id, 0, sizeof(state->activity_fetch_current_id));
+        xiaomi(state)->activity_fetch_inflight = FALSE;
+        memset(xiaomi(state)->activity_fetch_current_id, 0, sizeof(xiaomi(state)->activity_fetch_current_id));
         trigger_next_activity_fetch(state);
-    } else if (state->activity_fetch_inflight &&
+    } else if (xiaomi(state)->activity_fetch_inflight &&
                ack_allowed &&
                file_id != NULL &&
-               memcmp(file_id, state->activity_fetch_current_id, 7) != 0) {
-        salus_log_fetch_transition(state, "waiting-current", state->activity_fetch_current_id);
+               memcmp(file_id, xiaomi(state)->activity_fetch_current_id, 7) != 0) {
+        salus_log_fetch_transition(state, "waiting-current", xiaomi(state)->activity_fetch_current_id);
     }
 }

@@ -203,7 +203,7 @@ static void on_hypno_leave(GtkEventControllerMotion *m, gpointer user_data) {
 #define WEEK_BOTTOM 24.0
 
 static void draw_week(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     SalusDashboardUi *dash = state->dash_ui;
     GtkWidget *w = GTK_WIDGET(area);
     const double left = WEEK_LEFT, top = 6, bottom = WEEK_BOTTOM;
@@ -256,7 +256,7 @@ static void draw_week(GtkDrawingArea *area, cairo_t *cr, int width, int height, 
 static void on_week_click(GtkGestureClick *g, int n_press, double x, double y, gpointer user_data) {
     (void)n_press;
     (void)y;
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     GtkWidget *w = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(g));
     const double pw = gtk_widget_get_width(w) - WEEK_LEFT;
     if (x < WEEK_LEFT || pw <= 0) {
@@ -279,7 +279,7 @@ static GtkWidget *sleep_hr_value, *sleep_spo2_value;
 static GtkWidget *sleep_summary_sub;
 static GtkWidget *sleep_stages_sub;
 
-GtkWidget *mi_sleep_page_new(AppState *state, SalusDashboardUi *dash) {
+GtkWidget *mi_sleep_page_new(SalusApp *state, SalusDashboardUi *dash) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
     gtk_widget_add_css_class(box, "salus-page");
     gtk_box_append(GTK_BOX(box), ui_date_nav_new(state, dash));
@@ -378,7 +378,7 @@ static void set_legend(int idx, int minutes, int total) {
     g_free(m);
 }
 
-void mi_sleep_refresh(AppState *state) {
+void mi_sleep_refresh(SalusApp *state) {
     SalusDashboardUi *dash = state->dash_ui;
     if (dash == NULL || dash->sleep_content == NULL) {
         return;

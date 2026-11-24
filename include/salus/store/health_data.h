@@ -43,16 +43,16 @@ typedef struct {
     SalusDailySummaryRow summary;
 } SalusDayHealthAgg;
 
-void salus_health_aggregate_day(AppState *state, const gchar *day_key, SalusDayHealthAgg *out);
+void salus_health_aggregate_day(SalusApp *state, const gchar *day_key, SalusDayHealthAgg *out);
 
 gboolean salus_spo2_value_valid(int spo2);
 gboolean salus_stress_value_valid(int stress);
 const char *salus_pressure_level_label(int pressure);
-guint salus_apply_pressure_from_activity_record_json(AppState *state, JsonNode *decoded, uint32_t base_ts_sec);
+guint salus_apply_pressure_from_activity_record_json(SalusApp *state, JsonNode *decoded, uint32_t base_ts_sec);
 guint salus_standing_display_value(int standing_field);
 guint salus_activity_goal_default(void);
 /* Minutes of @day_key at moderate or higher intensity, from synced per-minute data. */
-guint salus_count_activity_minutes_from_timeline(AppState *state, const gchar *day_key);
+guint salus_count_activity_minutes_from_timeline(SalusApp *state, const gchar *day_key);
 guint salus_standing_hours_from_bitmap(int standing_raw);
 guint salus_count_moderate_activity_minutes_json(JsonNode *decoded);
 float salus_profile_bmi_kg_m2(float weight_kg, guint height_cm);

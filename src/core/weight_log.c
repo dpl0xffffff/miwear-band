@@ -60,7 +60,7 @@ static gchar *serialize_log(GArray *entries) {
     return g_string_free(s, FALSE);
 }
 
-static gboolean persist_log(const AppState *state) {
+static gboolean persist_log(const SalusApp *state) {
     if (state == NULL || state->weight_log == NULL) {
         return FALSE;
     }
@@ -97,7 +97,7 @@ static gboolean persist_log(const AppState *state) {
     return ok;
 }
 
-void salus_weight_log_load(AppState *state) {
+void salus_weight_log_load(SalusApp *state) {
     if (state == NULL) {
         return;
     }
@@ -137,11 +137,11 @@ void salus_weight_log_load(AppState *state) {
     state->weight_log_loaded = TRUE;
 }
 
-gboolean salus_weight_log_has_entries(const AppState *state) {
+gboolean salus_weight_log_has_entries(const SalusApp *state) {
     return state != NULL && state->weight_log != NULL && state->weight_log->len > 0;
 }
 
-float salus_weight_log_latest_kg(const AppState *state, guint *date_yyyymmdd_out) {
+float salus_weight_log_latest_kg(const SalusApp *state, guint *date_yyyymmdd_out) {
     if (!salus_weight_log_has_entries(state)) {
         if (date_yyyymmdd_out != NULL) {
             *date_yyyymmdd_out = 0;
@@ -155,7 +155,7 @@ float salus_weight_log_latest_kg(const AppState *state, guint *date_yyyymmdd_out
     return e->kg;
 }
 
-float salus_weight_log_band_user_kg(const AppState *state) {
+float salus_weight_log_band_user_kg(const SalusApp *state) {
     const float logged = salus_weight_log_latest_kg(state, NULL);
     if (logged > 0.0f) {
         return logged;
@@ -166,7 +166,7 @@ float salus_weight_log_band_user_kg(const AppState *state) {
     return 70.0f;
 }
 
-gboolean salus_weight_log_add_today(AppState *state, float kg) {
+gboolean salus_weight_log_add_today(SalusApp *state, float kg) {
     if (state == NULL || kg <= 0.0f || kg > 500.0f) {
         return FALSE;
     }

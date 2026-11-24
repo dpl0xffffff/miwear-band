@@ -338,7 +338,7 @@ static int series_value(const RecordedSample *s, UiSeries series) {
     }
 }
 
-guint ui_series_collect(AppState *state, const gchar *day_key, UiSeries series, int *values) {
+guint ui_series_collect(SalusApp *state, const gchar *day_key, UiSeries series, int *values) {
     for (int m = 0; m < UI_DAY_MINUTES; m++) {
         values[m] = -1;
     }
@@ -367,7 +367,7 @@ static const UiColor series_colors[UI_SERIES_COUNT] = {
 };
 
 static void draw_sparkline(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     const UiSeries series = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(area), "salus-series"));
     if (width <= 4 || height <= 4) {
         return;
@@ -412,7 +412,7 @@ static void draw_sparkline(GtkDrawingArea *area, cairo_t *cr, int width, int hei
     g_free(values);
 }
 
-GtkWidget *ui_sparkline_new(AppState *state, UiSeries series) {
+GtkWidget *ui_sparkline_new(SalusApp *state, UiSeries series) {
     GtkWidget *area = gtk_drawing_area_new();
     gtk_widget_set_size_request(area, -1, 26);
     gtk_widget_set_hexpand(area, TRUE);
@@ -423,7 +423,7 @@ GtkWidget *ui_sparkline_new(AppState *state, UiSeries series) {
 
 /* ---- Sleep night window ------------------------------------------------------------------- */
 
-static void night_copy_day(AppState *state, GDate *day, int from_min, int to_min, UiNight *out, int offset) {
+static void night_copy_day(SalusApp *state, GDate *day, int from_min, int to_min, UiNight *out, int offset) {
     gchar *key = ui_day_key(day);
     GArray *arr = state->recorded_days != NULL ? g_hash_table_lookup(state->recorded_days, key) : NULL;
     g_free(key);
@@ -463,7 +463,7 @@ static int night_average(const int *sum, const int *n, int first, int last) {
     return minutes > 0 ? (int)lround(total / minutes) : 0;
 }
 
-void ui_night_collect(AppState *state, GDate *wake_day, UiNight *out) {
+void ui_night_collect(SalusApp *state, GDate *wake_day, UiNight *out) {
     memset(out, 0, sizeof(*out));
     for (int i = 0; i < UI_NIGHT_MINUTES; i++) {
         out->stage[i] = -1;

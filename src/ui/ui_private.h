@@ -84,9 +84,9 @@ typedef enum {
 } UiSeries;
 
 /* Copies the series for `day_key` into values[UI_DAY_MINUTES] (-1 = none). Returns the count. */
-guint ui_series_collect(AppState *state, const gchar *day_key, UiSeries series, int *values);
+guint ui_series_collect(SalusApp *state, const gchar *day_key, UiSeries series, int *values);
 /* Sparkline drawing area for a series of the viewed day. */
-GtkWidget *ui_sparkline_new(AppState *state, UiSeries series);
+GtkWidget *ui_sparkline_new(SalusApp *state, UiSeries series);
 
 /* ---- Sleep night window ------------------------------------------------------------------- */
 
@@ -108,7 +108,7 @@ typedef struct {
     int avg_spo2; /* over first … last; 0 when no samples */
 } UiNight;
 
-void ui_night_collect(AppState *state, GDate *wake_day, UiNight *out);
+void ui_night_collect(SalusApp *state, GDate *wake_day, UiNight *out);
 
 /* ---- Dashboard state ---------------------------------------------------------------------- */
 
@@ -122,7 +122,7 @@ typedef struct {
 } UiTile;
 
 struct SalusDashboardUi {
-    AppState *state;
+    SalusApp *state;
     GtkWidget *nav_view;      /* AdwNavigationView: main page + pushed workout details */
     GtkWidget *header;
     GtkWidget *switcher_bar;
@@ -197,33 +197,34 @@ struct SalusDashboardUi {
 };
 
 /* Pages */
-GtkWidget *ui_today_page_new(AppState *state, SalusDashboardUi *dash);
-void ui_today_refresh(AppState *state);
-void ui_today_redraw(AppState *state);
-GtkWidget *mi_sleep_page_new(AppState *state, SalusDashboardUi *dash);
-void mi_sleep_refresh(AppState *state);
-GtkWidget *ui_workouts_page_new(AppState *state, SalusDashboardUi *dash);
-void ui_workouts_refresh_training(AppState *state);
-GtkWidget *ui_device_page_new(AppState *state, SalusDashboardUi *dash);
-void ui_device_refresh(AppState *state);
+GtkWidget *ui_today_page_new(SalusApp *state, SalusDashboardUi *dash);
+void ui_today_refresh(SalusApp *state);
+void ui_today_redraw(SalusApp *state);
+GtkWidget *mi_sleep_page_new(SalusApp *state, SalusDashboardUi *dash);
+void mi_sleep_refresh(SalusApp *state);
+GtkWidget *ui_workouts_page_new(SalusApp *state, SalusDashboardUi *dash);
+void ui_workouts_refresh_training(SalusApp *state);
+GtkWidget *ui_device_page_new(SalusApp *state, SalusDashboardUi *dash);
+void ui_device_refresh(SalusApp *state);
 
 /* Date navigation shared by Today and Sleep. */
-GtkWidget *ui_date_nav_new(AppState *state, SalusDashboardUi *dash);
-GDate *ui_view_date(AppState *state);
+GtkWidget *ui_date_nav_new(SalusApp *state, SalusDashboardUi *dash);
+GDate *ui_view_date(SalusApp *state);
 gchar *ui_day_key(GDate *d);
-gboolean ui_viewing_today(AppState *state);
-void ui_set_view_date(AppState *state, GDate *d);
+gboolean ui_viewing_today(SalusApp *state);
+void ui_set_view_date(SalusApp *state, GDate *d);
 
 /* Shell helpers */
-void ui_toast(AppState *state, const char *text);
-gboolean ui_is_connected(AppState *state);
-void ui_connect_saved(AppState *state);
-void ui_show_log_dialog(AppState *state);
-void ui_show_weight_dialog(AppState *state);
-void ui_show_page(AppState *state, const char *name);
+void ui_toast(SalusApp *state, const char *text);
+gboolean ui_is_connected(SalusApp *state);
+void ui_connect_saved(SalusApp *state);
+void ui_show_log_dialog(SalusApp *state);
+void ui_show_weight_dialog(SalusApp *state);
+void ui_show_page(SalusApp *state, const char *name);
 
 /* Implemented in ui.c */
-void salus_ui_show_setup(AppState *state);
-gboolean salus_ui_has_saved_device(AppState *state);
+void start_connect_for_address(SalusApp *state, const gchar *raw_address);
+void salus_ui_show_setup(SalusApp *state);
+gboolean salus_ui_has_saved_device(SalusApp *state);
 
 #endif

@@ -1,3 +1,4 @@
+#include "salus/devices/xiaomi/xiaomi.h"
 #include "salus/app.h"
 #include "salus/devices/xiaomi/activity.h"
 #include "salus/find_phone.h"
@@ -28,16 +29,16 @@
 #include "xiaomi.pb-c.h"
 
 static void log_activity_file_ids(const uint8_t *ids, size_t len, const char *label);
-static void enqueue_activity_file_ids(AppState *state, const uint8_t *ids, size_t len);
-static void log_missing_sleep_files(AppState *state, guint n_sleep, guint n_sleep_stages);
-static void prioritize_advertised_manual_samples(AppState *state, const uint8_t *ids, size_t len);
+static void enqueue_activity_file_ids(SalusApp *state, const uint8_t *ids, size_t len);
+static void log_missing_sleep_files(SalusApp *state, guint n_sleep, guint n_sleep_stages);
+static void prioritize_advertised_manual_samples(SalusApp *state, const uint8_t *ids, size_t len);
 static int activity_file_id_subtype(const uint8_t *id);
 static gboolean activity_file_id_is_sleep_probe(int subtype);
-void trigger_next_activity_fetch(AppState *state);
-static gboolean send_encrypted_simple_command(AppState *state, uint32_t type, uint32_t subtype, const char *label);
-static void send_activity_fetch_past_channels(AppState *state, const char *label_prefix);
-static void stop_activity_live_poll(AppState *state);
-static void start_activity_live_poll(AppState *state);
+void trigger_next_activity_fetch(SalusApp *state);
+static gboolean send_encrypted_simple_command(SalusApp *state, uint32_t type, uint32_t subtype, const char *label);
+static void send_activity_fetch_past_channels(SalusApp *state, const char *label_prefix);
+static void stop_activity_live_poll(SalusApp *state);
+static void start_activity_live_poll(SalusApp *state);
 static const uint32_t ACTIVITY_TODAY_CHANNEL_MAX = 7u;
 static const guint ACTIVITY_AUTO_REFETCH_ROUNDS = 4u;
 static const guint ACTIVITY_LIVE_POLL_INTERVAL_SECONDS = 60u;
@@ -150,7 +151,7 @@ static void append_unknown_fields(GString *s, const char *label, const ProtobufC
     }
 }
 
-static void append_friendly_command_log(AppState *state, const Xiaomi__Command *cmd) {
+static void append_friendly_command_log(SalusApp *state, const Xiaomi__Command *cmd) {
     GString *s = g_string_new("Friendly ");
     g_string_append_printf(s, "type=%u", cmd->type);
     if (cmd->has_subtype) {
@@ -251,7 +252,7 @@ static void append_friendly_command_log(AppState *state, const Xiaomi__Command *
     g_string_free(s, TRUE);
 }
 
-static void log_decoded_command_proto(AppState *state, const uint8_t *plain, size_t plain_len) {
+static void log_decoded_command_proto(SalusApp *state, const uint8_t *plain, size_t plain_len) {
     Xiaomi__Command *cmd = xiaomi__command__unpack(NULL, plain_len, plain);
     if (cmd == NULL) {
         append_log(state, "protobuf-c failed to decode Xiaomi Command.");
@@ -405,8 +406,8 @@ static void log_decoded_command_proto(AppState *state, const uint8_t *plain, siz
                     prioritize_advertised_manual_samples(state, ids, len);
                 }
                 log_missing_sleep_files(state, n_sleep, n_sleep_stages);
-                if (n_manual == 0 && n_daily_summary > 0 && !state->manual_stress_probe_done) {
-                    state->manual_stress_probe_done = TRUE;
+                if (n_manual == 0 && n_daily_summary > 0 && !xiaomi(state)->manual_stress_probe_done) {
+                    xiaomi(state)->manual_stress_probe_done = TRUE;
                     append_log(state,
                                "Manual stress: band did not list MANUAL_SAMPLES yet — will fetch when a later "
                                "today-ID response includes subtype 6 (auto follow-up / resync).");
@@ -418,8 +419,8 @@ static void log_decoded_command_proto(AppState *state, const uint8_t *plain, siz
         if (cmd->subtype == 1) {
             /* Request past once after the first valid today IDs response. */
             if (ids_valid) {
-                if (!state->activity_past_requested) {
-                    state->activity_past_requested = TRUE;
+                if (!xiaomi(state)->activity_past_requested) {
+                    xiaomi(state)->activity_past_requested = TRUE;
                     send_activity_fetch_past_channels(state, "Requested activity file IDs (past probe)");
                 }
             } else {
@@ -432,7 +433,7 @@ static void log_decoded_command_proto(AppState *state, const uint8_t *plain, siz
 
     append_friendly_command_log(state, cmd);
 
-    if (state->verbose_wire_log) {
+    if (xiaomi(state)->verbose_wire_log) {
         GString *s = g_string_new("PB ");
         g_string_append_printf(s, "type=%u", cmd->type);
         if (cmd->has_subtype) {
@@ -525,7 +526,7 @@ static gboolean parse_auth_message(const uint8_t *buf, size_t len, ParsedAuthCom
     return TRUE;
 }
 
-static gboolean send_spp_v2_packet(AppState *state, uint8_t packet_type, uint8_t seq, const uint8_t *payload, size_t payload_len) {
+static gboolean send_spp_v2_packet(SalusApp *state, uint8_t packet_type, uint8_t seq, const uint8_t *payload, size_t payload_len) {
     uint8_t *pkt = g_malloc(8 + payload_len);
     pkt[0] = 0xA5;
     pkt[1] = 0xA5;
@@ -540,12 +541,12 @@ static gboolean send_spp_v2_packet(AppState *state, uint8_t packet_type, uint8_t
         memcpy(pkt + 8, payload, payload_len);
     }
 
-    gboolean ok = write_all(state->sock_fd, pkt, 8 + payload_len) > 0;
+    gboolean ok = write_all(xiaomi(state)->sock_fd, pkt, 8 + payload_len) > 0;
     g_free(pkt);
     return ok;
 }
 
-static gboolean send_spp_v2_ack(AppState *state, uint8_t seq) {
+static gboolean send_spp_v2_ack(SalusApp *state, uint8_t seq) {
     if (!send_spp_v2_packet(state, 1, seq, NULL, 0)) {
         append_log(state, "Failed to send SPPv2 ACK.");
         return FALSE;
@@ -555,10 +556,10 @@ static gboolean send_spp_v2_ack(AppState *state, uint8_t seq) {
 
 /* Encrypts @plain (a packed Command) and sends it as an SPPv2 data packet on @channel with
  * opcode 2 (encrypted). Gadgetbridge V2 quirk: the key doubles as the IV. */
-static gboolean send_encrypted(AppState *state, uint8_t channel, const uint8_t *plain, size_t plain_len) {
+static gboolean send_encrypted(SalusApp *state, uint8_t channel, const uint8_t *plain, size_t plain_len) {
     uint8_t *encrypted = NULL;
     size_t encrypted_len = 0;
-    if (!aes_ctr_encrypt(state->encryption_key, state->encryption_key, plain, plain_len, &encrypted, &encrypted_len)) {
+    if (!aes_ctr_encrypt(xiaomi(state)->encryption_key, xiaomi(state)->encryption_key, plain, plain_len, &encrypted, &encrypted_len)) {
         append_log(state, "Failed to encrypt command.");
         return FALSE;
     }
@@ -566,13 +567,13 @@ static gboolean send_encrypted(AppState *state, uint8_t channel, const uint8_t *
     const uint8_t header[2] = {channel, 2};
     g_byte_array_append(payload, header, 2);
     g_byte_array_append(payload, encrypted, (guint)encrypted_len);
-    const gboolean ok = send_spp_v2_packet(state, 3, state->spp_v2_seq++, payload->data, payload->len);
+    const gboolean ok = send_spp_v2_packet(state, 3, xiaomi(state)->spp_v2_seq++, payload->data, payload->len);
     g_free(encrypted);
     g_byte_array_unref(payload);
     return ok;
 }
 
-static void log_sent(AppState *state, const char *label, gboolean ok) {
+static void log_sent(SalusApp *state, const char *label, gboolean ok) {
     if (label != NULL) {
         gchar *line = g_strdup_printf("%s: %s", label, ok ? "sent" : "failed");
         append_log(state, line);
@@ -581,7 +582,7 @@ static void log_sent(AppState *state, const char *label, gboolean ok) {
 }
 
 /* Health command (type 8) with an optional Health message (Command field 10). */
-static gboolean send_health_command(AppState *state, uint32_t subtype, const GByteArray *health, uint8_t channel) {
+static gboolean send_health_command(SalusApp *state, uint32_t subtype, const GByteArray *health, uint8_t channel) {
     GByteArray *cmd = g_byte_array_new();
     pb_append_u32(cmd, 1, 8);
     pb_append_u32(cmd, 2, subtype);
@@ -593,7 +594,7 @@ static gboolean send_health_command(AppState *state, uint32_t subtype, const GBy
     return ok;
 }
 
-static gboolean send_spp_v2_session_config(AppState *state) {
+static gboolean send_spp_v2_session_config(SalusApp *state) {
     const uint8_t payload[] = {
         0x01,
         0x01, 0x03, 0x00, 0x01, 0x00, 0x00,
@@ -609,20 +610,20 @@ static gboolean send_spp_v2_session_config(AppState *state) {
     return TRUE;
 }
 
-static gboolean send_auth_step1_nonce_command(AppState *state) {
+static gboolean send_auth_step1_nonce_command(SalusApp *state) {
     uint8_t secret_key[16];
-    if (!hex_to_bytes16(state->auth_key_hex, secret_key)) {
+    if (!hex_to_bytes16(xiaomi(state)->auth_key_hex, secret_key)) {
         append_log(state, "Invalid auth key format.");
         return FALSE;
     }
 
-    if (RAND_bytes(state->phone_nonce, sizeof(state->phone_nonce)) != 1) {
+    if (RAND_bytes(xiaomi(state)->phone_nonce, sizeof(xiaomi(state)->phone_nonce)) != 1) {
         append_log(state, "Failed to generate phone nonce.");
         return FALSE;
     }
 
     GByteArray *phone_nonce = g_byte_array_new();
-    pb_append_len_bytes(phone_nonce, 1, state->phone_nonce, 16);
+    pb_append_len_bytes(phone_nonce, 1, xiaomi(state)->phone_nonce, 16);
 
     GByteArray *auth = g_byte_array_new();
     pb_append_len_bytes(auth, 30, phone_nonce->data, phone_nonce->len);
@@ -639,7 +640,7 @@ static gboolean send_auth_step1_nonce_command(AppState *state) {
     g_byte_array_append(v2payload, &op, 1);
     g_byte_array_append(v2payload, cmd->data, cmd->len);
 
-    gboolean ok = send_spp_v2_packet(state, 3, state->spp_v2_seq++, v2payload->data, v2payload->len);
+    gboolean ok = send_spp_v2_packet(state, 3, xiaomi(state)->spp_v2_seq++, v2payload->data, v2payload->len);
     if (ok) {
         append_log(state, "Sent auth step 1 (phone nonce).");
     } else {
@@ -653,31 +654,31 @@ static gboolean send_auth_step1_nonce_command(AppState *state) {
     return ok;
 }
 
-static gboolean send_auth_step2(AppState *state, const ParsedAuthCommand *parsed) {
+static gboolean send_auth_step2(SalusApp *state, const ParsedAuthCommand *parsed) {
     uint8_t secret_key[16];
     uint8_t step_hmac[64];
     uint8_t expected_watch_hmac[32];
     uint8_t input_watch_phone[32];
     uint8_t input_phone_watch[32];
 
-    if (!hex_to_bytes16(state->auth_key_hex, secret_key)) {
+    if (!hex_to_bytes16(xiaomi(state)->auth_key_hex, secret_key)) {
         append_log(state, "Invalid auth key format.");
         return FALSE;
     }
 
-    memcpy(state->watch_nonce, parsed->watch_nonce, 16);
-    if (!compute_auth_step3_hmac(secret_key, state->phone_nonce, state->watch_nonce, step_hmac)) {
+    memcpy(xiaomi(state)->watch_nonce, parsed->watch_nonce, 16);
+    if (!compute_auth_step3_hmac(secret_key, xiaomi(state)->phone_nonce, xiaomi(state)->watch_nonce, step_hmac)) {
         append_log(state, "Failed to compute auth step HMAC.");
         return FALSE;
     }
-    memcpy(state->decryption_key, step_hmac, 16);
-    memcpy(state->encryption_key, step_hmac + 16, 16);
-    memcpy(state->decryption_nonce, step_hmac + 32, 4);
-    memcpy(state->encryption_nonce, step_hmac + 36, 4);
+    memcpy(xiaomi(state)->decryption_key, step_hmac, 16);
+    memcpy(xiaomi(state)->encryption_key, step_hmac + 16, 16);
+    memcpy(xiaomi(state)->decryption_nonce, step_hmac + 32, 4);
+    memcpy(xiaomi(state)->encryption_nonce, step_hmac + 36, 4);
 
-    memcpy(input_watch_phone, state->watch_nonce, 16);
-    memcpy(input_watch_phone + 16, state->phone_nonce, 16);
-    if (!hmac_sha256(state->decryption_key, 16, input_watch_phone, sizeof(input_watch_phone), expected_watch_hmac)) {
+    memcpy(input_watch_phone, xiaomi(state)->watch_nonce, 16);
+    memcpy(input_watch_phone + 16, xiaomi(state)->phone_nonce, 16);
+    if (!hmac_sha256(xiaomi(state)->decryption_key, 16, input_watch_phone, sizeof(input_watch_phone), expected_watch_hmac)) {
         append_log(state, "Failed to verify watch HMAC.");
         return FALSE;
     }
@@ -687,10 +688,10 @@ static gboolean send_auth_step2(AppState *state, const ParsedAuthCommand *parsed
         return FALSE;
     }
 
-    memcpy(input_phone_watch, state->phone_nonce, 16);
-    memcpy(input_phone_watch + 16, state->watch_nonce, 16);
+    memcpy(input_phone_watch, xiaomi(state)->phone_nonce, 16);
+    memcpy(input_phone_watch + 16, xiaomi(state)->watch_nonce, 16);
     uint8_t encrypted_nonces[32];
-    if (!hmac_sha256(state->encryption_key, 16, input_phone_watch, sizeof(input_phone_watch), encrypted_nonces)) {
+    if (!hmac_sha256(xiaomi(state)->encryption_key, 16, input_phone_watch, sizeof(input_phone_watch), encrypted_nonces)) {
         append_log(state, "Failed to compute encrypted nonces.");
         return FALSE;
     }
@@ -703,10 +704,10 @@ static gboolean send_auth_step2(AppState *state, const ParsedAuthCommand *parsed
     pb_append_len_bytes(device_info, 5, (const uint8_t *)"US", 2);
 
     uint8_t nonce12[12] = {0};
-    memcpy(nonce12, state->encryption_nonce, 4);
+    memcpy(nonce12, xiaomi(state)->encryption_nonce, 4);
     uint8_t *encrypted_device_info = NULL;
     size_t encrypted_device_info_len = 0;
-    if (!aes_ccm_encrypt_4byte_tag(state->encryption_key, nonce12,
+    if (!aes_ccm_encrypt_4byte_tag(xiaomi(state)->encryption_key, nonce12,
                                    device_info->data, device_info->len,
                                    &encrypted_device_info, &encrypted_device_info_len)) {
         g_byte_array_unref(device_info);
@@ -735,7 +736,7 @@ static gboolean send_auth_step2(AppState *state, const ParsedAuthCommand *parsed
     g_byte_array_append(v2payload, &op, 1);
     g_byte_array_append(v2payload, cmd->data, cmd->len);
 
-    gboolean ok = send_spp_v2_packet(state, 3, state->spp_v2_seq++, v2payload->data, v2payload->len);
+    gboolean ok = send_spp_v2_packet(state, 3, xiaomi(state)->spp_v2_seq++, v2payload->data, v2payload->len);
     append_log(state, ok ? "Sent auth step 2 (AuthStep3)." : "Failed to send auth step 2.");
 
     g_byte_array_unref(v2payload);
@@ -745,7 +746,7 @@ static gboolean send_auth_step2(AppState *state, const ParsedAuthCommand *parsed
     return ok;
 }
 
-static gboolean send_realtime_stats_start(AppState *state) {
+static gboolean send_realtime_stats_start(SalusApp *state) {
     const gboolean ok = send_health_command(state, 45, NULL, ACTIVITY_PROTO_CHANNEL); /* CMD_REALTIME_STATS_START */
     append_log(state, ok ? "Requested realtime stats stream." : "Failed to request realtime stats stream.");
     return ok;
@@ -761,7 +762,7 @@ static void log_activity_file_ids(const uint8_t *ids, size_t len, const char *la
     g_string_free(s, TRUE);
 }
 
-static gboolean send_activity_fetch_request(AppState *state, const uint8_t *ids, size_t ids_len) {
+static gboolean send_activity_fetch_request(SalusApp *state, const uint8_t *ids, size_t ids_len) {
     if (ids == NULL || ids_len == 0) {
         return FALSE;
     }
@@ -775,7 +776,7 @@ static gboolean send_activity_fetch_request(AppState *state, const uint8_t *ids,
     return ok;
 }
 
-gboolean send_activity_fetch_ack(AppState *state, const uint8_t *ids, size_t ids_len) {
+gboolean send_activity_fetch_ack(SalusApp *state, const uint8_t *ids, size_t ids_len) {
     if (ids == NULL || ids_len == 0) {
         return FALSE;
     }
@@ -800,18 +801,18 @@ static gchar *activity_file_id_key(const uint8_t *id7) {
     return out;
 }
 
-void salus_log_fetch_transition(AppState *state, const char *event, const uint8_t *file_id7) {
-    if (state == NULL || !state->verbose_fetch_log) {
+void salus_log_fetch_transition(SalusApp *state, const char *event, const uint8_t *file_id7) {
+    if (state == NULL || !xiaomi(state)->verbose_fetch_log) {
         return;
     }
 
-    const guint qlen = (state->activity_fetch_queue != NULL) ? g_queue_get_length(state->activity_fetch_queue) : 0;
+    const guint qlen = (xiaomi(state)->activity_fetch_queue != NULL) ? g_queue_get_length(xiaomi(state)->activity_fetch_queue) : 0;
     gchar *id_txt = (file_id7 != NULL) ? activity_file_id_key(file_id7) : g_strdup("-");
-    gchar *cur_txt = state->activity_fetch_inflight ? activity_file_id_key(state->activity_fetch_current_id) : g_strdup("-");
+    gchar *cur_txt = xiaomi(state)->activity_fetch_inflight ? activity_file_id_key(xiaomi(state)->activity_fetch_current_id) : g_strdup("-");
     gchar *line = g_strdup_printf("FETCH %s q=%u inflight=%s current=%s id=%s",
                                   event ? event : "?",
                                   qlen,
-                                  state->activity_fetch_inflight ? "yes" : "no",
+                                  xiaomi(state)->activity_fetch_inflight ? "yes" : "no",
                                   cur_txt,
                                   id_txt);
     append_log(state, line);
@@ -820,10 +821,10 @@ void salus_log_fetch_transition(AppState *state, const char *event, const uint8_
     g_free(id_txt);
 }
 
-static void cancel_activity_fetch_timeout(AppState *state) {
-    if (state->activity_fetch_timeout_source_id != 0) {
-        g_source_remove(state->activity_fetch_timeout_source_id);
-        state->activity_fetch_timeout_source_id = 0;
+static void cancel_activity_fetch_timeout(SalusApp *state) {
+    if (xiaomi(state)->activity_fetch_timeout_source_id != 0) {
+        g_source_remove(xiaomi(state)->activity_fetch_timeout_source_id);
+        xiaomi(state)->activity_fetch_timeout_source_id = 0;
     }
 }
 
@@ -839,16 +840,16 @@ static gboolean activity_file_id_is_sleep_probe(int subtype) {
 }
 
 static gboolean activity_fetch_timeout_cb(gpointer user_data) {
-    AppState *state = user_data;
-    state->activity_fetch_timeout_source_id = 0;
-    if (!state->activity_fetch_inflight) {
+    SalusApp *state = user_data;
+    xiaomi(state)->activity_fetch_timeout_source_id = 0;
+    if (!xiaomi(state)->activity_fetch_inflight) {
         return G_SOURCE_REMOVE;
     }
 
-    const int subtype = activity_file_id_subtype(state->activity_fetch_current_id);
-    const int detail = state->activity_fetch_current_id[6] & 3;
+    const int subtype = activity_file_id_subtype(xiaomi(state)->activity_fetch_current_id);
+    const int detail = xiaomi(state)->activity_fetch_current_id[6] & 3;
     const char *sub_name = activity_subtype_name(0, subtype >= 0 ? subtype : 0);
-    gchar *id_txt = activity_file_id_key(state->activity_fetch_current_id);
+    gchar *id_txt = activity_file_id_key(xiaomi(state)->activity_fetch_current_id);
     gchar *line = g_strdup_printf(
         "Timed out waiting for activity file %s (subtype=%d/%s detail=%d); requesting next.",
         id_txt,
@@ -858,15 +859,15 @@ static gboolean activity_fetch_timeout_cb(gpointer user_data) {
     append_log(state, line);
     g_free(line);
     g_free(id_txt);
-    if (activity_file_id_is_sleep_probe(subtype) && state->activity_fetch_seen != NULL) {
-        gchar *key = activity_file_id_key(state->activity_fetch_current_id);
-        g_hash_table_remove(state->activity_fetch_seen, key);
+    if (activity_file_id_is_sleep_probe(subtype) && xiaomi(state)->activity_fetch_seen != NULL) {
+        gchar *key = activity_file_id_key(xiaomi(state)->activity_fetch_current_id);
+        g_hash_table_remove(xiaomi(state)->activity_fetch_seen, key);
         g_free(key);
     }
-    salus_log_fetch_transition(state, "timeout", state->activity_fetch_current_id);
+    salus_log_fetch_transition(state, "timeout", xiaomi(state)->activity_fetch_current_id);
 
-    state->activity_fetch_inflight = FALSE;
-    memset(state->activity_fetch_current_id, 0, sizeof(state->activity_fetch_current_id));
+    xiaomi(state)->activity_fetch_inflight = FALSE;
+    memset(xiaomi(state)->activity_fetch_current_id, 0, sizeof(xiaomi(state)->activity_fetch_current_id));
     trigger_next_activity_fetch(state);
     return G_SOURCE_REMOVE;
 }
@@ -881,10 +882,10 @@ static guint activity_fetch_timeout_ms(const uint8_t *file_id7) {
     return 5000u;
 }
 
-static void schedule_activity_fetch_timeout(AppState *state) {
+static void schedule_activity_fetch_timeout(SalusApp *state) {
     cancel_activity_fetch_timeout(state);
-    const guint ms = activity_fetch_timeout_ms(state->activity_fetch_current_id);
-    state->activity_fetch_timeout_source_id = g_timeout_add(ms, activity_fetch_timeout_cb, state);
+    const guint ms = activity_fetch_timeout_ms(xiaomi(state)->activity_fetch_current_id);
+    xiaomi(state)->activity_fetch_timeout_source_id = g_timeout_add(ms, activity_fetch_timeout_cb, state);
 }
 
 static int activity_detail_fetch_order(uint8_t detail) {
@@ -954,77 +955,77 @@ static gint activity_file_id_compare(gconstpointer a, gconstpointer b, gpointer 
     return 0;
 }
 
-void reset_activity_fetch_state(AppState *state) {
+void reset_activity_fetch_state(SalusApp *state) {
     cancel_activity_fetch_timeout(state);
-    state->activity_fetch_inflight = FALSE;
-    state->activity_refetch_round = 0;
-    state->activity_past_requested = FALSE;
-    memset(state->activity_fetch_current_id, 0, sizeof(state->activity_fetch_current_id));
-    if (state->activity_fetch_queue != NULL) {
-        g_queue_clear_full(state->activity_fetch_queue, g_free);
+    xiaomi(state)->activity_fetch_inflight = FALSE;
+    xiaomi(state)->activity_refetch_round = 0;
+    xiaomi(state)->activity_past_requested = FALSE;
+    memset(xiaomi(state)->activity_fetch_current_id, 0, sizeof(xiaomi(state)->activity_fetch_current_id));
+    if (xiaomi(state)->activity_fetch_queue != NULL) {
+        g_queue_clear_full(xiaomi(state)->activity_fetch_queue, g_free);
     }
-    if (state->activity_fetch_seen != NULL) {
-        g_hash_table_remove_all(state->activity_fetch_seen);
+    if (xiaomi(state)->activity_fetch_seen != NULL) {
+        g_hash_table_remove_all(xiaomi(state)->activity_fetch_seen);
     }
     salus_log_fetch_transition(state, "reset", NULL);
 }
 
-static void resync_activity_fetch_state(AppState *state) {
+static void resync_activity_fetch_state(SalusApp *state) {
     cancel_activity_fetch_timeout(state);
-    state->activity_fetch_inflight = FALSE;
-    state->activity_past_requested = FALSE;
-    memset(state->activity_fetch_current_id, 0, sizeof(state->activity_fetch_current_id));
-    if (state->activity_fetch_seen != NULL) {
-        g_hash_table_remove_all(state->activity_fetch_seen);
+    xiaomi(state)->activity_fetch_inflight = FALSE;
+    xiaomi(state)->activity_past_requested = FALSE;
+    memset(xiaomi(state)->activity_fetch_current_id, 0, sizeof(xiaomi(state)->activity_fetch_current_id));
+    if (xiaomi(state)->activity_fetch_seen != NULL) {
+        g_hash_table_remove_all(xiaomi(state)->activity_fetch_seen);
     }
     salus_log_fetch_transition(state, "resync-pause", NULL);
 }
 
 /* Logs once per connection when the band lists no sleep file. (Guessing sleep file IDs used to be
  * tried, but fetching unlisted IDs stalled the queue, so it only explains the situation now.) */
-static void log_missing_sleep_files(AppState *state, guint n_sleep, guint n_sleep_stages) {
-    if (state->sleep_hint_logged || (n_sleep + n_sleep_stages) > 0) {
+static void log_missing_sleep_files(SalusApp *state, guint n_sleep, guint n_sleep_stages) {
+    if (xiaomi(state)->sleep_hint_logged || (n_sleep + n_sleep_stages) > 0) {
         return;
     }
-    state->sleep_hint_logged = TRUE;
+    xiaomi(state)->sleep_hint_logged = TRUE;
     append_log(state,
                "Sleep: band did not advertise sleep file IDs (subtype 3 SLEEP_STAGES / 8 SLEEP). Wear the band "
                "overnight with sleep tracking on and sync before the Mi Fitness phone app clears the queue.");
 }
 
-static void remove_file_id_from_fetch_queue(AppState *state, const uint8_t *id7) {
-    if (state == NULL || state->activity_fetch_queue == NULL || id7 == NULL) {
+static void remove_file_id_from_fetch_queue(SalusApp *state, const uint8_t *id7) {
+    if (state == NULL || xiaomi(state)->activity_fetch_queue == NULL || id7 == NULL) {
         return;
     }
     GQueue *kept = g_queue_new();
-    while (!g_queue_is_empty(state->activity_fetch_queue)) {
-        uint8_t *item = g_queue_pop_head(state->activity_fetch_queue);
+    while (!g_queue_is_empty(xiaomi(state)->activity_fetch_queue)) {
+        uint8_t *item = g_queue_pop_head(xiaomi(state)->activity_fetch_queue);
         if (item != NULL && memcmp(item, id7, 7) == 0) {
             g_free(item);
         } else if (item != NULL) {
             g_queue_push_tail(kept, item);
         }
     }
-    g_queue_free(state->activity_fetch_queue);
-    state->activity_fetch_queue = kept;
+    g_queue_free(xiaomi(state)->activity_fetch_queue);
+    xiaomi(state)->activity_fetch_queue = kept;
 }
 
-static void purge_sleep_probe_ids_from_fetch_queue(AppState *state) {
-    if (state == NULL || state->activity_fetch_queue == NULL) {
+static void purge_sleep_probe_ids_from_fetch_queue(SalusApp *state) {
+    if (state == NULL || xiaomi(state)->activity_fetch_queue == NULL) {
         return;
     }
     GQueue *kept = g_queue_new();
     guint removed = 0;
-    while (!g_queue_is_empty(state->activity_fetch_queue)) {
-        uint8_t *item = g_queue_pop_head(state->activity_fetch_queue);
+    while (!g_queue_is_empty(xiaomi(state)->activity_fetch_queue)) {
+        uint8_t *item = g_queue_pop_head(xiaomi(state)->activity_fetch_queue);
         if (item == NULL) {
             continue;
         }
         const int subtype = activity_file_id_subtype(item);
         if (activity_file_id_is_sleep_probe(subtype)) {
             gchar *key = activity_file_id_key(item);
-            if (state->activity_fetch_seen != NULL) {
-                g_hash_table_remove(state->activity_fetch_seen, key);
+            if (xiaomi(state)->activity_fetch_seen != NULL) {
+                g_hash_table_remove(xiaomi(state)->activity_fetch_seen, key);
             }
             g_free(key);
             g_free(item);
@@ -1033,8 +1034,8 @@ static void purge_sleep_probe_ids_from_fetch_queue(AppState *state) {
             g_queue_push_tail(kept, item);
         }
     }
-    g_queue_free(state->activity_fetch_queue);
-    state->activity_fetch_queue = kept;
+    g_queue_free(xiaomi(state)->activity_fetch_queue);
+    xiaomi(state)->activity_fetch_queue = kept;
     if (removed > 0) {
         gchar *line = g_strdup_printf("Fetch queue: dropped %u sleep probe ID(s) to prioritize health data.",
                                       removed);
@@ -1043,22 +1044,22 @@ static void purge_sleep_probe_ids_from_fetch_queue(AppState *state) {
     }
 }
 
-static void abort_inflight_sleep_probe_fetch(AppState *state) {
-    if (state == NULL || !state->activity_fetch_inflight) {
+static void abort_inflight_sleep_probe_fetch(SalusApp *state) {
+    if (state == NULL || !xiaomi(state)->activity_fetch_inflight) {
         return;
     }
-    const int subtype = activity_file_id_subtype(state->activity_fetch_current_id);
+    const int subtype = activity_file_id_subtype(xiaomi(state)->activity_fetch_current_id);
     if (!activity_file_id_is_sleep_probe(subtype)) {
         return;
     }
-    gchar *key = activity_file_id_key(state->activity_fetch_current_id);
-    if (state->activity_fetch_seen != NULL) {
-        g_hash_table_remove(state->activity_fetch_seen, key);
+    gchar *key = activity_file_id_key(xiaomi(state)->activity_fetch_current_id);
+    if (xiaomi(state)->activity_fetch_seen != NULL) {
+        g_hash_table_remove(xiaomi(state)->activity_fetch_seen, key);
     }
     g_free(key);
     cancel_activity_fetch_timeout(state);
-    state->activity_fetch_inflight = FALSE;
-    memset(state->activity_fetch_current_id, 0, sizeof(state->activity_fetch_current_id));
+    xiaomi(state)->activity_fetch_inflight = FALSE;
+    memset(xiaomi(state)->activity_fetch_current_id, 0, sizeof(xiaomi(state)->activity_fetch_current_id));
     append_log(state, "Fetch queue: cancelled in-flight sleep probe to prioritize MANUAL_SAMPLES.");
 }
 
@@ -1066,7 +1067,7 @@ static gboolean manual_file_id_equal(const uint8_t *a, const uint8_t *b) {
     return a != NULL && b != NULL && memcmp(a, b, 7) == 0;
 }
 
-static void prioritize_advertised_manual_samples(AppState *state, const uint8_t *ids, size_t len) {
+static void prioritize_advertised_manual_samples(SalusApp *state, const uint8_t *ids, size_t len) {
     if (state == NULL || ids == NULL || len < 7) {
         return;
     }
@@ -1082,36 +1083,36 @@ static void prioritize_advertised_manual_samples(AppState *state, const uint8_t 
         return;
     }
 
-    if (state->manual_listed_file_id_valid && manual_file_id_equal(state->manual_listed_file_id, manual_id)) {
-        if (state->activity_fetch_inflight && manual_file_id_equal(state->activity_fetch_current_id, manual_id)) {
+    if (xiaomi(state)->manual_listed_file_id_valid && manual_file_id_equal(xiaomi(state)->manual_listed_file_id, manual_id)) {
+        if (xiaomi(state)->activity_fetch_inflight && manual_file_id_equal(xiaomi(state)->activity_fetch_current_id, manual_id)) {
             return;
         }
-        if (state->activity_fetch_queue != NULL && !g_queue_is_empty(state->activity_fetch_queue)) {
-            const uint8_t *head = g_queue_peek_head(state->activity_fetch_queue);
+        if (xiaomi(state)->activity_fetch_queue != NULL && !g_queue_is_empty(xiaomi(state)->activity_fetch_queue)) {
+            const uint8_t *head = g_queue_peek_head(xiaomi(state)->activity_fetch_queue);
             if (head != NULL && manual_file_id_equal(head, manual_id)) {
                 return;
             }
         }
     }
 
-    memcpy(state->manual_listed_file_id, manual_id, 7);
-    state->manual_listed_file_id_valid = TRUE;
+    memcpy(xiaomi(state)->manual_listed_file_id, manual_id, 7);
+    xiaomi(state)->manual_listed_file_id_valid = TRUE;
 
     purge_sleep_probe_ids_from_fetch_queue(state);
     abort_inflight_sleep_probe_fetch(state);
 
-    if (state->activity_fetch_queue == NULL) {
-        state->activity_fetch_queue = g_queue_new();
+    if (xiaomi(state)->activity_fetch_queue == NULL) {
+        xiaomi(state)->activity_fetch_queue = g_queue_new();
     }
-    if (state->activity_fetch_seen == NULL) {
-        state->activity_fetch_seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    if (xiaomi(state)->activity_fetch_seen == NULL) {
+        xiaomi(state)->activity_fetch_seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
     }
 
     gchar *key = activity_file_id_key(manual_id);
-    g_hash_table_remove(state->activity_fetch_seen, key);
+    g_hash_table_remove(xiaomi(state)->activity_fetch_seen, key);
     remove_file_id_from_fetch_queue(state, manual_id);
-    g_hash_table_add(state->activity_fetch_seen, key);
-    g_queue_push_head(state->activity_fetch_queue, g_memdup2(manual_id, 7));
+    g_hash_table_add(xiaomi(state)->activity_fetch_seen, key);
+    g_queue_push_head(xiaomi(state)->activity_fetch_queue, g_memdup2(manual_id, 7));
 
     gchar *id_txt = activity_file_id_key(manual_id);
     gchar *line = g_strdup_printf("Band advertised MANUAL_SAMPLES — prioritized fetch for %s.", id_txt);
@@ -1121,13 +1122,13 @@ static void prioritize_advertised_manual_samples(AppState *state, const uint8_t 
     trigger_next_activity_fetch(state);
 }
 
-static void enqueue_activity_file_ids(AppState *state, const uint8_t *ids, size_t len) {
+static void enqueue_activity_file_ids(SalusApp *state, const uint8_t *ids, size_t len) {
     if (ids == NULL || len < 7) return;
-    if (state->activity_fetch_queue == NULL) {
-        state->activity_fetch_queue = g_queue_new();
+    if (xiaomi(state)->activity_fetch_queue == NULL) {
+        xiaomi(state)->activity_fetch_queue = g_queue_new();
     }
-    if (state->activity_fetch_seen == NULL) {
-        state->activity_fetch_seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    if (xiaomi(state)->activity_fetch_seen == NULL) {
+        xiaomi(state)->activity_fetch_seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
     }
 
     guint added = 0;
@@ -1139,12 +1140,12 @@ static void enqueue_activity_file_ids(AppState *state, const uint8_t *ids, size_
             continue;
         }
         gchar *key = activity_file_id_key(id);
-        if (g_hash_table_contains(state->activity_fetch_seen, key)) {
+        if (g_hash_table_contains(xiaomi(state)->activity_fetch_seen, key)) {
             g_free(key);
             continue;
         }
-        g_hash_table_add(state->activity_fetch_seen, key);
-        g_queue_insert_sorted(state->activity_fetch_queue,
+        g_hash_table_add(xiaomi(state)->activity_fetch_seen, key);
+        g_queue_insert_sorted(xiaomi(state)->activity_fetch_queue,
                               g_memdup2(id, 7),
                               activity_file_id_compare,
                               NULL);
@@ -1157,15 +1158,15 @@ static void enqueue_activity_file_ids(AppState *state, const uint8_t *ids, size_
     }
 }
 
-void trigger_next_activity_fetch(AppState *state) {
-    if (!state->auth_initialized || state->activity_fetch_inflight) {
+void trigger_next_activity_fetch(SalusApp *state) {
+    if (!xiaomi(state)->auth_initialized || xiaomi(state)->activity_fetch_inflight) {
         return;
     }
-    if (state->activity_fetch_queue == NULL || g_queue_is_empty(state->activity_fetch_queue)) {
+    if (xiaomi(state)->activity_fetch_queue == NULL || g_queue_is_empty(xiaomi(state)->activity_fetch_queue)) {
         return;
     }
 
-    uint8_t *next_id = g_queue_pop_head(state->activity_fetch_queue);
+    uint8_t *next_id = g_queue_pop_head(xiaomi(state)->activity_fetch_queue);
     if (next_id == NULL) {
         return;
     }
@@ -1185,14 +1186,14 @@ void trigger_next_activity_fetch(AppState *state) {
     g_free(id_txt);
 
     if (send_activity_fetch_request(state, next_id, 7)) {
-        state->activity_fetch_inflight = TRUE;
-        memcpy(state->activity_fetch_current_id, next_id, 7);
+        xiaomi(state)->activity_fetch_inflight = TRUE;
+        memcpy(xiaomi(state)->activity_fetch_current_id, next_id, 7);
         schedule_activity_fetch_timeout(state);
         salus_log_fetch_transition(state, "request-sent", next_id);
     } else {
         gchar *key = activity_file_id_key(next_id);
-        if (state->activity_fetch_seen != NULL) {
-            g_hash_table_remove(state->activity_fetch_seen, key);
+        if (xiaomi(state)->activity_fetch_seen != NULL) {
+            g_hash_table_remove(xiaomi(state)->activity_fetch_seen, key);
         }
         g_free(key);
         salus_log_fetch_transition(state, "request-failed", next_id);
@@ -1201,7 +1202,7 @@ void trigger_next_activity_fetch(AppState *state) {
     g_free(next_id);
 }
 
-static gboolean send_activity_fetch_catalog_request(AppState *state,
+static gboolean send_activity_fetch_catalog_request(SalusApp *state,
                                                     uint32_t subtype,
                                                     gboolean include_activity_sync_today,
                                                     gboolean include_unknown1,
@@ -1240,7 +1241,7 @@ static gboolean send_activity_fetch_catalog_request(AppState *state,
 /* Gadgetbridge fetchRecordedDataToday(): CMD 8,1 with Health.activitySyncRequestToday.
  * We probe multiple unknown1 values because some firmware variants expose different ID sets.
  */
-static gboolean send_activity_fetch_today_request(AppState *state, uint32_t unknown1, const char *label) {
+static gboolean send_activity_fetch_today_request(SalusApp *state, uint32_t unknown1, const char *label) {
     return send_activity_fetch_catalog_request(state,
                                                1,
                                                TRUE,
@@ -1250,7 +1251,7 @@ static gboolean send_activity_fetch_today_request(AppState *state, uint32_t unkn
                                                label);
 }
 
-static gboolean send_activity_fetch_today_request_unset_unknown(AppState *state, const char *label) {
+static gboolean send_activity_fetch_today_request_unset_unknown(SalusApp *state, const char *label) {
     return send_activity_fetch_catalog_request(state,
                                                1,
                                                TRUE,
@@ -1260,7 +1261,7 @@ static gboolean send_activity_fetch_today_request_unset_unknown(AppState *state,
                                                label);
 }
 
-static gboolean send_activity_fetch_today_request_on_channel(AppState *state, uint32_t unknown1, uint8_t tx_channel, const char *label) {
+static gboolean send_activity_fetch_today_request_on_channel(SalusApp *state, uint32_t unknown1, uint8_t tx_channel, const char *label) {
     return send_activity_fetch_catalog_request(state,
                                                1,
                                                TRUE,
@@ -1270,7 +1271,7 @@ static gboolean send_activity_fetch_today_request_on_channel(AppState *state, ui
                                                label);
 }
 
-static gboolean send_activity_fetch_past_request(AppState *state, const char *label) {
+static gboolean send_activity_fetch_past_request(SalusApp *state, const char *label) {
     return send_activity_fetch_catalog_request(state,
                                                2,
                                                FALSE,
@@ -1280,7 +1281,7 @@ static gboolean send_activity_fetch_past_request(AppState *state, const char *la
                                                label);
 }
 
-static gboolean send_activity_fetch_past_request_with_unknown(AppState *state, uint32_t unknown1, const char *label) {
+static gboolean send_activity_fetch_past_request_with_unknown(SalusApp *state, uint32_t unknown1, const char *label) {
     return send_activity_fetch_catalog_request(state,
                                                2,
                                                TRUE,
@@ -1290,7 +1291,7 @@ static gboolean send_activity_fetch_past_request_with_unknown(AppState *state, u
                                                label);
 }
 
-static void send_activity_fetch_today_channels(AppState *state, const char *label_prefix) {
+static void send_activity_fetch_today_channels(SalusApp *state, const char *label_prefix) {
     for (uint32_t channel = 0; channel <= ACTIVITY_TODAY_CHANNEL_MAX; channel++) {
         gchar *label = g_strdup_printf("%s [channel=%u]", label_prefix, channel);
         (void)send_activity_fetch_today_request(state, channel, label);
@@ -1304,7 +1305,7 @@ static void send_activity_fetch_today_channels(AppState *state, const char *labe
     g_free(alt_label);
 }
 
-static void send_activity_fetch_past_channels(AppState *state, const char *label_prefix) {
+static void send_activity_fetch_past_channels(SalusApp *state, const char *label_prefix) {
     (void)send_activity_fetch_past_request(state, "Requested activity file IDs (past)");
     for (uint32_t channel = 0; channel <= ACTIVITY_TODAY_CHANNEL_MAX; channel++) {
         gchar *label = g_strdup_printf("%s [channel=%u]", label_prefix, channel);
@@ -1313,71 +1314,71 @@ static void send_activity_fetch_past_channels(AppState *state, const char *label
     }
 }
 
-static void stop_activity_live_poll(AppState *state) {
-    if (state->activity_live_poll_source_id != 0) {
-        g_source_remove(state->activity_live_poll_source_id);
-        state->activity_live_poll_source_id = 0;
+static void stop_activity_live_poll(SalusApp *state) {
+    if (xiaomi(state)->activity_live_poll_source_id != 0) {
+        g_source_remove(xiaomi(state)->activity_live_poll_source_id);
+        xiaomi(state)->activity_live_poll_source_id = 0;
     }
-    state->activity_live_poll_round = 0;
+    xiaomi(state)->activity_live_poll_round = 0;
 }
 
 static gboolean activity_live_poll_cb(gpointer user_data) {
-    AppState *state = user_data;
-    if (!state->auth_initialized || state->sock_fd < 0) {
-        state->activity_live_poll_source_id = 0;
-        state->activity_live_poll_round = 0;
+    SalusApp *state = user_data;
+    if (!xiaomi(state)->auth_initialized || xiaomi(state)->sock_fd < 0) {
+        xiaomi(state)->activity_live_poll_source_id = 0;
+        xiaomi(state)->activity_live_poll_round = 0;
         return G_SOURCE_REMOVE;
     }
 
-    state->activity_live_poll_round++;
-    gchar *line = g_strdup_printf("Rolling history capture poll %u.", state->activity_live_poll_round);
+    xiaomi(state)->activity_live_poll_round++;
+    gchar *line = g_strdup_printf("Rolling history capture poll %u.", xiaomi(state)->activity_live_poll_round);
     append_log(state, line);
     g_free(line);
 
     (void)send_activity_fetch_today_request(state, 0, "Rolling history file IDs (today)");
     (void)send_activity_fetch_today_request(state, 1, "Rolling history file IDs (today, alt)");
 
-    if ((state->activity_live_poll_round % ACTIVITY_LIVE_PAST_PROBE_EVERY) == 0) {
+    if ((xiaomi(state)->activity_live_poll_round % ACTIVITY_LIVE_PAST_PROBE_EVERY) == 0) {
         send_activity_fetch_past_channels(state, "Rolling history file IDs (past probe)");
     }
 
     return G_SOURCE_CONTINUE;
 }
 
-static void start_activity_live_poll(AppState *state) {
+static void start_activity_live_poll(SalusApp *state) {
     stop_activity_live_poll(state);
-    state->activity_live_poll_source_id = g_timeout_add_seconds(ACTIVITY_LIVE_POLL_INTERVAL_SECONDS, activity_live_poll_cb, state);
+    xiaomi(state)->activity_live_poll_source_id = g_timeout_add_seconds(ACTIVITY_LIVE_POLL_INTERVAL_SECONDS, activity_live_poll_cb, state);
     append_log(state, "Enabled rolling history capture poll (every 60s).");
 }
 
 static gboolean auto_history_followup_cb(gpointer user_data) {
-    AppState *state = user_data;
-    if (!state->auth_initialized || state->sock_fd < 0) {
-        state->activity_refetch_source_id = 0;
+    SalusApp *state = user_data;
+    if (!xiaomi(state)->auth_initialized || xiaomi(state)->sock_fd < 0) {
+        xiaomi(state)->activity_refetch_source_id = 0;
         return G_SOURCE_REMOVE;
     }
 
-    if (state->activity_refetch_round >= ACTIVITY_AUTO_REFETCH_ROUNDS) {
-        state->activity_refetch_source_id = 0;
+    if (xiaomi(state)->activity_refetch_round >= ACTIVITY_AUTO_REFETCH_ROUNDS) {
+        xiaomi(state)->activity_refetch_source_id = 0;
         return G_SOURCE_REMOVE;
     }
 
-    state->activity_refetch_round++;
-    gchar *line = g_strdup_printf("Auto follow-up history sync round %u/%u.", state->activity_refetch_round, ACTIVITY_AUTO_REFETCH_ROUNDS);
+    xiaomi(state)->activity_refetch_round++;
+    gchar *line = g_strdup_printf("Auto follow-up history sync round %u/%u.", xiaomi(state)->activity_refetch_round, ACTIVITY_AUTO_REFETCH_ROUNDS);
     append_log(state, line);
     g_free(line);
     send_activity_fetch_today_channels(state, "Auto history file IDs (today)");
     send_activity_fetch_past_channels(state, "Auto history file IDs (past probe)");
 
-    if (state->activity_refetch_round >= ACTIVITY_AUTO_REFETCH_ROUNDS) {
-        state->activity_refetch_source_id = 0;
+    if (xiaomi(state)->activity_refetch_round >= ACTIVITY_AUTO_REFETCH_ROUNDS) {
+        xiaomi(state)->activity_refetch_source_id = 0;
         return G_SOURCE_REMOVE;
     }
     return G_SOURCE_CONTINUE;
 }
 
-gboolean salus_wire_send_find_device(AppState *state, uint32_t subtype, uint32_t find_device, const char *label) {
-    if (state == NULL || !state->auth_initialized) {
+gboolean salus_wire_send_find_device(SalusApp *state, uint32_t subtype, uint32_t find_device, const char *label) {
+    if (state == NULL || !xiaomi(state)->auth_initialized) {
         return FALSE;
     }
     Xiaomi__System sys = XIAOMI__SYSTEM__INIT;
@@ -1393,34 +1394,34 @@ gboolean salus_wire_send_find_device(AppState *state, uint32_t subtype, uint32_t
 }
 
 static gboolean find_band_auto_stop_cb(gpointer user_data) {
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     if (state == NULL) {
         return G_SOURCE_REMOVE;
     }
-    state->find_band_stop_source = 0;
+    xiaomi(state)->find_band_stop_source = 0;
     (void)salus_wire_send_find_device(state, 18, 1, "Find band auto-stop");
     append_log(state, "Find band: auto-stopped after timeout.");
     return G_SOURCE_REMOVE;
 }
 
-gboolean salus_wire_find_band(AppState *state, gboolean start) {
+gboolean salus_wire_find_band(SalusApp *state, gboolean start) {
     if (state == NULL) {
         return FALSE;
     }
-    if (state->find_band_stop_source != 0) {
-        g_source_remove(state->find_band_stop_source);
-        state->find_band_stop_source = 0;
+    if (xiaomi(state)->find_band_stop_source != 0) {
+        g_source_remove(xiaomi(state)->find_band_stop_source);
+        xiaomi(state)->find_band_stop_source = 0;
     }
     const gboolean ok = salus_wire_send_find_device(
         state, 18, start ? 0u : 1u, start ? "Find band (start)" : "Find band (stop)");
     if (ok && start) {
-        state->find_band_stop_source = g_timeout_add_seconds(45, find_band_auto_stop_cb, state);
+        xiaomi(state)->find_band_stop_source = g_timeout_add_seconds(45, find_band_auto_stop_cb, state);
     }
     return ok;
 }
 
-gboolean salus_wire_send_xiaomi_command(AppState *state, Xiaomi__Command *cmd, const char *label) {
-    if (state == NULL || cmd == NULL || !state->auth_initialized) {
+gboolean salus_wire_send_xiaomi_command(SalusApp *state, Xiaomi__Command *cmd, const char *label) {
+    if (state == NULL || cmd == NULL || !xiaomi(state)->auth_initialized) {
         return FALSE;
     }
     const size_t packed_len = xiaomi__command__get_packed_size(cmd);
@@ -1432,7 +1433,7 @@ gboolean salus_wire_send_xiaomi_command(AppState *state, Xiaomi__Command *cmd, c
     return ok;
 }
 
-static gboolean send_encrypted_simple_command(AppState *state, uint32_t type, uint32_t subtype, const char *label) {
+static gboolean send_encrypted_simple_command(SalusApp *state, uint32_t type, uint32_t subtype, const char *label) {
     GByteArray *cmd = g_byte_array_new();
     pb_append_u32(cmd, 1, type);
     pb_append_u32(cmd, 2, subtype);
@@ -1443,7 +1444,7 @@ static gboolean send_encrypted_simple_command(AppState *state, uint32_t type, ui
 }
 
 /* XiaomiSystemService.setCurrentTime(): type 2, subtype 3, System.clock — runs before service.initialize() in GB onAuthSuccess. */
-static gboolean send_gb_set_current_time(AppState *state) {
+static gboolean send_gb_set_current_time(SalusApp *state) {
     GDateTime *now = g_date_time_new_now_local();
     GTimeZone *gtz = g_date_time_get_timezone(now);
     const gchar *tz_id = g_time_zone_get_identifier(gtz);
@@ -1497,7 +1498,7 @@ static gboolean send_gb_set_current_time(AppState *state) {
 }
 
 /* XiaomiHealthService.setUserInfo(): type 8, subtype 0, Health.userInfo */
-static gboolean send_gb_user_info(AppState *state) {
+static gboolean send_gb_user_info(SalusApp *state) {
     Xiaomi__UserInfo ui = XIAOMI__USER_INFO__INIT;
     salus_profile_apply_defaults(state);
     ui.has_height = TRUE;
@@ -1540,7 +1541,7 @@ static gboolean send_gb_user_info(AppState *state) {
     return ok;
 }
 
-void salus_wire_send_device_bootstrap(AppState *state) {
+void salus_wire_send_device_bootstrap(SalusApp *state) {
     (void)send_gb_set_current_time(state);
     (void)send_gb_user_info(state);
     (void)send_encrypted_simple_command(state, 8, 8, "Requested SpO2 config");
@@ -1558,46 +1559,48 @@ void salus_wire_send_device_bootstrap(AppState *state) {
     salus_weather_initialize(state);
 }
 
-void salus_wire_begin_file_sync(AppState *state, const char *today_label) {
+void salus_wire_begin_file_sync(SalusApp *state, const char *today_label) {
     reset_activity_fetch_state(state);
     send_activity_fetch_today_channels(state, today_label != NULL ? today_label : "Today file IDs");
     /* Mi Fitness requests history after today list is dispatched (FitnessWearSender.requestData). */
     send_activity_fetch_past_channels(state, "Mi Fitness history file IDs");
-    state->activity_refetch_round = 0;
-    if (state->activity_refetch_source_id != 0) {
-        g_source_remove(state->activity_refetch_source_id);
-        state->activity_refetch_source_id = 0;
+    xiaomi(state)->activity_refetch_round = 0;
+    if (xiaomi(state)->activity_refetch_source_id != 0) {
+        g_source_remove(xiaomi(state)->activity_refetch_source_id);
+        xiaomi(state)->activity_refetch_source_id = 0;
     }
-    state->activity_refetch_source_id = g_timeout_add_seconds(6, auto_history_followup_cb, state);
+    xiaomi(state)->activity_refetch_source_id = g_timeout_add_seconds(6, auto_history_followup_cb, state);
     start_activity_live_poll(state);
 }
 
-void salus_wire_resync_file_lists(AppState *state, const char *today_label) {
+void salus_wire_resync_file_lists(SalusApp *state, const char *today_label) {
     resync_activity_fetch_state(state);
-    state->manual_stress_probe_done = FALSE;
-    state->manual_listed_file_id_valid = FALSE;
-    memset(state->manual_listed_file_id, 0, sizeof(state->manual_listed_file_id));
+    xiaomi(state)->manual_stress_probe_done = FALSE;
+    xiaomi(state)->manual_listed_file_id_valid = FALSE;
+    memset(xiaomi(state)->manual_listed_file_id, 0, sizeof(xiaomi(state)->manual_listed_file_id));
     send_activity_fetch_today_channels(state, today_label != NULL ? today_label : "Today file IDs");
     send_activity_fetch_past_channels(state, "History file IDs");
-    state->activity_refetch_round = 0;
-    if (state->activity_refetch_source_id != 0) {
-        g_source_remove(state->activity_refetch_source_id);
-        state->activity_refetch_source_id = 0;
+    xiaomi(state)->activity_refetch_round = 0;
+    if (xiaomi(state)->activity_refetch_source_id != 0) {
+        g_source_remove(xiaomi(state)->activity_refetch_source_id);
+        xiaomi(state)->activity_refetch_source_id = 0;
     }
-    state->activity_refetch_source_id = g_timeout_add_seconds(6, auto_history_followup_cb, state);
+    xiaomi(state)->activity_refetch_source_id = g_timeout_add_seconds(6, auto_history_followup_cb, state);
     start_activity_live_poll(state);
     trigger_next_activity_fetch(state);
 }
 
 static gboolean auth_failed_idle(gpointer user_data) {
-    AppState *state = user_data;
+    SalusApp *state = user_data;
+    if (state->device == NULL || state->device->driver != &xiaomi_band_driver) {
+        return G_SOURCE_REMOVE; /* the session went away meanwhile */
+    }
     disconnect_socket(state);
-    set_status(state, "Authentication failed — check the auth key.");
-    set_connect_busy(state, FALSE);
+    salus_device_set_link(state->device, SALUS_LINK_DISCONNECTED, "Authentication failed — check the auth key.");
     return G_SOURCE_REMOVE;
 }
 
-static void handle_command_payload(AppState *state, const uint8_t *payload, size_t len) {
+static void handle_command_payload(SalusApp *state, const uint8_t *payload, size_t len) {
     ParsedAuthCommand parsed;
     if (!parse_auth_message(payload, len, &parsed)) {
         append_log(state, "Failed to parse protobuf command.");
@@ -1618,18 +1621,15 @@ static void handle_command_payload(AppState *state, const uint8_t *payload, size
         }
     } else if ((parsed.subtype == 27) || (parsed.subtype == 5)) {
         if (parsed.subtype == 27 || (parsed.has_auth_status && parsed.auth_status == 1)) {
-            state->auth_initialized = (parsed.subtype == 27);
-            append_log(state, state->auth_initialized ? "Auth success (encrypted session)." : "Auth success (plaintext).");
-            set_status(state, "Authenticated and connected.");
-            schedule_switch_to_dashboard(state);
-            set_connect_busy(state, FALSE);
-            if (state->auth_initialized) {
+            xiaomi(state)->auth_initialized = (parsed.subtype == 27);
+            append_log(state, xiaomi(state)->auth_initialized ? "Auth success (encrypted session)." : "Auth success (plaintext).");
+            salus_device_set_link(state->device, SALUS_LINK_CONNECTED, "Authenticated and connected.");
+            if (xiaomi(state)->auth_initialized) {
                 salus_fitness_sync_on_auth_async(state);
             }
         } else {
             append_log(state, "Auth failed.");
-            set_status(state, "Authentication failed.");
-            set_connect_busy(state, FALSE);
+            g_idle_add(auth_failed_idle, state);
         }
     } else {
         gchar *line = g_strdup_printf("Unhandled auth subtype %u", parsed.subtype);
@@ -1638,7 +1638,7 @@ static void handle_command_payload(AppState *state, const uint8_t *payload, size
     }
 }
 
-static gboolean process_v2_packet(AppState *state, const uint8_t *packet, size_t packet_len) {
+static gboolean process_v2_packet(SalusApp *state, const uint8_t *packet, size_t packet_len) {
     if (packet_len < 8) return FALSE;
     uint8_t packet_type = packet[2] & 0x0F;
     uint8_t seq = packet[3];
@@ -1668,16 +1668,16 @@ static gboolean process_v2_packet(AppState *state, const uint8_t *packet, size_t
             if (op_code == 1) {
                 handle_command_payload(state, data, data_len);
             } else {
-                if (!state->auth_initialized) {
+                if (!xiaomi(state)->auth_initialized) {
                     append_log(state, "Encrypted protobuf packet received before auth init.");
                 } else {
                     uint8_t *plain = NULL;
                     size_t plain_len = 0;
                     /* Gadgetbridge V2 quirk: decrypt key and IV are both decryptionKey. */
-                    if (!aes_ctr_crypt(state->decryption_key, state->decryption_key, data, data_len, &plain, &plain_len)) {
+                    if (!aes_ctr_crypt(xiaomi(state)->decryption_key, xiaomi(state)->decryption_key, data, data_len, &plain, &plain_len)) {
                         append_log(state, "Failed to decrypt encrypted protobuf packet.");
                     } else {
-                        if (state->verbose_wire_log) {
+                        if (xiaomi(state)->verbose_wire_log) {
                             gchar *hex = format_hex(plain, plain_len);
                             gchar *line = g_strdup_printf("DEC %s", hex);
                             append_log(state, line);
@@ -1691,38 +1691,38 @@ static gboolean process_v2_packet(AppState *state, const uint8_t *packet, size_t
                 }
             }
         } else if (raw_channel == 5) {
-            if (op_code == 2 && state->auth_initialized) {
+            if (op_code == 2 && xiaomi(state)->auth_initialized) {
                 uint8_t *plain = NULL;
                 size_t plain_len = 0;
-                if (aes_ctr_crypt(state->decryption_key, state->decryption_key, data, data_len, &plain, &plain_len)) {
+                if (aes_ctr_crypt(xiaomi(state)->decryption_key, xiaomi(state)->decryption_key, data, data_len, &plain, &plain_len)) {
                     if (plain_len >= 4) {
                         const uint16_t total = salus_read_u16_le(plain);
                         const uint16_t num = salus_read_u16_le(plain + 2);
-                        if (state->verbose_fetch_log) {
+                        if (xiaomi(state)->verbose_fetch_log) {
                             gchar *line = g_strdup_printf("ACT chunk %u/%u (%zu bytes)", num, total, plain_len);
                             append_log(state, line);
                             g_free(line);
                         }
 
                         if (num == 1) {
-                            if (state->activity_chunk_accumulator != NULL) {
-                                g_byte_array_set_size(state->activity_chunk_accumulator, 0);
+                            if (xiaomi(state)->activity_chunk_accumulator != NULL) {
+                                g_byte_array_set_size(xiaomi(state)->activity_chunk_accumulator, 0);
                             } else {
-                                state->activity_chunk_accumulator = g_byte_array_new();
+                                xiaomi(state)->activity_chunk_accumulator = g_byte_array_new();
                             }
-                        } else if (state->activity_chunk_accumulator == NULL) {
-                            state->activity_chunk_accumulator = g_byte_array_new();
+                        } else if (xiaomi(state)->activity_chunk_accumulator == NULL) {
+                            xiaomi(state)->activity_chunk_accumulator = g_byte_array_new();
                         }
 
                         if (plain_len > 4) {
-                            g_byte_array_append(state->activity_chunk_accumulator, plain + 4, (guint)(plain_len - 4));
+                            g_byte_array_append(xiaomi(state)->activity_chunk_accumulator, plain + 4, (guint)(plain_len - 4));
                         }
 
                         if (total > 0 && num == total) {
                             handle_activity_payload(state,
-                                                    state->activity_chunk_accumulator->data,
-                                                    state->activity_chunk_accumulator->len);
-                            g_byte_array_set_size(state->activity_chunk_accumulator, 0);
+                                                    xiaomi(state)->activity_chunk_accumulator->data,
+                                                    xiaomi(state)->activity_chunk_accumulator->len);
+                            g_byte_array_set_size(xiaomi(state)->activity_chunk_accumulator, 0);
                         }
                     } else {
                         append_log(state, "Activity chunk too short.");
@@ -1731,17 +1731,17 @@ static gboolean process_v2_packet(AppState *state, const uint8_t *packet, size_t
                 } else {
                     append_log(state, "Failed to decrypt activity chunk.");
                 }
-            } else if (state->verbose_wire_log) {
+            } else if (xiaomi(state)->verbose_wire_log) {
                 append_log(state, "Activity channel packet received.");
             }
-        } else if (state->verbose_wire_log) {
+        } else if (xiaomi(state)->verbose_wire_log) {
             append_log(state, "SPPv2 non-protobuf channel packet received.");
         }
         return TRUE;
     }
 
     if (packet_type == 1) {
-        if (state->verbose_wire_log) {
+        if (xiaomi(state)->verbose_wire_log) {
             append_log(state, "Received SPPv2 ACK.");
         }
         return TRUE;
@@ -1750,7 +1750,7 @@ static gboolean process_v2_packet(AppState *state, const uint8_t *packet, size_t
     return TRUE;
 }
 
-static gboolean process_v1_packet(AppState *state, const uint8_t *packet, size_t packet_len) {
+static gboolean process_v1_packet(SalusApp *state, const uint8_t *packet, size_t packet_len) {
     if (packet_len < 11) return FALSE;
     uint16_t payload_sz = (uint16_t)packet[5] | ((uint16_t)packet[6] << 8);
     if (packet_len != (size_t)(payload_sz + 8)) return FALSE;
@@ -1762,23 +1762,23 @@ static gboolean process_v1_packet(AppState *state, const uint8_t *packet, size_t
     size_t payload_len = payload_sz - 3;
 
     if (channel == 0 && opcode == 1 && payload_len > 0) {
-        state->protocol_version = payload[0];
-        gchar *line = g_strdup_printf("SPP version response: %u", state->protocol_version);
+        xiaomi(state)->protocol_version = payload[0];
+        gchar *line = g_strdup_printf("SPP version response: %u", xiaomi(state)->protocol_version);
         append_log(state, line);
         g_free(line);
-        if (state->protocol_version >= 2) {
+        if (xiaomi(state)->protocol_version >= 2) {
             append_log(state, "Switching to SPPv2 and starting session.");
-            state->spp_v2_seq = 0;
+            xiaomi(state)->spp_v2_seq = 0;
             return send_spp_v2_session_config(state);
         }
     }
     return TRUE;
 }
 
-static void process_rx_buffer(AppState *state) {
-    while (state->rx_accumulator != NULL && state->rx_accumulator->len > 0) {
-        uint8_t *buf = state->rx_accumulator->data;
-        size_t len = state->rx_accumulator->len;
+static void process_rx_buffer(SalusApp *state) {
+    while (xiaomi(state)->rx_accumulator != NULL && xiaomi(state)->rx_accumulator->len > 0) {
+        uint8_t *buf = xiaomi(state)->rx_accumulator->data;
+        size_t len = xiaomi(state)->rx_accumulator->len;
 
         if (len >= 3 && buf[0] == 0xBA && buf[1] == 0xDC && buf[2] == 0xFE) {
             if (len < 11) return;
@@ -1786,7 +1786,7 @@ static void process_rx_buffer(AppState *state) {
             size_t pkt_sz = payload_sz + 8;
             if (len < pkt_sz) return;
             (void)process_v1_packet(state, buf, pkt_sz);
-            g_byte_array_remove_range(state->rx_accumulator, 0, pkt_sz);
+            g_byte_array_remove_range(xiaomi(state)->rx_accumulator, 0, pkt_sz);
             continue;
         }
 
@@ -1799,20 +1799,20 @@ static void process_rx_buffer(AppState *state) {
             uint16_t calc_crc = crc16_arc(buf + 8, payload_len);
             if (got_crc != calc_crc) {
                 append_log(state, "SPPv2 packet CRC mismatch, dropping byte.");
-                g_byte_array_remove_range(state->rx_accumulator, 0, 1);
+                g_byte_array_remove_range(xiaomi(state)->rx_accumulator, 0, 1);
                 continue;
             }
             (void)process_v2_packet(state, buf, pkt_sz);
-            g_byte_array_remove_range(state->rx_accumulator, 0, pkt_sz);
+            g_byte_array_remove_range(xiaomi(state)->rx_accumulator, 0, pkt_sz);
             continue;
         }
 
         /* Resync to potential next packet preamble. */
-        g_byte_array_remove_range(state->rx_accumulator, 0, 1);
+        g_byte_array_remove_range(xiaomi(state)->rx_accumulator, 0, 1);
     }
 }
 
-/* Worker-thread safe: touches no AppState fields. Returns a connected fd or -1 (errno set). */
+/* Worker-thread safe: touches no SalusApp fields. Returns a connected fd or -1 (errno set). */
 static int try_connect_rfcomm_with_security(const bdaddr_t *bdaddr, int channel, int sec_level) {
     struct sockaddr_rc addr = {0};
     addr.rc_family = AF_BLUETOOTH;
@@ -1847,7 +1847,7 @@ static int try_connect_rfcomm(const bdaddr_t *bdaddr, int channel) {
     return -1;
 }
 
-static gboolean send_xiaomi_version_request(AppState *state) {
+static gboolean send_xiaomi_version_request(SalusApp *state) {
     /* Matches Gadgetbridge's XiaomiSppSupport initializeDevice() first request. */
     const uint8_t packet[] = {
         0xBA, 0xDC, 0xFE, /* preamble */
@@ -1860,7 +1860,7 @@ static gboolean send_xiaomi_version_request(AppState *state) {
         0xEF              /* epilogue */
     };
 
-    if (write_all(state->sock_fd, packet, sizeof(packet)) < 0) {
+    if (write_all(xiaomi(state)->sock_fd, packet, sizeof(packet)) < 0) {
         gchar *line = g_strdup_printf("Write failed: %s", g_strerror(errno));
         append_log(state, line);
         g_free(line);
@@ -1871,11 +1871,9 @@ static gboolean send_xiaomi_version_request(AppState *state) {
     return TRUE;
 }
 
-static void on_connection_lost(AppState *state) {
+static void on_connection_lost(SalusApp *state) {
     disconnect_socket(state);
-    set_status(state, "Disconnected");
-    switch_to_pairing(state);
-    set_connect_busy(state, FALSE);
+    salus_device_set_link(state->device, SALUS_LINK_DISCONNECTED, "Disconnected");
 }
 
 /*
@@ -1884,12 +1882,12 @@ static void on_connection_lost(AppState *state) {
  * timers and button handlers that touch the same state and write to the same socket.
  */
 static gboolean on_socket_io(gint fd, GIOCondition condition, gpointer user_data) {
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     if (condition & G_IO_IN) {
         uint8_t buffer[4096];
         const ssize_t n = read(fd, buffer, sizeof(buffer));
         if (n > 0) {
-            if (state->verbose_wire_log) {
+            if (xiaomi(state)->verbose_wire_log) {
                 gchar *hex = format_hex(buffer, (size_t)n);
                 gchar *line = g_strdup_printf("RX %s", hex);
                 append_log(state, line);
@@ -1905,10 +1903,10 @@ static gboolean on_socket_io(gint fd, GIOCondition condition, gpointer user_data
                 }
             }
 
-            if (state->rx_accumulator == NULL) {
-                state->rx_accumulator = g_byte_array_new();
+            if (xiaomi(state)->rx_accumulator == NULL) {
+                xiaomi(state)->rx_accumulator = g_byte_array_new();
             }
-            g_byte_array_append(state->rx_accumulator, buffer, (guint)n);
+            g_byte_array_append(xiaomi(state)->rx_accumulator, buffer, (guint)n);
             process_rx_buffer(state);
             return G_SOURCE_CONTINUE;
         }
@@ -1926,12 +1924,12 @@ static gboolean on_socket_io(gint fd, GIOCondition condition, gpointer user_data
         append_log(state, "Socket hang-up / error.");
     }
 
-    state->rx_watch_id = 0; /* this source is being removed by returning G_SOURCE_REMOVE */
+    xiaomi(state)->rx_watch_id = 0; /* this source is being removed by returning G_SOURCE_REMOVE */
     on_connection_lost(state);
     return G_SOURCE_REMOVE;
 }
 
-gboolean parse_mac(const gchar *input, bdaddr_t *out_bdaddr, gchar **normalized) {
+static gboolean parse_mac(const gchar *input, bdaddr_t *out_bdaddr, gchar **normalized) {
     if (input == NULL || strlen(input) != 17) {
         return FALSE;
     }
@@ -1953,31 +1951,34 @@ gboolean parse_mac(const gchar *input, bdaddr_t *out_bdaddr, gchar **normalized)
     return TRUE;
 }
 
-void disconnect_socket(AppState *state) {
-    /* Invalidates any connect attempt still running on the worker thread. */
-    state->connect_generation++;
+/* Bumped by every disconnect: a connect attempt still running on the worker thread is stale once
+ * this changed (file-wide, so a session freed and replaced meanwhile can't match by accident). */
+static guint s_connect_generation;
+
+void disconnect_socket(SalusApp *state) {
+    s_connect_generation++;
     stop_activity_live_poll(state);
 
-    if (state->rx_watch_id != 0) {
-        g_source_remove(state->rx_watch_id);
-        state->rx_watch_id = 0;
+    if (xiaomi(state)->rx_watch_id != 0) {
+        g_source_remove(xiaomi(state)->rx_watch_id);
+        xiaomi(state)->rx_watch_id = 0;
     }
-    if (state->sock_fd >= 0) {
-        shutdown(state->sock_fd, SHUT_RDWR);
-        close(state->sock_fd);
-        state->sock_fd = -1;
+    if (xiaomi(state)->sock_fd >= 0) {
+        shutdown(xiaomi(state)->sock_fd, SHUT_RDWR);
+        close(xiaomi(state)->sock_fd);
+        xiaomi(state)->sock_fd = -1;
     }
-    if (state->rx_accumulator != NULL) {
-        g_byte_array_unref(state->rx_accumulator);
-        state->rx_accumulator = NULL;
+    if (xiaomi(state)->rx_accumulator != NULL) {
+        g_byte_array_unref(xiaomi(state)->rx_accumulator);
+        xiaomi(state)->rx_accumulator = NULL;
     }
-    if (state->activity_chunk_accumulator != NULL) {
-        g_byte_array_unref(state->activity_chunk_accumulator);
-        state->activity_chunk_accumulator = NULL;
+    if (xiaomi(state)->activity_chunk_accumulator != NULL) {
+        g_byte_array_unref(xiaomi(state)->activity_chunk_accumulator);
+        xiaomi(state)->activity_chunk_accumulator = NULL;
     }
-    state->auth_initialized = FALSE;
-    state->protocol_version = 0;
-    state->spp_v2_seq = 0;
+    xiaomi(state)->auth_initialized = FALSE;
+    xiaomi(state)->protocol_version = 0;
+    xiaomi(state)->spp_v2_seq = 0;
     state->has_live_steps = FALSE;
     state->has_live_hr = FALSE;
     salus_notifications_on_disconnect(state);
@@ -1985,7 +1986,14 @@ void disconnect_socket(AppState *state) {
 }
 
 typedef struct {
-    AppState *state;
+    SalusApp *state;
+    bdaddr_t bdaddr;
+    gchar *normalized;
+    guint generation;
+} XiaomiConnectTask;
+
+typedef struct {
+    SalusApp *state;
     guint generation;
     int fd;
 } ConnectResult;
@@ -1993,9 +2001,10 @@ typedef struct {
 /* Main thread: adopt the socket connected by the worker (unless the attempt went stale). */
 static gboolean on_connect_finished(gpointer user_data) {
     ConnectResult *res = user_data;
-    AppState *state = res->state;
+    SalusApp *state = res->state;
 
-    if (res->generation != state->connect_generation) {
+    if (res->generation != s_connect_generation || state->device == NULL ||
+        state->device->driver != &xiaomi_band_driver) {
         if (res->fd >= 0) {
             close(res->fd);
             append_log(state, "Discarded a superseded connection attempt.");
@@ -2004,32 +2013,31 @@ static gboolean on_connect_finished(gpointer user_data) {
         return G_SOURCE_REMOVE;
     }
     if (res->fd < 0) {
-        set_status(state, "Connect failed.");
-        set_connect_busy(state, FALSE);
+        salus_device_set_link(state->device, SALUS_LINK_DISCONNECTED, "Connect failed.");
         g_free(res);
         return G_SOURCE_REMOVE;
     }
 
-    state->sock_fd = res->fd;
+    xiaomi(state)->sock_fd = res->fd;
     g_free(res);
 
     set_status(state, "Connected. Sending version request...");
-    memset(state->phone_nonce, 0, sizeof(state->phone_nonce));
-    memset(state->watch_nonce, 0, sizeof(state->watch_nonce));
-    memset(state->decryption_key, 0, sizeof(state->decryption_key));
-    memset(state->encryption_key, 0, sizeof(state->encryption_key));
-    memset(state->decryption_nonce, 0, sizeof(state->decryption_nonce));
-    memset(state->encryption_nonce, 0, sizeof(state->encryption_nonce));
-    state->auth_initialized = FALSE;
-    state->protocol_version = 0;
-    state->spp_v2_seq = 0;
-    state->sleep_hint_logged = FALSE;
-    state->manual_stress_probe_done = FALSE;
-    state->manual_listed_file_id_valid = FALSE;
-    memset(state->manual_listed_file_id, 0, sizeof(state->manual_listed_file_id));
+    memset(xiaomi(state)->phone_nonce, 0, sizeof(xiaomi(state)->phone_nonce));
+    memset(xiaomi(state)->watch_nonce, 0, sizeof(xiaomi(state)->watch_nonce));
+    memset(xiaomi(state)->decryption_key, 0, sizeof(xiaomi(state)->decryption_key));
+    memset(xiaomi(state)->encryption_key, 0, sizeof(xiaomi(state)->encryption_key));
+    memset(xiaomi(state)->decryption_nonce, 0, sizeof(xiaomi(state)->decryption_nonce));
+    memset(xiaomi(state)->encryption_nonce, 0, sizeof(xiaomi(state)->encryption_nonce));
+    xiaomi(state)->auth_initialized = FALSE;
+    xiaomi(state)->protocol_version = 0;
+    xiaomi(state)->spp_v2_seq = 0;
+    xiaomi(state)->sleep_hint_logged = FALSE;
+    xiaomi(state)->manual_stress_probe_done = FALSE;
+    xiaomi(state)->manual_listed_file_id_valid = FALSE;
+    memset(xiaomi(state)->manual_listed_file_id, 0, sizeof(xiaomi(state)->manual_listed_file_id));
     reset_activity_fetch_state(state);
-    if (state->activity_chunk_accumulator != NULL) {
-        g_byte_array_set_size(state->activity_chunk_accumulator, 0);
+    if (xiaomi(state)->activity_chunk_accumulator != NULL) {
+        g_byte_array_set_size(xiaomi(state)->activity_chunk_accumulator, 0);
     }
     if (!send_xiaomi_version_request(state)) {
         set_status(state, "Connected, but first write failed.");
@@ -2037,15 +2045,15 @@ static gboolean on_connect_finished(gpointer user_data) {
         set_status(state, "Connected. Listening for SPP packets...");
     }
 
-    state->rx_watch_id = g_unix_fd_add(state->sock_fd, G_IO_IN | G_IO_HUP | G_IO_ERR, on_socket_io, state);
+    xiaomi(state)->rx_watch_id = g_unix_fd_add(xiaomi(state)->sock_fd, G_IO_IN | G_IO_HUP | G_IO_ERR, on_socket_io, state);
     return G_SOURCE_REMOVE;
 }
 
 /* Worker thread: blocking BlueZ pairing, SDP lookup and RFCOMM connect. Only thread-safe helpers
  * (append_log / set_status) are used; the result is handed to on_connect_finished(). */
-gpointer connect_worker_main(gpointer user_data) {
-    ConnectTask *task = user_data;
-    AppState *state = task->state;
+static gpointer xiaomi_connect_worker_main(gpointer user_data) {
+    XiaomiConnectTask *task = user_data;
+    SalusApp *state = task->state;
     gchar *normalized = task->normalized;
     const bdaddr_t *bdaddr = &task->bdaddr;
     int fd = -1;
@@ -2124,4 +2132,28 @@ gpointer connect_worker_main(gpointer user_data) {
     g_free(normalized);
     g_free(task);
     return NULL;
+}
+
+void xiaomi_wire_connect(SalusApp *state) {
+    XiaomiDevice *x = xiaomi(state);
+    disconnect_socket(state);
+    salus_device_set_link(&x->base, SALUS_LINK_CONNECTING, "Connecting…");
+
+    bdaddr_t bdaddr = {0};
+    gchar *normalized = NULL;
+    if (!parse_mac(x->base.config->address, &bdaddr, &normalized)) {
+        salus_device_set_link(&x->base, SALUS_LINK_DISCONNECTED, "Invalid address format. Use AA:BB:CC:DD:EE:FF");
+        return;
+    }
+    if (!xiaomi_auth_key_valid(x->auth_key_hex)) {
+        g_free(normalized);
+        salus_device_set_link(&x->base, SALUS_LINK_DISCONNECTED, "Invalid auth key. Enter 32 hex chars.");
+        return;
+    }
+    XiaomiConnectTask *task = g_new0(XiaomiConnectTask, 1);
+    task->state = state;
+    task->bdaddr = bdaddr;
+    task->normalized = normalized;
+    task->generation = s_connect_generation; /* bumped by disconnect_socket() above */
+    g_thread_unref(g_thread_new("xiaomi-connect", xiaomi_connect_worker_main, task));
 }

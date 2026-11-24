@@ -16,7 +16,7 @@ static int sleep_stage_bucket(int stage) {
     }
 }
 
-void salus_health_aggregate_day(AppState *state, const gchar *day_key, SalusDayHealthAgg *out) {
+void salus_health_aggregate_day(SalusApp *state, const gchar *day_key, SalusDayHealthAgg *out) {
     memset(out, 0, sizeof(*out));
     out->day_key = day_key;
     out->steps = -1;
@@ -139,7 +139,7 @@ static int json_item_cur_pressure(JsonObject *item) {
     return json_object_get_int_member(block, "curPressure");
 }
 
-guint salus_apply_pressure_from_activity_record_json(AppState *state, JsonNode *decoded, uint32_t base_ts_sec) {
+guint salus_apply_pressure_from_activity_record_json(SalusApp *state, JsonNode *decoded, uint32_t base_ts_sec) {
     if (state == NULL || decoded == NULL || !JSON_NODE_HOLDS_OBJECT(decoded)) {
         return 0;
     }
@@ -212,7 +212,7 @@ guint salus_activity_goal_default(void) {
 #define SALUS_ACTIVE_INTENSITY_MIN 3
 #define SALUS_ACTIVE_INTENSITY_MAX 5
 
-guint salus_count_activity_minutes_from_timeline(AppState *state, const gchar *day_key) {
+guint salus_count_activity_minutes_from_timeline(SalusApp *state, const gchar *day_key) {
     if (state == NULL || day_key == NULL) {
         return 0;
     }

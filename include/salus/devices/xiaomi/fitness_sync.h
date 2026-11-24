@@ -8,10 +8,10 @@
  * Reference: FitnessDeviceSyncManager.startSyncWithDevice → FitnessWearSender.requestData
  *   (today IDs via getTodayFitnessIds, then history via requestHistoryData).
  */
-void salus_fitness_sync_on_auth(AppState *state);
-void salus_fitness_sync_on_auth_async(AppState *state);
+void salus_fitness_sync_on_auth(SalusApp *state);
+void salus_fitness_sync_on_auth_async(SalusApp *state);
 
-void salus_fitness_sync_resync(AppState *state);
+void salus_fitness_sync_resync(SalusApp *state);
 
 
 #endif

@@ -12,7 +12,7 @@ struct Xiaomi__Command;
  */
 
 /* Handles the workout open/status commands; ignores everything else. Main thread. */
-void salus_workout_gps_handle_command(AppState *state, const struct Xiaomi__Command *cmd);
+void salus_workout_gps_handle_command(SalusApp *state, const struct Xiaomi__Command *cmd);
 
 /* Stops sending location (connection lost, or sharing turned off). */
-void salus_workout_gps_stop(AppState *state, const char *reason);
+void salus_workout_gps_stop(SalusApp *state, const char *reason);

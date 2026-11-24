@@ -1,8 +1,6 @@
 #include "ui_private.h"
 
 #include "salus/profile.h"
-#include "salus/devices/xiaomi/fitness_sync.h"
-#include "salus/devices/xiaomi/wire.h"
 #include "salus/weight_log.h"
 
 #include <math.h>
@@ -18,7 +16,7 @@
 #define TREND_STEP_BUCKET_MIN 30
 #define TREND_BUCKETS (UI_DAY_MINUTES / TREND_STEP_BUCKET_MIN)
 
-static void dashboard_update_date_navs(AppState *state);
+static void dashboard_update_date_navs(SalusApp *state);
 
 /* ======================================================================================== */
 /* Lifecycle                                                                                */
@@ -64,7 +62,7 @@ static GDate *today_date(void) {
     return d;
 }
 
-GDate *ui_view_date(AppState *state) {
+GDate *ui_view_date(SalusApp *state) {
     if (state->health_view_date == NULL) {
         state->health_view_date = today_date();
     }
@@ -76,14 +74,14 @@ gchar *ui_day_key(GDate *d) {
                            (guint)g_date_get_day(d));
 }
 
-gboolean ui_viewing_today(AppState *state) {
+gboolean ui_viewing_today(SalusApp *state) {
     GDate *today = today_date();
     const gboolean same = g_date_compare(today, ui_view_date(state)) == 0;
     g_date_free(today);
     return same;
 }
 
-void ui_set_view_date(AppState *state, GDate *d) {
+void ui_set_view_date(SalusApp *state, GDate *d) {
     GDate *today = today_date();
     GDate *vd = ui_view_date(state);
     *vd = g_date_compare(d, today) > 0 ? *today : *d; /* no future days */
@@ -93,7 +91,7 @@ void ui_set_view_date(AppState *state, GDate *d) {
 
 static void on_date_prev(GtkButton *b, gpointer user_data) {
     (void)b;
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     GDate d = *ui_view_date(state);
     g_date_subtract_days(&d, 1);
     ui_set_view_date(state, &d);
@@ -101,7 +99,7 @@ static void on_date_prev(GtkButton *b, gpointer user_data) {
 
 static void on_date_next(GtkButton *b, gpointer user_data) {
     (void)b;
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     GDate d = *ui_view_date(state);
     g_date_add_days(&d, 1);
     ui_set_view_date(state, &d);
@@ -109,14 +107,14 @@ static void on_date_next(GtkButton *b, gpointer user_data) {
 
 static void on_date_today(GtkButton *b, gpointer user_data) {
     (void)b;
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     GDate *t = today_date();
     ui_set_view_date(state, t);
     g_date_free(t);
 }
 
 static void on_calendar_day_selected(GtkCalendar *cal, gpointer user_data) {
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     if (g_object_get_data(G_OBJECT(cal), "salus-syncing") != NULL) {
         return;
     }
@@ -132,7 +130,7 @@ static void on_calendar_day_selected(GtkCalendar *cal, gpointer user_data) {
     g_date_free(d);
 }
 
-GtkWidget *ui_date_nav_new(AppState *state, SalusDashboardUi *dash) {
+GtkWidget *ui_date_nav_new(SalusApp *state, SalusDashboardUi *dash) {
     GtkWidget *bar = gtk_center_box_new();
 
     GtkWidget *prev = gtk_button_new_from_icon_name("go-previous-symbolic");
@@ -179,7 +177,7 @@ GtkWidget *ui_date_nav_new(AppState *state, SalusDashboardUi *dash) {
     return bar;
 }
 
-static void dashboard_update_date_navs(AppState *state) {
+static void dashboard_update_date_navs(SalusApp *state) {
     SalusDashboardUi *dash = state->dash_ui;
     GDate *vd = ui_view_date(state);
     GDate *today = today_date();
@@ -212,11 +210,11 @@ static void dashboard_update_date_navs(AppState *state) {
 /* Shell: connection state, toasts, dialogs                                                 */
 /* ======================================================================================== */
 
-gboolean ui_is_connected(AppState *state) {
-    return state->sock_fd >= 0 && (state->dash_ui == NULL || !state->dash_ui->busy);
+gboolean ui_is_connected(SalusApp *state) {
+    return salus_device_connected(state);
 }
 
-void ui_toast(AppState *state, const char *text) {
+void ui_toast(SalusApp *state, const char *text) {
     SalusDashboardUi *dash = state->dash_ui;
     if (dash == NULL || dash->toast_overlay == NULL || text == NULL) {
         return;
@@ -226,17 +224,15 @@ void ui_toast(AppState *state, const char *text) {
     adw_toast_overlay_add_toast(ADW_TOAST_OVERLAY(dash->toast_overlay), toast);
 }
 
-void ui_connect_saved(AppState *state) {
+void ui_connect_saved(SalusApp *state) {
     if (!salus_ui_has_saved_device(state)) {
         salus_ui_show_setup(state);
         return;
     }
-    gchar *addr = g_strdup(state->selected_address);
-    start_connect_for_address(state, addr);
-    g_free(addr);
+    salus_device_connect(state);
 }
 
-void ui_show_page(AppState *state, const char *name) {
+void ui_show_page(SalusApp *state, const char *name) {
     SalusDashboardUi *dash = state->dash_ui;
     if (dash != NULL && dash->view_stack != NULL) {
         adw_view_stack_set_visible_child_name(ADW_VIEW_STACK(dash->view_stack), name);
@@ -248,7 +244,7 @@ static gboolean status_is_error(const char *s) {
                          strstr(s, "error") != NULL);
 }
 
-void salus_dashboard_update_connection(AppState *state) {
+void salus_dashboard_update_connection(SalusApp *state) {
     SalusDashboardUi *dash = state->dash_ui;
     if (dash == NULL || dash->banner == NULL) {
         return;
@@ -287,14 +283,14 @@ void salus_dashboard_update_connection(AppState *state) {
     ui_device_refresh(state);
 }
 
-void salus_dashboard_set_busy(AppState *state, gboolean busy) {
+void salus_dashboard_set_busy(SalusApp *state, gboolean busy) {
     if (state->dash_ui != NULL) {
         state->dash_ui->busy = busy;
         salus_dashboard_update_connection(state);
     }
 }
 
-void salus_dashboard_set_status(AppState *state, const char *text) {
+void salus_dashboard_set_status(SalusApp *state, const char *text) {
     SalusDashboardUi *dash = state->dash_ui;
     if (dash == NULL) {
         return;
@@ -304,7 +300,7 @@ void salus_dashboard_set_status(AppState *state, const char *text) {
     salus_dashboard_update_connection(state);
 }
 
-void salus_dashboard_toast(AppState *state, const char *text) {
+void salus_dashboard_toast(SalusApp *state, const char *text) {
     ui_toast(state, text);
 }
 
@@ -319,7 +315,7 @@ static void on_banner_button(AdwBanner *banner, gpointer user_data) {
 
 static void on_conn_button(GtkButton *b, gpointer user_data) {
     (void)b;
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     if (ui_is_connected(state)) {
         ui_show_page(state, "device");
     } else {
@@ -329,9 +325,9 @@ static void on_conn_button(GtkButton *b, gpointer user_data) {
 
 static void on_sync_button(GtkButton *b, gpointer user_data) {
     (void)b;
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     if (ui_is_connected(state)) {
-        salus_fitness_sync_resync(state);
+        salus_device_sync(state);
         ui_toast(state, "Syncing health data…");
     }
 }
@@ -339,7 +335,7 @@ static void on_sync_button(GtkButton *b, gpointer user_data) {
 /* ---- Log dialog --------------------------------------------------------------------------- */
 
 static void on_log_copy(GtkButton *b, gpointer user_data) {
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     GtkTextIter s, e;
     gtk_text_buffer_get_bounds(state->log_buffer, &s, &e);
     gchar *text = gtk_text_buffer_get_text(state->log_buffer, &s, &e, FALSE);
@@ -357,7 +353,7 @@ static gboolean scroll_log_to_end(gpointer data) {
     return G_SOURCE_REMOVE;
 }
 
-void ui_show_log_dialog(AppState *state) {
+void ui_show_log_dialog(SalusApp *state) {
     if (state->log_buffer == NULL || state->window == NULL) {
         return;
     }
@@ -396,7 +392,7 @@ void ui_show_log_dialog(AppState *state) {
 /* ---- Weight dialog ------------------------------------------------------------------------ */
 
 static void on_weight_response(AdwAlertDialog *dialog, const char *response, gpointer user_data) {
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     if (g_strcmp0(response, "save") != 0) {
         return;
     }
@@ -408,7 +404,7 @@ static void on_weight_response(AdwAlertDialog *dialog, const char *response, gpo
     }
 }
 
-void ui_show_weight_dialog(AppState *state) {
+void ui_show_weight_dialog(SalusApp *state) {
     AdwDialog *dialog = adw_alert_dialog_new("Log Weight", "Today's weight in kilograms.");
     GtkAdjustment *adj = gtk_adjustment_new(70.0, 30.0, 300.0, 0.1, 1.0, 0.0);
     guint last_date = 0;
@@ -451,7 +447,7 @@ static void act_change_device(GSimpleAction *a, GVariant *p, gpointer user_data)
 static void act_about(GSimpleAction *a, GVariant *p, gpointer user_data) {
     (void)a;
     (void)p;
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     AdwDialog *about = adw_about_dialog_new();
     adw_about_dialog_set_application_name(ADW_ABOUT_DIALOG(about), "Salus");
     adw_about_dialog_set_application_icon(ADW_ABOUT_DIALOG(about), "salus-watch-symbolic");
@@ -467,7 +463,7 @@ static void act_about(GSimpleAction *a, GVariant *p, gpointer user_data) {
 /* Shell                                                                                    */
 /* ======================================================================================== */
 
-GtkWidget *salus_dashboard_build(AppState *state, SalusDashboardUi *dash) {
+GtkWidget *salus_dashboard_build(SalusApp *state, SalusDashboardUi *dash) {
     state->dash_ui = dash;
     dash->state = state;
 
@@ -610,7 +606,7 @@ static GtkWidget *ring_legend_row(UiColor color, const char *title, GtkWidget **
 
 static void on_tile_clicked(GtkButton *b, gpointer user_data);
 
-static GtkWidget *build_activity_card(AppState *state, SalusDashboardUi *dash) {
+static GtkWidget *build_activity_card(SalusApp *state, SalusDashboardUi *dash) {
     GtkWidget *inner = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
     dash->ring_badge = ui_label("LIVE", "salus-live", 0.5f);
     gtk_widget_set_visible(dash->ring_badge, FALSE);
@@ -662,7 +658,7 @@ static void set_ring_value(GtkWidget *label, long value, long goal, const char *
 
 /* ---- Tiles ---------------------------------------------------------------------------- */
 
-static void tile_build(UiTile *t, AppState *state, const char *id, const char *title, const char *icon,
+static void tile_build(UiTile *t, SalusApp *state, const char *id, const char *title, const char *icon,
                        UiColor color, gboolean clickable, int spark_series) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
     GtkWidget *head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
@@ -792,7 +788,7 @@ static void trend_format(UiSeries s, int v, gchar *buf, size_t len) {
 }
 
 static void draw_trend(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     SalusDashboardUi *dash = state->dash_ui;
     GtkWidget *w = GTK_WIDGET(area);
     if (dash == NULL || width < 60 || height < 60) {
@@ -992,7 +988,7 @@ static void trend_set_stat(SalusDashboardUi *dash, int i, const char *value, con
     gtk_widget_set_opacity(gtk_widget_get_parent(dash->trend_stat_value[i]), caption[0] != '\0' ? 1.0 : 0.0);
 }
 
-static void trend_update_stats(AppState *state, const SalusDayHealthAgg *agg) {
+static void trend_update_stats(SalusApp *state, const SalusDayHealthAgg *agg) {
     SalusDashboardUi *dash = state->dash_ui;
     const TrendSpec *spec = &trend_specs[dash->trend_metric];
     int *values = g_new(int, UI_DAY_MINUTES);
@@ -1104,7 +1100,7 @@ static void on_trend_leave(GtkEventControllerMotion *m, gpointer user_data) {
     gtk_widget_queue_draw(dash->trend_area);
 }
 
-static GtkWidget *build_trend_card(AppState *state, SalusDashboardUi *dash) {
+static GtkWidget *build_trend_card(SalusApp *state, SalusDashboardUi *dash) {
     GtkWidget *inner = NULL;
     GtkWidget *card = ui_card_new(&inner, 12);
     gtk_box_append(GTK_BOX(inner), ui_card_header("Through the Day", &dash->trend_subtitle, NULL));
@@ -1134,7 +1130,7 @@ static GtkWidget *build_trend_card(AppState *state, SalusDashboardUi *dash) {
 }
 
 /* One detail page, reused for every metric: pushed onto the navigation view by a tile. */
-static AdwNavigationPage *build_metric_page(AppState *state, SalusDashboardUi *dash) {
+static AdwNavigationPage *build_metric_page(SalusApp *state, SalusDashboardUi *dash) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
     gtk_widget_add_css_class(box, "salus-page");
     gtk_box_append(GTK_BOX(box), ui_date_nav_new(state, dash));
@@ -1149,7 +1145,7 @@ static AdwNavigationPage *build_metric_page(AppState *state, SalusDashboardUi *d
     return g_object_ref_sink(adw_navigation_page_new_with_tag(tb, trend_specs[0].label, "metric"));
 }
 
-static void show_metric_page(AppState *state, UiSeries s) {
+static void show_metric_page(SalusApp *state, UiSeries s) {
     SalusDashboardUi *dash = state->dash_ui;
     dash->trend_metric = s;
     dash->trend_hover_x = -1;
@@ -1163,7 +1159,7 @@ static void show_metric_page(AppState *state, UiSeries s) {
 }
 
 static void on_tile_clicked(GtkButton *b, gpointer user_data) {
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     const char *id = g_object_get_data(G_OBJECT(b), "salus-tile");
     for (int i = 0; i < UI_SERIES_COUNT; i++) {
         if (g_strcmp0(id, trend_specs[i].name) == 0) {
@@ -1178,7 +1174,7 @@ static void on_tile_clicked(GtkButton *b, gpointer user_data) {
     }
 }
 
-GtkWidget *ui_today_page_new(AppState *state, SalusDashboardUi *dash) {
+GtkWidget *ui_today_page_new(SalusApp *state, SalusDashboardUi *dash) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
     gtk_widget_add_css_class(box, "salus-page");
     gtk_box_append(GTK_BOX(box), ui_date_nav_new(state, dash));
@@ -1216,7 +1212,7 @@ GtkWidget *ui_today_page_new(AppState *state, SalusDashboardUi *dash) {
 }
 
 /* The day's most recent per-minute reading of a series (synced, manual or live-merged); -1 if none. */
-static int last_reading(AppState *state, const gchar *day_key, UiSeries series, int *minute_out) {
+static int last_reading(SalusApp *state, const gchar *day_key, UiSeries series, int *minute_out) {
     int *values = g_new(int, UI_DAY_MINUTES);
     int v = -1;
     *minute_out = -1;
@@ -1244,11 +1240,11 @@ static void last_reading_caption(int minute, const char *extra, gchar *buf, gsiz
     }
 }
 
-static gboolean live_tiles(AppState *state) {
-    return ui_is_connected(state) && state->auth_initialized && ui_viewing_today(state);
+static gboolean live_tiles(SalusApp *state) {
+    return ui_is_connected(state) && ui_viewing_today(state);
 }
 
-void ui_today_refresh(AppState *state) {
+void ui_today_refresh(SalusApp *state) {
     SalusDashboardUi *dash = state->dash_ui;
     if (dash == NULL || dash->rings == NULL) {
         return;
@@ -1398,7 +1394,7 @@ void ui_today_refresh(AppState *state) {
     ui_today_redraw(state);
 }
 
-void ui_today_redraw(AppState *state) {
+void ui_today_redraw(SalusApp *state) {
     SalusDashboardUi *dash = state->dash_ui;
     if (dash == NULL || dash->trend_area == NULL) {
         return;
@@ -1418,13 +1414,13 @@ void ui_today_redraw(AppState *state) {
 /* ======================================================================================== */
 
 static gboolean dashboard_refresh_idle(gpointer user_data) {
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     state->dashboard_refresh_pending = FALSE;
     salus_dashboard_refresh(state);
     return G_SOURCE_REMOVE;
 }
 
-void salus_dashboard_schedule_refresh(AppState *state) {
+void salus_dashboard_schedule_refresh(SalusApp *state) {
     if (state == NULL || state->dash_ui == NULL || state->dashboard_refresh_pending) {
         return;
     }
@@ -1432,7 +1428,7 @@ void salus_dashboard_schedule_refresh(AppState *state) {
     g_idle_add(dashboard_refresh_idle, state);
 }
 
-void salus_dashboard_refresh(AppState *state) {
+void salus_dashboard_refresh(SalusApp *state) {
     if (state == NULL || state->dash_ui == NULL || state->dash_ui->rings == NULL) {
         return;
     }
@@ -1443,7 +1439,7 @@ void salus_dashboard_refresh(AppState *state) {
     salus_dashboard_update_connection(state);
 }
 
-void salus_dashboard_redraw_charts(AppState *state) {
+void salus_dashboard_redraw_charts(SalusApp *state) {
     /* Called for every merged sample batch: coalesce into one refresh on idle. */
     salus_dashboard_schedule_refresh(state);
 }
@@ -1463,7 +1459,7 @@ static gchar *device_status_label_copy(const gchar *kind, const gchar *value) {
     return g_strdup(value);
 }
 
-void salus_dashboard_update_device_state(AppState *state,
+void salus_dashboard_update_device_state(SalusApp *state,
                                           const gchar *charging,
                                           const gchar *wearing,
                                           const gchar *sleep) {
@@ -1485,7 +1481,7 @@ void salus_dashboard_update_device_state(AppState *state,
     ui_device_refresh(state);
 }
 
-void salus_dashboard_set_notification_status(AppState *state, const char *msg) {
+void salus_dashboard_set_notification_status(SalusApp *state, const char *msg) {
     if (state == NULL || state->dash_ui == NULL || state->dash_ui->dev_notif_switch == NULL) {
         return;
     }

@@ -21,7 +21,7 @@
 #define MAX_ACCURACY_M 50.0
 
 typedef struct {
-    AppState *state;
+    SalusApp *state;
     GCancellable *cancel;
     GClueSimple *simple;
     gulong location_handler;
@@ -30,7 +30,7 @@ typedef struct {
 
 static WorkoutGps *s_gps; /* one band connection at a time */
 
-static void send_open_reply(AppState *state, gboolean have_location) {
+static void send_open_reply(SalusApp *state, gboolean have_location) {
     /* Gadgetbridge: 0/2/2 when the phone provides location, 3/2/10 when it has no location
      * permission at all (the band then uses its own GPS only). */
     Xiaomi__WorkoutOpenReply reply = XIAOMI__WORKOUT_OPEN_REPLY__INIT;
@@ -60,7 +60,7 @@ static gboolean location_usable(GClueLocation *loc) {
 
 /* No usable location. By default the app stays silent, as before connected GPS existed: the
  * "no permission" reply makes the band show "grant location permission on your phone". */
-static void reply_unavailable(AppState *state, const char *why) {
+static void reply_unavailable(SalusApp *state, const char *why) {
     const char *mode = state->location_unavailable_reply != NULL ? state->location_unavailable_reply : "none";
     gchar *line = g_strdup_printf("Workout GPS: no usable location on this computer (%s); reply_when_unavailable=%s.",
                                   why, mode);
@@ -171,7 +171,7 @@ static void on_simple_ready(GObject *source, GAsyncResult *res, gpointer user_da
     send_location(g, gclue_simple_get_location(simple));
 }
 
-static void start(AppState *state, uint32_t sport) {
+static void start(SalusApp *state, uint32_t sport) {
     if (s_gps != NULL) {
         /* Already sharing (the band asked again): confirm. Still starting: the answer follows. */
         if (s_gps->simple != NULL) {
@@ -195,7 +195,7 @@ static void start(AppState *state, uint32_t sport) {
                                      on_simple_ready, g);
 }
 
-void salus_workout_gps_stop(AppState *state, const char *reason) {
+void salus_workout_gps_stop(SalusApp *state, const char *reason) {
     WorkoutGps *g = s_gps;
     if (g == NULL) {
         return;
@@ -217,7 +217,7 @@ void salus_workout_gps_stop(AppState *state, const char *reason) {
     g_free(g);
 }
 
-void salus_workout_gps_handle_command(AppState *state, const struct Xiaomi__Command *cmd) {
+void salus_workout_gps_handle_command(SalusApp *state, const struct Xiaomi__Command *cmd) {
     if (state == NULL || cmd == NULL || cmd->type != HEALTH_CMD_TYPE || !cmd->has_subtype || cmd->health == NULL) {
         return;
     }

@@ -18,7 +18,7 @@
 #define BODY_MAX 240
 #define PACKAGE_MAX 64
 
-static void notif_status_update(AppState *state, const char *msg) {
+static void notif_status_update(SalusApp *state, const char *msg) {
     if (state == NULL || msg == NULL) {
         return;
     }
@@ -27,7 +27,7 @@ static void notif_status_update(AppState *state, const char *msg) {
     salus_dashboard_set_notification_status(state, msg);
 }
 
-static void log_desktop_capture(AppState *state, const char *via, const char *app, const char *title) {
+static void log_desktop_capture(SalusApp *state, const char *via, const char *app, const char *title) {
     gchar *line =
         g_strdup_printf("Desktop notify (%s): %s — %s", via, app != NULL ? app : "?", title != NULL ? title : "");
     append_log(state, line);
@@ -178,11 +178,11 @@ static gchar *package_from_app_name(const char *app_name) {
 
 /* Band notification ids only need to be unique per session (the id → package map that used to be
  * kept here was never read and grew by one entry per forwarded notification). */
-static guint32 notification_next_band_id(AppState *state) {
+static guint32 notification_next_band_id(SalusApp *state) {
     return state->notification_next_id++;
 }
 
-static gboolean send_notification3(AppState *state,
+static gboolean send_notification3(SalusApp *state,
                                    guint32 band_id,
                                    const char *package,
                                    const char *app_name,
@@ -190,7 +190,7 @@ static gboolean send_notification3(AppState *state,
                                    const char *body,
                                    gint64 when_unix_sec,
                                    GVariant *notify_hints) {
-    if (state == NULL || !state->auth_initialized || state->sock_fd < 0) {
+    if (state == NULL || !salus_device_connected(state)) {
         return FALSE;
     }
 
@@ -249,7 +249,7 @@ static gboolean send_notification3(AppState *state,
     return ok;
 }
 
-static gboolean salus_notifications_push_at(AppState *state,
+static gboolean salus_notifications_push_at(SalusApp *state,
                                              const char *app_name,
                                              const char *title,
                                              const char *body,
@@ -258,7 +258,7 @@ static gboolean salus_notifications_push_at(AppState *state,
     if (state == NULL || !state->notifications_enabled) {
         return FALSE;
     }
-    if (!state->auth_initialized || state->sock_fd < 0) {
+    if (!salus_device_connected(state)) {
         append_log(state, "Desktop notification captured but not sent (connect band first).");
         return FALSE;
     }
@@ -288,7 +288,7 @@ static gboolean salus_notifications_push_at(AppState *state,
 }
 
 typedef struct {
-    AppState *state;
+    SalusApp *state;
     gchar *app_name;
     gchar *title;
     gchar *body;
@@ -310,7 +310,7 @@ static gboolean notif_push_idle(gpointer user_data) {
     return G_SOURCE_REMOVE;
 }
 
-static void schedule_push(AppState *state,
+static void schedule_push(SalusApp *state,
                           const char *app_name,
                           const char *title,
                           const char *body,
@@ -332,7 +332,7 @@ static void schedule_push(AppState *state,
     g_idle_add(notif_push_idle, ctx);
 }
 
-static void handle_freedesktop_notify(AppState *state, GDBusMessage *message) {
+static void handle_freedesktop_notify(SalusApp *state, GDBusMessage *message) {
     GVariant *params = g_dbus_message_get_body(message);
     if (params == NULL || !g_variant_is_of_type(params, G_VARIANT_TYPE("(susssasa{sv}i)"))) {
         return;
@@ -356,7 +356,7 @@ static void handle_freedesktop_notify(AppState *state, GDBusMessage *message) {
     }
 }
 
-static void handle_portal_add_notification(AppState *state, GDBusMessage *message) {
+static void handle_portal_add_notification(SalusApp *state, GDBusMessage *message) {
     GVariant *params = g_dbus_message_get_body(message);
     if (params == NULL || !g_variant_is_of_type(params, G_VARIANT_TYPE("(sa{sv})"))) {
         return;
@@ -391,7 +391,7 @@ static GDBusMessage *dbus_filter_drop_outgoing(GDBusConnection *connection,
                                                gboolean incoming,
                                                gpointer user_data) {
     (void)connection;
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     if (!incoming && state != NULL && state->notification_monitor_active) {
         return NULL;
     }
@@ -403,7 +403,7 @@ static GDBusMessage *dbus_message_filter(GDBusConnection *connection,
                                          gboolean incoming,
                                          gpointer user_data) {
     (void)connection;
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     if (!incoming || state == NULL || !state->notifications_enabled) {
         return message;
     }
@@ -469,8 +469,8 @@ static gboolean become_notification_monitor(GDBusConnection *conn, GError **erro
     return FALSE;
 }
 
-static void request_screen_on_pref(AppState *state) {
-    if (state == NULL || !state->auth_initialized) {
+static void request_screen_on_pref(SalusApp *state) {
+    if (state == NULL || !salus_device_connected(state)) {
         return;
     }
     Xiaomi__Notification n = XIAOMI__NOTIFICATION__INIT;
@@ -482,7 +482,7 @@ static void request_screen_on_pref(AppState *state) {
     (void)salus_wire_send_xiaomi_command(state, &cmd, "Notification prefs (screen on)");
 }
 
-static void ensure_dbus_listener(AppState *state) {
+static void ensure_dbus_listener(SalusApp *state) {
     if (state == NULL || !state->notifications_enabled || state->notification_bus != NULL) {
         return;
     }
@@ -518,7 +518,7 @@ static void ensure_dbus_listener(AppState *state) {
     append_log(state, "Notification monitor active — dunst Notify + portal AddNotification.");
 }
 
-static void stop_dbus_listener(AppState *state) {
+static void stop_dbus_listener(SalusApp *state) {
     if (state == NULL || state->notification_bus == NULL) {
         return;
     }
@@ -535,7 +535,7 @@ static void stop_dbus_listener(AppState *state) {
     state->notification_bus = NULL;
 }
 
-void salus_notifications_on_connect(AppState *state) {
+void salus_notifications_on_connect(SalusApp *state) {
     if (state == NULL || !state->notifications_enabled) {
         return;
     }
@@ -543,21 +543,21 @@ void salus_notifications_on_connect(AppState *state) {
     request_screen_on_pref(state);
 }
 
-void salus_notifications_on_disconnect(AppState *state) {
+void salus_notifications_on_disconnect(SalusApp *state) {
     if (state == NULL) {
         return;
     }
     state->notification_last_sent_ms = 0;
 }
 
-void salus_notifications_shutdown(AppState *state) {
+void salus_notifications_shutdown(SalusApp *state) {
     if (state == NULL) {
         return;
     }
     stop_dbus_listener(state);
 }
 
-void salus_notifications_handle_command(AppState *state, const Xiaomi__Command *cmd) {
+void salus_notifications_handle_command(SalusApp *state, const Xiaomi__Command *cmd) {
     if (state == NULL || cmd == NULL || cmd->type != NOTIF_CMD_TYPE) {
         return;
     }
@@ -567,14 +567,14 @@ void salus_notifications_handle_command(AppState *state, const Xiaomi__Command *
     }
 }
 
-void salus_notifications_set_enabled(AppState *state, gboolean enabled) {
+void salus_notifications_set_enabled(SalusApp *state, gboolean enabled) {
     if (state == NULL) {
         return;
     }
     state->notifications_enabled = enabled;
     if (enabled) {
         ensure_dbus_listener(state);
-        if (state->auth_initialized && state->sock_fd >= 0) {
+        if (salus_device_connected(state)) {
             request_screen_on_pref(state);
         }
     } else {
@@ -584,7 +584,7 @@ void salus_notifications_set_enabled(AppState *state, gboolean enabled) {
     (void)salus_config_save(state, NULL);
 }
 
-void salus_notifications_send_test(AppState *state) {
+void salus_notifications_send_test(SalusApp *state) {
     if (state == NULL) {
         return;
     }

@@ -3,22 +3,17 @@
 #include "salus/config.h"
 #include "salus/find_phone.h"
 #include "salus/notifications/notifications.h"
-#include "salus/devices/xiaomi/fitness_sync.h"
 #include "salus/devices/xiaomi/weather.h"
 #include "salus/devices/xiaomi/workout_gps.h"
-#include "salus/devices/xiaomi/wire.h"
-#include "salus/devices/xiaomi/wire_internal.h"
 
 #include <string.h>
 
 static void on_connect_clicked(GtkButton *b, gpointer user_data) {
     (void)b;
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     if (ui_is_connected(state)) {
-        disconnect_socket(state);
-        salus_dashboard_set_status(state, "Disconnected");
-        ui_toast(state, "Disconnected from the band");
-        salus_dashboard_refresh(state);
+        salus_device_disconnect(state);
+        ui_toast(state, "Disconnected");
     } else {
         ui_connect_saved(state);
     }
@@ -26,16 +21,15 @@ static void on_connect_clicked(GtkButton *b, gpointer user_data) {
 
 static void on_sync_clicked(GtkButton *b, gpointer user_data) {
     (void)b;
-    AppState *state = user_data;
-    salus_fitness_sync_resync(state);
+    SalusApp *state = user_data;
+    salus_device_sync(state);
     ui_toast(state, "Syncing health data…");
 }
 
 static void on_find_clicked(GtkButton *b, gpointer user_data) {
     (void)b;
-    AppState *state = user_data;
-    ui_toast(state, salus_wire_find_band(state, TRUE) ? "The band is vibrating (about 45 s)"
-                                                       : "Couldn't reach the band");
+    SalusApp *state = user_data;
+    ui_toast(state, salus_device_find(state, TRUE) ? "Your device is vibrating" : "Couldn't reach the device");
 }
 
 static void on_weather_clicked(GtkButton *b, gpointer user_data) {
@@ -51,7 +45,7 @@ static void on_find_phone_stop(GtkButton *b, gpointer user_data) {
 
 static void on_notif_toggled(GObject *obj, GParamSpec *pspec, gpointer user_data) {
     (void)pspec;
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     const gboolean on = adw_switch_row_get_active(ADW_SWITCH_ROW(obj));
     if (on != state->notifications_enabled) {
         salus_notifications_set_enabled(state, on);
@@ -60,7 +54,7 @@ static void on_notif_toggled(GObject *obj, GParamSpec *pspec, gpointer user_data
 
 static void on_share_location_toggled(GObject *obj, GParamSpec *pspec, gpointer user_data) {
     (void)pspec;
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     const gboolean on = adw_switch_row_get_active(ADW_SWITCH_ROW(obj));
     if (on == state->share_location_with_band) {
         return;
@@ -107,7 +101,7 @@ static GtkWidget *action_row(const char *title, const char *subtitle, const char
     return row;
 }
 
-GtkWidget *ui_device_page_new(AppState *state, SalusDashboardUi *dash) {
+GtkWidget *ui_device_page_new(SalusApp *state, SalusDashboardUi *dash) {
     GtkWidget *page = adw_preferences_page_new();
 
     /* Hero */
@@ -245,7 +239,7 @@ static const char *battery_icon(int pct, gboolean charging) {
     return buf;
 }
 
-void ui_device_refresh(AppState *state) {
+void ui_device_refresh(SalusApp *state) {
     SalusDashboardUi *dash = state->dash_ui;
     if (dash == NULL || dash->dev_name == NULL) {
         return;

@@ -60,7 +60,7 @@ static gchar *find_bluez_device_path_by_address(GDBusConnection *system_bus, con
     return found_path;
 }
 
-static gboolean bluez_set_trusted(AppState *state, GDBusConnection *bus, const gchar *device_path, gboolean trusted) {
+static gboolean bluez_set_trusted(SalusApp *state, GDBusConnection *bus, const gchar *device_path, gboolean trusted) {
     GError *error = NULL;
     GVariant *reply = g_dbus_connection_call_sync(
         bus,
@@ -90,7 +90,7 @@ static gboolean bluez_set_trusted(AppState *state, GDBusConnection *bus, const g
     return TRUE;
 }
 
-static gboolean bluez_call_device_method(AppState *state,
+static gboolean bluez_call_device_method(SalusApp *state,
                                          GDBusConnection *bus,
                                          const gchar *device_path,
                                          const gchar *method,
@@ -233,7 +233,7 @@ gchar *bluez_device_display_name(const gchar *address) {
     return result;
 }
 
-gboolean bluez_pair_trust_connect(AppState *state, const gchar *address) {
+gboolean bluez_pair_trust_connect(SalusApp *state, const gchar *address) {
     GError *error = NULL;
     GDBusConnection *bus = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, &error);
     if (bus == NULL) {

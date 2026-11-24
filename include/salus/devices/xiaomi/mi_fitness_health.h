@@ -6,7 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-void mi_fitness_apply_schema_health(AppState *state,
+void mi_fitness_apply_schema_health(SalusApp *state,
                                     uint32_t ts,
                                     int apk_daily_type,
                                     int detail,
@@ -14,7 +14,7 @@ void mi_fitness_apply_schema_health(AppState *state,
                                     const uint8_t *payload,
                                     size_t payload_len);
 
-gboolean mi_fitness_apply_native_health(AppState *state,
+gboolean mi_fitness_apply_native_health(SalusApp *state,
                                         uint32_t ts,
                                         int wire_daily_type,
                                         int detail,

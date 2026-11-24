@@ -51,7 +51,7 @@ static void stop_ring_audio(void) {
     }
 }
 
-static void start_ring_audio(AppState *state) {
+static void start_ring_audio(SalusApp *state) {
     stop_ring_audio();
 
     const char *sound = pick_ring_sound_path();
@@ -86,7 +86,7 @@ static void start_ring_audio(AppState *state) {
     }
 }
 
-static void stop_beep(AppState *state) {
+static void stop_beep(SalusApp *state) {
     if (state == NULL) {
         return;
     }
@@ -94,11 +94,11 @@ static void stop_beep(AppState *state) {
     state->find_phone_active = FALSE;
 }
 
-void salus_find_phone_shutdown(AppState *state) {
+void salus_find_phone_shutdown(SalusApp *state) {
     stop_beep(state);
 }
 
-void salus_find_phone_on_band_request(AppState *state, guint find_device) {
+void salus_find_phone_on_band_request(SalusApp *state, guint find_device) {
     if (state == NULL) {
         return;
     }
@@ -118,7 +118,7 @@ void salus_find_phone_on_band_request(AppState *state, guint find_device) {
     }
 }
 
-void salus_find_phone_dismiss(AppState *state) {
+void salus_find_phone_dismiss(SalusApp *state) {
     if (state == NULL || !state->find_phone_active) {
         return;
     }
@@ -129,6 +129,6 @@ void salus_find_phone_dismiss(AppState *state) {
     salus_dashboard_schedule_refresh(state);
 }
 
-gboolean salus_find_phone_is_active(const AppState *state) {
+gboolean salus_find_phone_is_active(const SalusApp *state) {
     return state != NULL && state->find_phone_active;
 }

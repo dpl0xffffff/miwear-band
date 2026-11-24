@@ -12,6 +12,7 @@
 
 #include "salus/util.h"
 #include "salus/store/db.h"
+#include "salus/device.h"
 
 typedef struct SalusDashboardUi SalusDashboardUi;
 
@@ -34,7 +35,7 @@ typedef struct SalusSportEntry {
 /* Set via UI or ~/.config/salus/config.ini (same salus-auth key as Mi Fitness). */
 #define DEFAULT_AUTH_KEY_HEX ""
 
-typedef struct {
+typedef struct SalusApp {
     AdwApplication *app;
     GtkWidget *window;
     GtkWidget *stack;
@@ -60,51 +61,22 @@ typedef struct {
     gchar *device_status_wearing;
     gchar *device_status_charging;
     gchar *device_status_sleep;
-    gchar auth_key_hex[33];
+
+    /* The active device's driver session (NULL when no device is set up). */
+    SalusDevice *device;
 
     /*
-     * Threading model: every field of AppState is owned by the GTK main thread. The RFCOMM socket
-     * is read from a main-loop fd watch; only the blocking BlueZ/RFCOMM connect runs on a worker
-     * thread, which hands the connected fd back via the main loop (see connect_generation).
+     * Threading model: every field of SalusApp is owned by the GTK main thread; drivers do their
+     * blocking work on worker threads and hand results back via the main loop.
      * Exceptions: append_log()/set_status()/set_connect_busy() are safe from any thread.
      */
-    int sock_fd;
-    guint rx_watch_id;
-    guint connect_generation;
 
-    uint8_t phone_nonce[16];
-    uint8_t watch_nonce[16];
-    uint8_t decryption_key[16];
-    uint8_t encryption_key[16];
-    uint8_t decryption_nonce[4];
-    uint8_t encryption_nonce[4];
-    gboolean auth_initialized;
-    uint8_t spp_v2_seq;
-    GByteArray *rx_accumulator;
-    GByteArray *activity_chunk_accumulator;
-    GQueue *activity_fetch_queue;
-    GHashTable *activity_fetch_seen;
-    gboolean activity_fetch_inflight;
-    uint8_t activity_fetch_current_id[7];
-    guint activity_fetch_timeout_source_id;
     GHashTable *recorded_days;
     /* day key "YYYY-MM-DD" -> SalusDailySummaryRow*, the band's own per-day totals. */
     GHashTable *daily_summaries;
     guint recorded_rebuild_source_id;
     GMutex recorded_lock;
-    int protocol_version;
-    guint activity_refetch_source_id;
-    guint activity_refetch_round;
-    guint activity_live_poll_source_id;
-    guint activity_live_poll_round;
-    gboolean activity_past_requested;
-    gboolean sleep_hint_logged;
-    gboolean manual_stress_probe_done;
-    uint8_t manual_listed_file_id[7];
-    gboolean manual_listed_file_id_valid;
     gboolean populate_devices_busy;
-    gboolean verbose_wire_log;
-    gboolean verbose_fetch_log;
     GQueue *log_queue;
     GMutex log_lock;
     guint log_flush_id;
@@ -137,7 +109,6 @@ typedef struct {
     gboolean dashboard_refresh_pending;
 
     gboolean find_phone_active;
-    guint find_band_stop_source;
 
     gboolean notifications_enabled;
     gboolean share_location_with_band; /* send this computer's location during outdoor workouts */
@@ -153,7 +124,7 @@ typedef struct {
 
     GCancellable *weather_cancellable;
     gboolean weather_fetch_inflight;
-} AppState;
+} SalusApp;
 
 typedef struct {
     uint16_t minute_of_day;
@@ -169,20 +140,13 @@ typedef struct {
     int intensity; /* per-minute activeStreng (3 moderate, 4 high, 5 intense); 0 when still or unknown */
 } RecordedSample;
 
-typedef struct {
-    AppState *state;
-    bdaddr_t bdaddr;
-    gchar *normalized;
-    guint generation;
-} ConnectTask;
-
-void append_log(AppState *state, const gchar *line);
-void set_status(AppState *state, const gchar *status);
-void set_connect_busy(AppState *state, gboolean busy);
-void switch_to_dashboard(AppState *state);
-void switch_to_pairing(AppState *state);
+void append_log(SalusApp *state, const gchar *line);
+void set_status(SalusApp *state, const gchar *status);
+void set_connect_busy(SalusApp *state, gboolean busy);
+void switch_to_dashboard(SalusApp *state);
+void switch_to_pairing(SalusApp *state);
 /* Safe from background threads (SPP reader); posts work to the GTK main loop. */
-void schedule_switch_to_dashboard(AppState *state);
+void schedule_switch_to_dashboard(SalusApp *state);
 /* Values the band pushed while connected; unset fields are left as they were. Main thread. */
 typedef struct {
     gboolean has_hr;
@@ -192,21 +156,21 @@ typedef struct {
     gboolean has_battery;
     guint battery;
 } SalusLiveMetrics;
-void salus_live_metrics_update(AppState *state, const SalusLiveMetrics *m);
-void schedule_state_update(AppState *state, const gchar *charging, const gchar *wearing, const gchar *sleep);
-void recorded_store_samples_for_day_key(AppState *state, const gchar *day_key, const RecordedSample *samples, size_t count);
+void salus_live_metrics_update(SalusApp *state, const SalusLiveMetrics *m);
+void schedule_state_update(SalusApp *state, const gchar *charging, const gchar *wearing, const gchar *sleep);
+void recorded_store_samples_for_day_key(SalusApp *state, const gchar *day_key, const RecordedSample *samples, size_t count);
 /* Day-bucketed batch of per-minute sleep samples for the recorded timelines. */
 typedef struct RecordedBatch RecordedBatch;
 RecordedBatch *recorded_batch_new(void);
 void recorded_batch_add_sleep_minute(RecordedBatch *batch, gint64 unix_sec, int stage);
 /* Hands the samples to the timelines (merged on the next idle) and frees the batch. */
-void recorded_batch_commit(AppState *state, RecordedBatch *batch);
-void recorded_store_daily_details(AppState *state, uint32_t ts, const RecordedSample *samples, size_t count);
-void recorded_merge_xiaomi_activity_rows(AppState *state, const SalusXiaomiActivityRow *rows, size_t count);
-void health_apply_daily_summary(AppState *state, const SalusDailySummaryRow *row);
-void recorded_rebuild_from_db(AppState *state);
+void recorded_batch_commit(SalusApp *state, RecordedBatch *batch);
+void recorded_store_daily_details(SalusApp *state, uint32_t ts, const RecordedSample *samples, size_t count);
+void recorded_merge_xiaomi_activity_rows(SalusApp *state, const SalusXiaomiActivityRow *rows, size_t count);
+void health_apply_daily_summary(SalusApp *state, const SalusDailySummaryRow *row);
+void recorded_rebuild_from_db(SalusApp *state);
 /* Coalesced rebuild on the next idle (several requests before it runs → one rebuild). */
-void recorded_schedule_rebuild(AppState *state);
+void recorded_schedule_rebuild(SalusApp *state);
 
 gchar *format_hex(const uint8_t *data, size_t len);
 gboolean looks_printable(const uint8_t *data, size_t len);
@@ -242,9 +206,8 @@ gboolean pb_read_varint(const uint8_t *buf, size_t len, size_t *idx, uint64_t *o
 gboolean pb_skip_field(const uint8_t *buf, size_t len, size_t *idx, uint32_t wire_type);
 void summarize_pb_message(const ProtobufCMessage *msg, GString *out, int depth);
 
-gboolean bluez_pair_trust_connect(AppState *state, const gchar *address);
+gboolean bluez_pair_trust_connect(SalusApp *state, const gchar *address);
 gchar *bluez_device_display_name(const gchar *address);
 
-gboolean parse_mac(const gchar *input, bdaddr_t *out_bdaddr, gchar **normalized);
 
 #endif /* SALUS_APP_H */

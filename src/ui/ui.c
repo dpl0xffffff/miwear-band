@@ -1,7 +1,6 @@
 #include "salus/app.h"
 #include "salus/config.h"
-#include "salus/devices/xiaomi/fitness_sync.h"
-#include "salus/devices/xiaomi/wire.h"
+#include "salus/devices/xiaomi/xiaomi.h"
 #include "salus/ui/ui.h"
 #include "salus/store/workout.h"
 #include "salus/notifications/notifications.h"
@@ -29,19 +28,19 @@
 #include "xiaomi.pb-c.h"
 
 typedef struct {
-    AppState *state;
+    SalusApp *state;
     gchar *status;
 } UiStatusLine;
 
 typedef struct {
-    AppState *state;
+    SalusApp *state;
     gchar *charging_text;
     gchar *wearing_text;
     gchar *sleep_text;
 } UiStateUpdate;
 
 typedef struct {
-    AppState *state;
+    SalusApp *state;
     gboolean busy;
 } UiBusyState;
 
@@ -51,13 +50,16 @@ static void ui_set_sensitive_if_widget(GtkWidget *widget, gboolean sensitive) {
     }
 }
 
-gboolean salus_ui_has_saved_device(AppState *state) {
-    uint8_t key[16];
-    return state != NULL && state->selected_address != NULL && state->selected_address[0] != '\0' &&
-           hex_to_bytes16(state->auth_key_hex, key);
+gboolean salus_ui_has_saved_device(SalusApp *state) {
+    return state != NULL && state->device != NULL;
 }
 
-static void setup_update_connect_sensitivity(AppState *state) {
+static const char *saved_auth_key(SalusApp *state) {
+    const char *key = salus_device_config_get(state->device != NULL ? state->device->config : NULL, "auth_key");
+    return key != NULL ? key : "";
+}
+
+static void setup_update_connect_sensitivity(SalusApp *state) {
     if (state->setup_connect_button == NULL || state->entry_authkey == NULL) {
         return;
     }
@@ -75,7 +77,7 @@ static void setup_update_connect_sensitivity(AppState *state) {
 }
 
 static void on_device_check_toggled(GtkCheckButton *check, gpointer user_data) {
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     if (!gtk_check_button_get_active(check)) {
         return;
     }
@@ -91,7 +93,7 @@ static void on_authkey_changed(GtkEditable *e, gpointer user_data) {
 
 static void on_setup_connect(GtkButton *b, gpointer user_data) {
     (void)b;
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     if (state->pairing_selected_address != NULL) {
         gchar *addr = g_strdup(state->pairing_selected_address);
         start_connect_for_address(state, addr);
@@ -99,14 +101,14 @@ static void on_setup_connect(GtkButton *b, gpointer user_data) {
     }
 }
 
-static void populate_device_list(AppState *state);
+static void populate_device_list(SalusApp *state);
 
 static void on_setup_refresh(GtkButton *b, gpointer user_data) {
     (void)b;
     populate_device_list(user_data);
 }
 
-static void populate_device_list(AppState *state) {
+static void populate_device_list(SalusApp *state) {
     if (state->listbox_devices == NULL || state->populate_devices_busy) {
         return;
     }
@@ -207,12 +209,12 @@ static void populate_device_list(AppState *state) {
 
 static void on_setup_cancel(GtkButton *b, gpointer user_data) {
     (void)b;
-    AppState *state = user_data;
-    gtk_editable_set_text(GTK_EDITABLE(state->entry_authkey), state->auth_key_hex);
+    SalusApp *state = user_data;
+    gtk_editable_set_text(GTK_EDITABLE(state->entry_authkey), saved_auth_key(state));
     gtk_stack_set_visible_child_name(GTK_STACK(state->stack), "main");
 }
 
-static GtkWidget *build_setup_page(AppState *state) {
+static GtkWidget *build_setup_page(SalusApp *state) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 24);
     gtk_widget_add_css_class(box, "salus-page");
     gtk_widget_set_margin_top(box, 12);
@@ -260,7 +262,7 @@ static GtkWidget *build_setup_page(AppState *state) {
         ADW_PREFERENCES_GROUP(auth), "32 hexadecimal characters. The README explains how to get it from Mi Fitness.");
     state->entry_authkey = adw_password_entry_row_new();
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(state->entry_authkey), "Auth Key");
-    gtk_editable_set_text(GTK_EDITABLE(state->entry_authkey), state->auth_key_hex);
+    gtk_editable_set_text(GTK_EDITABLE(state->entry_authkey), saved_auth_key(state));
     g_signal_connect(state->entry_authkey, "changed", G_CALLBACK(on_authkey_changed), state);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(auth), state->entry_authkey);
     gtk_box_append(GTK_BOX(box), auth);
@@ -297,12 +299,12 @@ static GtkWidget *build_setup_page(AppState *state) {
     return tb;
 }
 
-void salus_ui_show_setup(AppState *state) {
+void salus_ui_show_setup(SalusApp *state) {
     if (state == NULL || state->stack == NULL) {
         return;
     }
     gtk_widget_set_visible(state->setup_cancel_button, salus_ui_has_saved_device(state));
-    gtk_editable_set_text(GTK_EDITABLE(state->entry_authkey), state->auth_key_hex);
+    gtk_editable_set_text(GTK_EDITABLE(state->entry_authkey), saved_auth_key(state));
     gtk_stack_set_visible_child_name(GTK_STACK(state->stack), "setup");
     populate_device_list(state);
 }
@@ -310,7 +312,7 @@ void salus_ui_show_setup(AppState *state) {
 #define APP_LOG_MAX_CHARS 300000
 
 static gboolean ui_flush_log_queue_idle(gpointer user_data) {
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     g_mutex_lock(&state->log_lock);
     GQueue *lines = state->log_queue;
     state->log_queue = NULL;
@@ -344,7 +346,7 @@ static gboolean ui_flush_log_queue_idle(gpointer user_data) {
     return G_SOURCE_REMOVE;
 }
 
-void append_log(AppState *state, const gchar *line) {
+void append_log(SalusApp *state, const gchar *line) {
     if (line == NULL) return;
     g_mutex_lock(&state->log_lock);
     if (state->log_queue == NULL) {
@@ -370,7 +372,7 @@ static gboolean ui_set_status_cb(gpointer user_data) {
 
 static gboolean ui_set_busy_cb(gpointer user_data) {
     UiBusyState *ctx = user_data;
-    AppState *state = ctx->state;
+    SalusApp *state = ctx->state;
     ui_set_sensitive_if_widget(state->btn_refresh, !ctx->busy);
     ui_set_sensitive_if_widget(state->listbox_devices, !ctx->busy);
     ui_set_sensitive_if_widget(state->entry_authkey, !ctx->busy);
@@ -383,21 +385,21 @@ static gboolean ui_set_busy_cb(gpointer user_data) {
     return G_SOURCE_REMOVE;
 }
 
-void set_connect_busy(AppState *state, gboolean busy) {
+void set_connect_busy(SalusApp *state, gboolean busy) {
     UiBusyState *ctx = g_new0(UiBusyState, 1);
     ctx->state = state;
     ctx->busy = busy;
     g_idle_add(ui_set_busy_cb, ctx);
 }
 
-void set_status(AppState *state, const gchar *status) {
+void set_status(SalusApp *state, const gchar *status) {
     UiStatusLine *ctx = g_new0(UiStatusLine, 1);
     ctx->state = state;
     ctx->status = g_strdup(status);
     g_idle_add(ui_set_status_cb, ctx);
 }
 
-void salus_live_metrics_update(AppState *state, const SalusLiveMetrics *m) {
+void salus_live_metrics_update(SalusApp *state, const SalusLiveMetrics *m) {
     if (m->has_hr) {
         state->live_hr = m->hr;
         state->has_live_hr = TRUE;
@@ -422,7 +424,7 @@ static gboolean ui_update_state_cb(gpointer user_data) {
     return G_SOURCE_REMOVE;
 }
 
-void schedule_state_update(AppState *state, const gchar *charging, const gchar *wearing, const gchar *sleep) {
+void schedule_state_update(SalusApp *state, const gchar *charging, const gchar *wearing, const gchar *sleep) {
     UiStateUpdate *u = g_new0(UiStateUpdate, 1);
     u->state = state;
     u->charging_text = charging ? g_strdup(charging) : NULL;
@@ -457,19 +459,19 @@ static GArray *recorded_create_day_array(void) {
     return arr;
 }
 
-static void recorded_refresh_ui(AppState *state) {
+static void recorded_refresh_ui(SalusApp *state) {
     salus_dashboard_redraw_charts(state);
 }
 
 typedef struct {
-    AppState *state;
+    SalusApp *state;
     gchar *day_key;
     GArray *samples;
 } RecordedStoreCtx;
 
 static gboolean ui_recorded_store_cb(gpointer user_data) {
     RecordedStoreCtx *ctx = user_data;
-    AppState *state = ctx->state;
+    SalusApp *state = ctx->state;
 
     g_mutex_lock(&state->recorded_lock);
     if (state->recorded_days == NULL) {
@@ -505,7 +507,7 @@ static gboolean ui_recorded_store_cb(gpointer user_data) {
     return G_SOURCE_REMOVE;
 }
 
-void recorded_store_samples_for_day_key(AppState *state, const gchar *day_key, const RecordedSample *samples, size_t count) {
+void recorded_store_samples_for_day_key(SalusApp *state, const gchar *day_key, const RecordedSample *samples, size_t count) {
     if (samples == NULL || count == 0 || day_key == NULL) return;
     GArray *arr = g_array_sized_new(FALSE, FALSE, sizeof(RecordedSample), (guint)count);
     g_array_append_vals(arr, samples, (guint)count);
@@ -516,7 +518,7 @@ void recorded_store_samples_for_day_key(AppState *state, const gchar *day_key, c
     g_idle_add(ui_recorded_store_cb, ctx);
 }
 
-void recorded_store_daily_details(AppState *state, uint32_t ts, const RecordedSample *samples, size_t count) {
+void recorded_store_daily_details(SalusApp *state, uint32_t ts, const RecordedSample *samples, size_t count) {
     if (samples == NULL || count == 0) return;
     gchar *day_key = salus_local_day_key((gint64)ts);
     if (day_key == NULL) return;
@@ -524,7 +526,7 @@ void recorded_store_daily_details(AppState *state, uint32_t ts, const RecordedSa
     g_free(day_key);
 }
 
-static void flush_recorded_day_buckets(AppState *state, GHashTable *by_day) {
+static void flush_recorded_day_buckets(SalusApp *state, GHashTable *by_day) {
     GHashTableIter it;
     gpointer k, v;
     g_hash_table_iter_init(&it, by_day);
@@ -568,7 +570,7 @@ void recorded_batch_add_sleep_minute(RecordedBatch *b, gint64 unix_sec, int stag
     g_array_append_val(bucket, s);
 }
 
-void recorded_batch_commit(AppState *state, RecordedBatch *b) {
+void recorded_batch_commit(SalusApp *state, RecordedBatch *b) {
     if (b == NULL) {
         return;
     }
@@ -578,7 +580,7 @@ void recorded_batch_commit(AppState *state, RecordedBatch *b) {
     g_free(b);
 }
 
-void recorded_merge_xiaomi_activity_rows(AppState *state, const SalusXiaomiActivityRow *rows, size_t count) {
+void recorded_merge_xiaomi_activity_rows(SalusApp *state, const SalusXiaomiActivityRow *rows, size_t count) {
     if (state == NULL || rows == NULL || count == 0) {
         return;
     }
@@ -623,7 +625,7 @@ static GHashTable *daily_summary_table_new(void) {
 }
 
 /* Stores the band's summary for its local day. Main thread only (the dashboard reads it there). */
-void health_apply_daily_summary(AppState *state, const SalusDailySummaryRow *row) {
+void health_apply_daily_summary(SalusApp *state, const SalusDailySummaryRow *row) {
     if (state == NULL || row == NULL || row->timestamp_ms <= 0) {
         return;
     }
@@ -646,7 +648,7 @@ typedef struct {
 } RebuildSleepSession;
 
 typedef struct {
-    AppState *state;
+    SalusApp *state;
     GHashTable *days;
     GHashTable *summaries;
     GArray *sleep_stage_markers;
@@ -892,7 +894,7 @@ static gboolean rebuild_sleep_time_cb(const SalusSleepTimeRow *r, gpointer user_
 }
 
 /* Rebuilds the per-minute day timelines from SQLite. Main thread only. */
-void recorded_rebuild_from_db(AppState *state) {
+void recorded_rebuild_from_db(SalusApp *state) {
     if (state == NULL || state->selected_address == NULL || state->selected_address[0] == '\0') {
         return;
     }
@@ -940,21 +942,21 @@ void recorded_rebuild_from_db(AppState *state) {
 }
 
 static gboolean recorded_rebuild_idle_cb(gpointer user_data) {
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     state->recorded_rebuild_source_id = 0;
     recorded_rebuild_from_db(state);
     salus_dashboard_schedule_refresh(state);
     return G_SOURCE_REMOVE;
 }
 
-void recorded_schedule_rebuild(AppState *state) {
+void recorded_schedule_rebuild(SalusApp *state) {
     if (state == NULL || state->recorded_rebuild_source_id != 0) {
         return; /* a pending rebuild will read everything written to the DB before it runs */
     }
     state->recorded_rebuild_source_id = g_idle_add(recorded_rebuild_idle_cb, state);
 }
 
-static void show_main(AppState *state) {
+static void show_main(SalusApp *state) {
     recorded_rebuild_from_db(state);
     salus_sport_load_from_db(state);
     if (state->stack != NULL) {
@@ -965,7 +967,7 @@ static void show_main(AppState *state) {
 }
 
 /* Auth succeeded: the band is connected. */
-void switch_to_dashboard(AppState *state) {
+void switch_to_dashboard(SalusApp *state) {
     show_main(state);
     gchar *msg = g_strdup_printf("Connected to %s",
                                  state->device_display_name != NULL ? state->device_display_name : "the band");
@@ -974,11 +976,11 @@ void switch_to_dashboard(AppState *state) {
 }
 
 static gboolean idle_switch_to_dashboard(gpointer user_data) {
-    switch_to_dashboard((AppState *)user_data);
+    switch_to_dashboard((SalusApp *)user_data);
     return G_SOURCE_REMOVE;
 }
 
-void schedule_switch_to_dashboard(AppState *state) {
+void schedule_switch_to_dashboard(SalusApp *state) {
     if (state == NULL) {
         return;
     }
@@ -986,7 +988,7 @@ void schedule_switch_to_dashboard(AppState *state) {
 }
 
 /* Connection lost: saved data stays browsable; only fall back to setup without a saved band. */
-void switch_to_pairing(AppState *state) {
+void switch_to_pairing(SalusApp *state) {
     if (salus_ui_has_saved_device(state)) {
         salus_dashboard_toast(state, "Connection to the band was lost");
         salus_dashboard_schedule_refresh(state);
@@ -996,7 +998,7 @@ void switch_to_pairing(AppState *state) {
 }
 
 /* BlueZ's name for the selected band, else its address. */
-static void update_device_display_name(AppState *state) {
+static void update_device_display_name(SalusApp *state) {
     if (state->selected_address == NULL || state->selected_address[0] == '\0') {
         return;
     }
@@ -1008,76 +1010,33 @@ static void update_device_display_name(AppState *state) {
     }
 }
 
-void start_connect_for_address(AppState *state, const gchar *raw_address) {
-    set_connect_busy(state, TRUE);
-    disconnect_socket(state);
-
+void start_connect_for_address(SalusApp *state, const gchar *raw_address) {
     if (raw_address == NULL || raw_address[0] == '\0') {
         set_status(state, "No device selected.");
-        set_connect_busy(state, FALSE);
         return;
     }
-
-    const gchar *auth_text = NULL;
-    if (state->entry_authkey != NULL) {
-        auth_text = gtk_editable_get_text(GTK_EDITABLE(state->entry_authkey));
-    }
-    if (auth_text == NULL || !hex_to_bytes16(auth_text, (uint8_t[16]){0})) {
+    const gchar *auth_text = state->entry_authkey != NULL ? gtk_editable_get_text(GTK_EDITABLE(state->entry_authkey)) : NULL;
+    if (!xiaomi_auth_key_valid(auth_text)) {
         set_status(state, "Invalid auth key. Enter 32 hex chars.");
-        set_connect_busy(state, FALSE);
         return;
     }
-    g_strlcpy(state->auth_key_hex, auth_text, sizeof(state->auth_key_hex));
-
-    bdaddr_t bdaddr = {0};
-    gchar *normalized = NULL;
-    if (!parse_mac(raw_address, &bdaddr, &normalized)) {
-        set_status(state, "Invalid address format. Use AA:BB:CC:DD:EE:FF");
-        set_connect_busy(state, FALSE);
-        return;
-    }
-
-    g_free(state->selected_address);
-    state->selected_address = g_strdup(normalized);
+    gchar *address = g_ascii_strup(raw_address, -1);
+    SalusDeviceConfig *cfg = salus_device_config_new(address, "xiaomi-band");
+    salus_device_config_set(cfg, "auth_key", auth_text);
+    g_free(address);
+    salus_app_set_device(state, cfg);
     update_device_display_name(state);
     salus_dashboard_update_device_state(state, NULL, NULL, NULL);
     (void)salus_config_save(state, NULL);
-
-    ConnectTask *task = g_new0(ConnectTask, 1);
-    task->state = state;
-    task->bdaddr = bdaddr;
-    task->normalized = normalized;
-    task->generation = state->connect_generation; /* bumped by disconnect_socket() above */
-    g_thread_unref(g_thread_new("connect-worker", connect_worker_main, task));
+    salus_device_connect(state);
 }
 
 void salus_app_shutdown(GApplication *app, gpointer user_data) {
     (void)app;
-    AppState *state = user_data;
-    if (state->activity_refetch_source_id != 0) {
-        g_source_remove(state->activity_refetch_source_id);
-        state->activity_refetch_source_id = 0;
-    }
-    if (state->activity_live_poll_source_id != 0) {
-        g_source_remove(state->activity_live_poll_source_id);
-        state->activity_live_poll_source_id = 0;
-    }
+    SalusApp *state = user_data;
     salus_find_phone_shutdown(state);
     salus_weather_shutdown(state);
-    if (state->find_band_stop_source != 0) {
-        g_source_remove(state->find_band_stop_source);
-        state->find_band_stop_source = 0;
-    }
-    reset_activity_fetch_state(state);
-    if (state->activity_fetch_queue != NULL) {
-        g_queue_free(state->activity_fetch_queue);
-        state->activity_fetch_queue = NULL;
-    }
-    if (state->activity_fetch_seen != NULL) {
-        g_hash_table_unref(state->activity_fetch_seen);
-        state->activity_fetch_seen = NULL;
-    }
-    disconnect_socket(state);
+    salus_app_set_device(state, NULL); /* disconnects and frees the driver session */
     if (state->log_flush_id != 0) {
         g_source_remove(state->log_flush_id);
         state->log_flush_id = 0;
@@ -1129,7 +1088,7 @@ void salus_app_shutdown(GApplication *app, gpointer user_data) {
 }
 
 void salus_activate(GApplication *application, gpointer user_data) {
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     if (state->window != NULL) {
         gtk_window_present(GTK_WINDOW(state->window));
         return;

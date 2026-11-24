@@ -58,7 +58,7 @@ static int json_optional_int(JsonObject *obj, const char *key) {
     return (int)json_object_get_int_member(obj, key);
 }
 
-static void apply_daily_activity_record_schema(AppState *state, JsonNode *decoded, uint32_t ts) {
+static void apply_daily_activity_record_schema(SalusApp *state, JsonNode *decoded, uint32_t ts) {
     const guint pressure_points = salus_apply_pressure_from_activity_record_json(state, decoded, ts);
     const guint moderate_min = salus_count_moderate_activity_minutes_json(decoded);
 
@@ -73,7 +73,7 @@ static void apply_daily_activity_record_schema(AppState *state, JsonNode *decode
     }
 }
 
-static void apply_daily_activity_report_schema(AppState *state, JsonNode *decoded) {
+static void apply_daily_activity_report_schema(SalusApp *state, JsonNode *decoded) {
     JsonObject *hdr = decoded_header(decoded);
     JsonObject *body = decoded_body(decoded);
     if (body == NULL) {
@@ -146,7 +146,7 @@ static void apply_daily_activity_report_schema(AppState *state, JsonNode *decode
     g_free(line);
 }
 
-static void apply_full_day_sleep_schema(AppState *state,
+static void apply_full_day_sleep_schema(SalusApp *state,
                                         JsonObject *body,
                                         const uint8_t *payload,
                                         size_t payload_len) {
@@ -173,7 +173,7 @@ static void apply_full_day_sleep_schema(AppState *state,
     (void)payload_len;
 }
 
-static void log_abnormal_schema(AppState *state, JsonObject *body) {
+static void log_abnormal_schema(SalusApp *state, JsonObject *body) {
     if (body == NULL) {
         return;
     }
@@ -188,7 +188,7 @@ static void log_abnormal_schema(AppState *state, JsonObject *body) {
     g_free(line);
 }
 
-void mi_fitness_apply_schema_health(AppState *state,
+void mi_fitness_apply_schema_health(SalusApp *state,
                                     uint32_t ts,
                                     int apk_daily_type,
                                     int detail,
@@ -262,7 +262,7 @@ static gboolean native_split(const uint8_t *payload,
     return mi_fitness_split_native_payload(payload, wire_len, id_out, slice);
 }
 
-static void log_field_values(AppState *state, const char *tag, const MiFitnessFieldValue *values, size_t n) {
+static void log_field_values(SalusApp *state, const char *tag, const MiFitnessFieldValue *values, size_t n) {
     GString *s = g_string_new(tag);
     g_string_append(s, ":");
     for (size_t i = 0; i < n; i++) {
@@ -279,7 +279,7 @@ static void log_field_values(AppState *state, const char *tag, const MiFitnessFi
     g_string_free(s, TRUE);
 }
 
-gboolean mi_fitness_apply_native_health(AppState *state,
+gboolean mi_fitness_apply_native_health(SalusApp *state,
                                         uint32_t ts,
                                         int wire_daily_type,
                                         int detail,

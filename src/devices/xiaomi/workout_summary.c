@@ -557,7 +557,7 @@ gboolean salus_parse_workout_summary(const uint8_t *payload,
     return FALSE;
 }
 
-static void log_walk_summary(AppState *state, const SalusWorkoutSummary *sum, int version) {
+static void log_walk_summary(SalusApp *state, const SalusWorkoutSummary *sum, int version) {
     if (sum == NULL || !sum->has_walk_detail) {
         return;
     }
@@ -579,7 +579,7 @@ static void log_walk_summary(AppState *state, const SalusWorkoutSummary *sum, in
     g_free(line);
 }
 
-static void log_swim_summary(AppState *state, const SalusWorkoutSummary *sum, int version) {
+static void log_swim_summary(SalusApp *state, const SalusWorkoutSummary *sum, int version) {
     if (sum == NULL || !sum->has_swim_detail) {
         return;
     }
@@ -611,7 +611,7 @@ const char *xiaomi_sport_name(int subtype) {
     return name != NULL ? name : "Workout";
 }
 
-void salus_apply_workout_file(AppState *state,
+void salus_apply_workout_file(SalusApp *state,
                                uint32_t file_ts,
                                int subtype,
                                int detail,

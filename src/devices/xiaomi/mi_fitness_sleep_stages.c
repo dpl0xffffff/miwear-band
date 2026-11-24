@@ -34,7 +34,7 @@ static const uint8_t *mi_fitness_sleep_src_bytes(const uint8_t *full_payload,
     return feature_data;
 }
 
-static void persist_stage_timeline(AppState *state,
+static void persist_stage_timeline(SalusApp *state,
                                    const SalusSleepStageRow *rows,
                                    size_t n,
                                    int deep_min,
@@ -73,7 +73,7 @@ static void persist_stage_timeline(AppState *state,
     }
 }
 
-void mi_fitness_apply_sleep_stages_from_feature(AppState *state,
+void mi_fitness_apply_sleep_stages_from_feature(SalusApp *state,
                                                 const uint8_t *full_payload,
                                                 size_t full_payload_len,
                                                 int version,

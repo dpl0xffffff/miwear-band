@@ -1,3 +1,4 @@
+#include "salus/devices/xiaomi/xiaomi.h"
 #include "salus/devices/xiaomi/fitness_sync.h"
 #include "salus/notifications/notifications.h"
 #include "salus/devices/xiaomi/wire_internal.h"
@@ -14,8 +15,8 @@
  * Transport/auth: com.xiaomi.wearable.spp + wear.api.WearAuthV2 (salus-auth), same protobuf Command.
  */
 
-void salus_fitness_sync_on_auth(AppState *state) {
-    if (!state->auth_initialized || state->sock_fd < 0) {
+void salus_fitness_sync_on_auth(SalusApp *state) {
+    if (!xiaomi(state)->auth_initialized || xiaomi(state)->sock_fd < 0) {
         return;
     }
     /* No rebuild here: switch_to_dashboard() (queued just before this on auth) already rebuilt
@@ -27,19 +28,19 @@ void salus_fitness_sync_on_auth(AppState *state) {
 }
 
 static gboolean fitness_sync_on_auth_idle(gpointer user_data) {
-    salus_fitness_sync_on_auth((AppState *)user_data);
+    salus_fitness_sync_on_auth((SalusApp *)user_data);
     return G_SOURCE_REMOVE;
 }
 
-void salus_fitness_sync_on_auth_async(AppState *state) {
+void salus_fitness_sync_on_auth_async(SalusApp *state) {
     if (state == NULL) {
         return;
     }
     g_idle_add(fitness_sync_on_auth_idle, state);
 }
 
-void salus_fitness_sync_resync(AppState *state) {
-    if (!state->auth_initialized) {
+void salus_fitness_sync_resync(SalusApp *state) {
+    if (!xiaomi(state)->auth_initialized) {
         append_log(state, "History fetch needs authenticated session.");
         return;
     }

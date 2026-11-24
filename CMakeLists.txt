@@ -36,6 +36,9 @@ add_executable(salus
     src/main.c
     src/core/config.c
     src/core/migrate.c
+    src/core/device.c
+    src/devices/registry.c
+    src/devices/xiaomi/driver.c
     src/core/local_time.c
     src/core/profile.c
     src/core/find_phone.c

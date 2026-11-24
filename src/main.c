@@ -14,18 +14,13 @@
 #include <adwaita.h>
 
 int main(int argc, char **argv) {
-    AppState state = {0};
-    state.sock_fd = -1;
+    SalusApp state = {0};
     state.goal_moving = 30;
-    state.auth_key_hex[0] = '\0';
-    state.verbose_wire_log = (g_getenv("SALUS_VERBOSE_WIRE_LOG") != NULL);
-    state.verbose_fetch_log = (g_getenv("SALUS_FETCH_DEBUG") != NULL);
     g_mutex_init(&state.recorded_lock);
     g_mutex_init(&state.log_lock);
 
     salus_migrate_legacy_files();
     if (!salus_config_load(&state, NULL)) {
-        g_strlcpy(state.auth_key_hex, DEFAULT_AUTH_KEY_HEX, sizeof(state.auth_key_hex));
         state.notifications_enabled = TRUE;
         state.notifications_min_interval_ms = 3000;
         state.notification_next_id = 1;

@@ -10,7 +10,7 @@
 
 /* Mi Fitness: AllDaySleepSchemaParser → featureData → splitAllDaySleepBytes → MiDevSleepAlgo.parseSleep. */
 
-void mi_fitness_apply_sleep_stages_from_feature(AppState *state,
+void mi_fitness_apply_sleep_stages_from_feature(SalusApp *state,
                                                 const uint8_t *full_payload,
                                                 size_t full_payload_len,
                                                 int version,

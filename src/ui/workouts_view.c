@@ -9,7 +9,7 @@
 /* Sport entry model (backend-facing API)                                                   */
 /* ======================================================================================== */
 
-static SalusSportEntry *sport_find_entry(AppState *state, uint32_t ts, int subtype) {
+static SalusSportEntry *sport_find_entry(SalusApp *state, uint32_t ts, int subtype) {
     for (GList *l = state != NULL ? state->sport_entries : NULL; l != NULL; l = l->next) {
         SalusSportEntry *e = l->data;
         if (e->ts_sec == ts && e->sport_subtype == subtype) {
@@ -46,7 +46,7 @@ static int sport_entry_time_cmp(gconstpointer a, gconstpointer b) {
     return ta > tb ? -1 : ta < tb ? 1 : 0;
 }
 
-void salus_sport_entries_clear(AppState *state) {
+void salus_sport_entries_clear(SalusApp *state) {
     if (state == NULL) {
         return;
     }
@@ -73,7 +73,7 @@ void salus_sport_entries_clear(AppState *state) {
 }
 
 static gboolean sport_load_row_cb(const SalusDbSportWorkoutRow *row, gpointer user_data) {
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     if (state == NULL || row == NULL || row->detail_json == NULL) {
         return TRUE;
     }
@@ -106,7 +106,7 @@ static gboolean sport_load_row_cb(const SalusDbSportWorkoutRow *row, gpointer us
     return TRUE;
 }
 
-void salus_sport_load_from_db(AppState *state) {
+void salus_sport_load_from_db(SalusApp *state) {
     if (state == NULL || state->selected_address == NULL || state->selected_address[0] == '\0') {
         return;
     }
@@ -118,7 +118,7 @@ void salus_sport_load_from_db(AppState *state) {
     salus_sport_rebuild_list(state);
 }
 
-void salus_sport_add_entry(AppState *state, uint32_t ts, int type, int subtype, const SalusWorkoutSummary *summary,
+void salus_sport_add_entry(SalusApp *state, uint32_t ts, int type, int subtype, const SalusWorkoutSummary *summary,
                            const char *name) {
     SalusSportEntry *e = sport_find_entry(state, ts, subtype);
     if (e == NULL) {
@@ -143,7 +143,7 @@ void salus_sport_add_entry(AppState *state, uint32_t ts, int type, int subtype, 
     salus_sport_rebuild_list(state);
 }
 
-void salus_sport_merge_attachment(AppState *state, uint32_t ts, int subtype, SalusWorkoutSummary *patch) {
+void salus_sport_merge_attachment(SalusApp *state, uint32_t ts, int subtype, SalusWorkoutSummary *patch) {
     if (state == NULL || patch == NULL) {
         return;
     }
@@ -434,7 +434,7 @@ static void draw_week_load(GtkDrawingArea *area, cairo_t *cr, int width, int hei
 }
 
 /* Fills the two summary cards from the band's daily summaries and the stored workouts. */
-static void refresh_training_cards(AppState *state) {
+static void refresh_training_cards(SalusApp *state) {
     SalusDashboardUi *dash = state->dash_ui;
     GtkWidget *load_box = g_object_get_data(G_OBJECT(dash->sport_list_box), "salus-load-box");
     GtkWidget *vo2_box = g_object_get_data(G_OBJECT(dash->sport_list_box), "salus-vo2-box");
@@ -1058,7 +1058,7 @@ static void on_detail_hidden(AdwNavigationPage *page, gpointer user_data) {
     dash->sport_detail_page = NULL;
 }
 
-static void open_detail(AppState *state, SalusSportEntry *e) {
+static void open_detail(SalusApp *state, SalusSportEntry *e) {
     SalusDashboardUi *dash = state->dash_ui;
     const SalusWorkoutSummary *d = entry_detail(e);
     dash->sport_detail_entry = e;
@@ -1275,14 +1275,14 @@ static void open_detail(AppState *state, SalusSportEntry *e) {
 /* ======================================================================================== */
 
 static void on_row_activated(AdwActionRow *row, gpointer user_data) {
-    AppState *state = user_data;
+    SalusApp *state = user_data;
     SalusSportEntry *e = g_object_get_data(G_OBJECT(row), "salus-entry");
     if (e != NULL && g_list_find(state->sport_entries, e) != NULL) {
         open_detail(state, e);
     }
 }
 
-void salus_sport_rebuild_list(AppState *state) {
+void salus_sport_rebuild_list(SalusApp *state) {
     SalusDashboardUi *dash = state != NULL ? state->dash_ui : NULL;
     if (dash == NULL || dash->sport_list_box == NULL) {
         return;
@@ -1370,13 +1370,13 @@ void salus_sport_rebuild_list(AppState *state) {
     refresh_training_cards(state);
 }
 
-void ui_workouts_refresh_training(AppState *state) {
+void ui_workouts_refresh_training(SalusApp *state) {
     if (state != NULL && state->dash_ui != NULL && state->dash_ui->sport_list_box != NULL) {
         refresh_training_cards(state);
     }
 }
 
-GtkWidget *ui_workouts_page_new(AppState *state, SalusDashboardUi *dash) {
+GtkWidget *ui_workouts_page_new(SalusApp *state, SalusDashboardUi *dash) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 18);
     gtk_widget_add_css_class(box, "salus-page");
 

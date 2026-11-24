@@ -5,7 +5,7 @@
 
 #include <stdint.h>
 
-gboolean salus_sleep_run_external_algo_cmd(AppState *state,
+gboolean salus_sleep_run_external_algo_cmd(SalusApp *state,
                                             const uint8_t *sleep_src,
                                             size_t sleep_src_len,
                                             GArray *stage_rows,
