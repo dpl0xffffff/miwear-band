@@ -28,15 +28,7 @@
 
 static void log_activity_file_ids(const uint8_t *ids, size_t len, const char *label);
 static void enqueue_activity_file_ids(AppState *state, const uint8_t *ids, size_t len);
-static void probe_sleep_file_ids_if_needed(AppState *state,
-                                           const uint8_t *listed_ids,
-                                           size_t listed_len,
-                                           guint n_sleep,
-                                           guint n_sleep_stages);
-static void probe_manual_file_ids_if_needed(AppState *state,
-                                            const uint8_t *listed_ids,
-                                            size_t listed_len,
-                                            guint n_manual);
+static void log_missing_sleep_files(AppState *state, guint n_sleep, guint n_sleep_stages);
 static void prioritize_advertised_manual_samples(AppState *state, const uint8_t *ids, size_t len);
 static int activity_file_id_subtype(const uint8_t *id);
 static gboolean activity_file_id_is_sleep_probe(int subtype);
@@ -371,7 +363,7 @@ static void log_decoded_command_proto(AppState *state, const uint8_t *plain, siz
             guint n_other = 0;
             for (size_t off = 0; off + 7 <= len; off += 7) {
                 const uint8_t *p = ids + off;
-                uint32_t ts = (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+                const uint32_t ts = miwear_read_u32_le(p);
                 int8_t tz = (int8_t)p[4];
                 uint8_t ver = p[5];
                 uint8_t flags = p[6];
@@ -411,8 +403,13 @@ static void log_decoded_command_proto(AppState *state, const uint8_t *plain, siz
                 if (n_manual > 0) {
                     prioritize_advertised_manual_samples(state, ids, len);
                 }
-                probe_sleep_file_ids_if_needed(state, ids, len, n_sleep, n_sleep_stages);
-                probe_manual_file_ids_if_needed(state, ids, len, n_manual);
+                log_missing_sleep_files(state, n_sleep, n_sleep_stages);
+                if (n_manual == 0 && n_daily_summary > 0 && !state->manual_stress_probe_done) {
+                    state->manual_stress_probe_done = TRUE;
+                    append_log(state,
+                               "Manual stress: band did not list MANUAL_SAMPLES yet — will fetch when a later "
+                               "today-ID response includes subtype 6 (auto follow-up / resync).");
+                }
             }
             trigger_next_activity_fetch(state);
         }
@@ -553,6 +550,46 @@ static gboolean send_spp_v2_ack(AppState *state, uint8_t seq) {
         return FALSE;
     }
     return TRUE;
+}
+
+/* Encrypts @plain (a packed Command) and sends it as an SPPv2 data packet on @channel with
+ * opcode 2 (encrypted). Gadgetbridge V2 quirk: the key doubles as the IV. */
+static gboolean send_encrypted(AppState *state, uint8_t channel, const uint8_t *plain, size_t plain_len) {
+    uint8_t *encrypted = NULL;
+    size_t encrypted_len = 0;
+    if (!aes_ctr_encrypt(state->encryption_key, state->encryption_key, plain, plain_len, &encrypted, &encrypted_len)) {
+        append_log(state, "Failed to encrypt command.");
+        return FALSE;
+    }
+    GByteArray *payload = g_byte_array_sized_new((guint)encrypted_len + 2);
+    const uint8_t header[2] = {channel, 2};
+    g_byte_array_append(payload, header, 2);
+    g_byte_array_append(payload, encrypted, (guint)encrypted_len);
+    const gboolean ok = send_spp_v2_packet(state, 3, state->spp_v2_seq++, payload->data, payload->len);
+    g_free(encrypted);
+    g_byte_array_unref(payload);
+    return ok;
+}
+
+static void log_sent(AppState *state, const char *label, gboolean ok) {
+    if (label != NULL) {
+        gchar *line = g_strdup_printf("%s: %s", label, ok ? "sent" : "failed");
+        append_log(state, line);
+        g_free(line);
+    }
+}
+
+/* Health command (type 8) with an optional Health message (Command field 10). */
+static gboolean send_health_command(AppState *state, uint32_t subtype, const GByteArray *health, uint8_t channel) {
+    GByteArray *cmd = g_byte_array_new();
+    pb_append_u32(cmd, 1, 8);
+    pb_append_u32(cmd, 2, subtype);
+    if (health != NULL) {
+        pb_append_len_bytes(cmd, 10, health->data, health->len);
+    }
+    const gboolean ok = send_encrypted(state, channel, cmd->data, cmd->len);
+    g_byte_array_unref(cmd);
+    return ok;
 }
 
 static gboolean send_spp_v2_session_config(AppState *state) {
@@ -708,31 +745,8 @@ static gboolean send_auth_step2(AppState *state, const ParsedAuthCommand *parsed
 }
 
 static gboolean send_realtime_stats_start(AppState *state) {
-    GByteArray *cmd = g_byte_array_new();
-    pb_append_u32(cmd, 1, 8);   /* Health command type */
-    pb_append_u32(cmd, 2, 45);  /* CMD_REALTIME_STATS_START */
-
-    uint8_t *encrypted = NULL;
-    size_t encrypted_len = 0;
-    if (!aes_ctr_encrypt(state->encryption_key, state->encryption_key, cmd->data, cmd->len, &encrypted, &encrypted_len)) {
-        g_byte_array_unref(cmd);
-        append_log(state, "Failed to encrypt realtime stats start command.");
-        return FALSE;
-    }
-
-    GByteArray *v2payload = g_byte_array_new();
-    uint8_t chan = 1; /* protobuf command channel */
-    uint8_t op = 2;   /* encrypted */
-    g_byte_array_append(v2payload, &chan, 1);
-    g_byte_array_append(v2payload, &op, 1);
-    g_byte_array_append(v2payload, encrypted, encrypted_len);
-
-    gboolean ok = send_spp_v2_packet(state, 3, state->spp_v2_seq++, v2payload->data, v2payload->len);
+    const gboolean ok = send_health_command(state, 45, NULL, ACTIVITY_PROTO_CHANNEL); /* CMD_REALTIME_STATS_START */
     append_log(state, ok ? "Requested realtime stats stream." : "Failed to request realtime stats stream.");
-
-    g_free(encrypted);
-    g_byte_array_unref(v2payload);
-    g_byte_array_unref(cmd);
     return ok;
 }
 
@@ -747,72 +761,30 @@ static void log_activity_file_ids(const uint8_t *ids, size_t len, const char *la
 }
 
 static gboolean send_activity_fetch_request(AppState *state, const uint8_t *ids, size_t ids_len) {
-    if (ids == NULL || ids_len == 0) return FALSE;
-
-    GByteArray *health = g_byte_array_new();
-    /* Match XiaomiHealthService.requestRecordedData(): field 2 = activityRequestFileIds */
-    pb_append_len_bytes(health, 2, ids, ids_len);
-
-    GByteArray *cmd = g_byte_array_new();
-    pb_append_u32(cmd, 1, 8);  /* health */
-    pb_append_u32(cmd, 2, 3);  /* CMD_ACTIVITY_FETCH_REQUEST (GB constant = 3, not 4) */
-    pb_append_len_bytes(cmd, 10, health->data, health->len); /* health field in Command */
-
-    uint8_t *encrypted = NULL;
-    size_t encrypted_len = 0;
-    if (!aes_ctr_encrypt(state->encryption_key, state->encryption_key, cmd->data, cmd->len, &encrypted, &encrypted_len)) {
-        g_byte_array_unref(cmd);
-        g_byte_array_unref(health);
+    if (ids == NULL || ids_len == 0) {
         return FALSE;
     }
-
-    GByteArray *v2payload = g_byte_array_new();
-    uint8_t chan = 1, op = 2;
-    g_byte_array_append(v2payload, &chan, 1);
-    g_byte_array_append(v2payload, &op, 1);
-    g_byte_array_append(v2payload, encrypted, encrypted_len);
-    gboolean ok = send_spp_v2_packet(state, 3, state->spp_v2_seq++, v2payload->data, v2payload->len);
-    append_log(state, ok ? "Requested activity history file chunks." : "Failed to request activity history chunks.");
-
-    g_free(encrypted);
-    g_byte_array_unref(v2payload);
-    g_byte_array_unref(cmd);
+    /* XiaomiHealthService.requestRecordedData(): Health field 2 = activityRequestFileIds,
+     * CMD_ACTIVITY_FETCH_REQUEST = 3. */
+    GByteArray *health = g_byte_array_new();
+    pb_append_len_bytes(health, 2, ids, ids_len);
+    const gboolean ok = send_health_command(state, 3, health, ACTIVITY_PROTO_CHANNEL);
     g_byte_array_unref(health);
+    append_log(state, ok ? "Requested activity history file chunks." : "Failed to request activity history chunks.");
     return ok;
 }
 
 gboolean send_activity_fetch_ack(AppState *state, const uint8_t *ids, size_t ids_len) {
-    if (ids == NULL || ids_len == 0) return FALSE;
-
-    GByteArray *health = g_byte_array_new();
-    /* Match XiaomiHealthService.ackRecordedData(): field 3 = activitySyncAckFileIds */
-    pb_append_len_bytes(health, 3, ids, ids_len);
-
-    GByteArray *cmd = g_byte_array_new();
-    pb_append_u32(cmd, 1, 8);  /* health */
-    pb_append_u32(cmd, 2, 5);  /* CMD_ACTIVITY_FETCH_ACK */
-    pb_append_len_bytes(cmd, 10, health->data, health->len);
-
-    uint8_t *encrypted = NULL;
-    size_t encrypted_len = 0;
-    if (!aes_ctr_encrypt(state->encryption_key, state->encryption_key, cmd->data, cmd->len, &encrypted, &encrypted_len)) {
-        g_byte_array_unref(cmd);
-        g_byte_array_unref(health);
+    if (ids == NULL || ids_len == 0) {
         return FALSE;
     }
-
-    GByteArray *v2payload = g_byte_array_new();
-    uint8_t chan = 1, op = 2;
-    g_byte_array_append(v2payload, &chan, 1);
-    g_byte_array_append(v2payload, &op, 1);
-    g_byte_array_append(v2payload, encrypted, encrypted_len);
-    gboolean ok = send_spp_v2_packet(state, 3, state->spp_v2_seq++, v2payload->data, v2payload->len);
-    append_log(state, ok ? "Acked fetched activity file ID(s)." : "Failed to ack fetched activity file ID(s).");
-
-    g_free(encrypted);
-    g_byte_array_unref(v2payload);
-    g_byte_array_unref(cmd);
+    /* XiaomiHealthService.ackRecordedData(): Health field 3 = activitySyncAckFileIds,
+     * CMD_ACTIVITY_FETCH_ACK = 5. */
+    GByteArray *health = g_byte_array_new();
+    pb_append_len_bytes(health, 3, ids, ids_len);
+    const gboolean ok = send_health_command(state, 5, health, ACTIVITY_PROTO_CHANNEL);
     g_byte_array_unref(health);
+    append_log(state, ok ? "Acked fetched activity file ID(s)." : "Failed to ack fetched activity file ID(s).");
     return ok;
 }
 
@@ -1007,157 +979,16 @@ static void resync_activity_fetch_state(AppState *state) {
     miwear_log_fetch_transition(state, "resync-pause", NULL);
 }
 
-static gchar *activity_file_id_key(const uint8_t *id7);
-
-static uint8_t activity_file_flags(int subtype, int detail) {
-    return (uint8_t)(((subtype & 0x1f) << 2) | (detail & 3));
-}
-
-static void append_unique_file_id(GByteArray *out, GHashTable *seen_keys, const uint8_t id[7]) {
-    if (out == NULL || seen_keys == NULL || id == NULL) {
-        return;
-    }
-    if (id[0] == 0 && id[1] == 0 && id[2] == 0 && id[3] == 0 && id[5] == 0) {
-        return;
-    }
-    gchar *key = activity_file_id_key(id);
-    if (g_hash_table_contains(seen_keys, key)) {
-        g_free(key);
-        return;
-    }
-    g_hash_table_add(seen_keys, key);
-    g_byte_array_append(out, id, 7);
-}
-
-static void probe_sleep_file_ids_if_needed(AppState *state,
-                                           const uint8_t *listed_ids,
-                                           size_t listed_len,
-                                           guint n_sleep,
-                                           guint n_sleep_stages) {
-    if (state == NULL || state->sleep_hint_logged || (n_sleep + n_sleep_stages) > 0) {
+/* Logs once per connection when the band lists no sleep file. (Guessing sleep file IDs used to be
+ * tried, but fetching unlisted IDs stalled the queue, so it only explains the situation now.) */
+static void log_missing_sleep_files(AppState *state, guint n_sleep, guint n_sleep_stages) {
+    if (state->sleep_hint_logged || (n_sleep + n_sleep_stages) > 0) {
         return;
     }
     state->sleep_hint_logged = TRUE;
-
     append_log(state,
-               "Sleep: band did not advertise sleep file IDs (subtype 3 SLEEP_STAGES / 8 SLEEP). "
-               "Probing common on-device sleep IDs; if still empty, wear the band overnight with "
-               "sleep tracking on and sync before the Mi Fitness phone app clears the queue.");
-
-    GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
-    GByteArray *probe = g_byte_array_new();
-
-    for (size_t off = 0; listed_ids != NULL && off + 7 <= listed_len; off += 7) {
-        append_unique_file_id(probe, seen, listed_ids + off);
-        const uint32_t ts = miwear_read_u32_le(listed_ids + off);
-        const int8_t tz = (int8_t)listed_ids[off + 4];
-        if (ts >= 86400u) {
-            uint8_t prev[7];
-            memcpy(prev, listed_ids + off, 7);
-            const uint32_t prev_ts = ts - 86400u;
-            prev[0] = (uint8_t)(prev_ts & 0xffu);
-            prev[1] = (uint8_t)((prev_ts >> 8) & 0xffu);
-            prev[2] = (uint8_t)((prev_ts >> 16) & 0xffu);
-            prev[3] = (uint8_t)((prev_ts >> 24) & 0xffu);
-            prev[4] = (uint8_t)tz;
-            append_unique_file_id(probe, seen, prev);
-        }
-    }
-
-    GDateTime *now = g_date_time_new_now_local();
-    if (now != NULL) {
-        GTimeZone *tz = g_date_time_get_timezone(now);
-        for (int day = 0; day < 3; day++) {
-            GDateTime *day_dt = g_date_time_add_days(now, -day);
-            if (day_dt == NULL) {
-                continue;
-            }
-            GDateTime *midnight = g_date_time_new(tz,
-                                                  g_date_time_get_year(day_dt),
-                                                  g_date_time_get_month(day_dt),
-                                                  g_date_time_get_day_of_month(day_dt),
-                                                  0,
-                                                  0,
-                                                  0);
-            g_date_time_unref(day_dt);
-            if (midnight == NULL) {
-                continue;
-            }
-            const int64_t ts_mid = g_date_time_to_unix(midnight);
-            g_date_time_unref(midnight);
-            if (ts_mid <= 0) {
-                continue;
-            }
-            int8_t tz_slot = 8;
-            if (listed_len >= 7) {
-                tz_slot = (int8_t)listed_ids[4];
-            }
-            static const struct {
-                int subtype;
-                int detail;
-                uint8_t version;
-            } sleep_variants[] = {
-                {3, 1, 6}, {3, 1, 5}, {3, 0, 6}, {3, 0, 5}, {3, 1, 2},
-                {8, 1, 5}, {8, 1, 4}, {8, 0, 5}, {8, 0, 4},
-            };
-            for (size_t i = 0; i < G_N_ELEMENTS(sleep_variants); i++) {
-                uint8_t id[7];
-                const uint32_t ts = (uint32_t)ts_mid;
-                id[0] = (uint8_t)(ts & 0xffu);
-                id[1] = (uint8_t)((ts >> 8) & 0xffu);
-                id[2] = (uint8_t)((ts >> 16) & 0xffu);
-                id[3] = (uint8_t)((ts >> 24) & 0xffu);
-                id[4] = (uint8_t)tz_slot;
-                id[5] = sleep_variants[i].version;
-                id[6] = activity_file_flags(sleep_variants[i].subtype, sleep_variants[i].detail);
-                append_unique_file_id(probe, seen, id);
-            }
-        }
-        g_date_time_unref(now);
-    }
-
-    if (probe->len >= 7) {
-        gchar *line = g_strdup_printf(
-            "Sleep probe: %u candidate ID(s) skipped (not queued — avoids blocking stress/activity fetch).",
-            (unsigned)(probe->len / 7u));
-        append_log(state, line);
-        g_free(line);
-    } else {
-        append_log(state, "Sleep probe: no candidate IDs generated.");
-    }
-
-    g_byte_array_unref(probe);
-    g_hash_table_unref(seen);
-}
-
-static void probe_manual_file_ids_if_needed(AppState *state,
-                                            const uint8_t *listed_ids,
-                                            size_t listed_len,
-                                            guint n_manual) {
-    if (state == NULL || state->manual_stress_probe_done || n_manual > 0 || listed_ids == NULL ||
-        listed_len < 7) {
-        return;
-    }
-
-    uint32_t day_ts = 0;
-    for (size_t off = 0; off + 7 <= listed_len; off += 7) {
-        const uint8_t flags = listed_ids[off + 6];
-        const int type = (flags >> 7) & 1;
-        const int subtype = (flags & 127) >> 2;
-        const int detail = flags & 3;
-        if (type == 0 && subtype == 0 && detail == 1) {
-            day_ts = miwear_read_u32_le(listed_ids + off);
-            break;
-        }
-    }
-    if (day_ts == 0) {
-        return;
-    }
-
-    state->manual_stress_probe_done = TRUE;
-    append_log(state,
-               "Manual stress: band did not list MANUAL_SAMPLES yet — will fetch when a later today-ID "
-               "response includes subtype 6 (auto follow-up / resync).");
+               "Sleep: band did not advertise sleep file IDs (subtype 3 SLEEP_STAGES / 8 SLEEP). Wear the band "
+               "overnight with sleep tracking on and sync before the Mi Fitness phone app clears the queue.");
 }
 
 static void remove_file_id_from_fetch_queue(AppState *state, const uint8_t *id7) {
@@ -1386,30 +1217,10 @@ static gboolean send_activity_fetch_catalog_request(AppState *state,
         pb_append_len_bytes(health, 5, activity_sync_today->data, activity_sync_today->len);
         g_byte_array_unref(activity_sync_today);
     }
-
-    GByteArray *cmd = g_byte_array_new();
-    pb_append_u32(cmd, 1, 8);
-    pb_append_u32(cmd, 2, subtype);
+    const gboolean ok = send_health_command(state, subtype, health, tx_channel);
     if (health != NULL) {
-        pb_append_len_bytes(cmd, 10, health->data, health->len);
         g_byte_array_unref(health);
     }
-
-    uint8_t *encrypted = NULL;
-    size_t encrypted_len = 0;
-    if (!aes_ctr_encrypt(state->encryption_key, state->encryption_key, cmd->data, cmd->len, &encrypted, &encrypted_len)) {
-        g_byte_array_unref(cmd);
-        return FALSE;
-    }
-    g_byte_array_unref(cmd);
-
-    GByteArray *v2payload = g_byte_array_new();
-    const uint8_t op = 2;
-    g_byte_array_append(v2payload, &tx_channel, 1);
-    g_byte_array_append(v2payload, &op, 1);
-    g_byte_array_append(v2payload, encrypted, encrypted_len);
-
-    gboolean ok = send_spp_v2_packet(state, 3, state->spp_v2_seq++, v2payload->data, v2payload->len);
     if (label) {
         gchar *line = NULL;
         if (include_activity_sync_today && include_unknown1) {
@@ -1422,9 +1233,6 @@ static gboolean send_activity_fetch_catalog_request(AppState *state,
         append_log(state, line);
         g_free(line);
     }
-
-    g_free(encrypted);
-    g_byte_array_unref(v2payload);
     return ok;
 }
 
@@ -1614,34 +1422,12 @@ gboolean miwear_wire_send_xiaomi_command(AppState *state, Xiaomi__Command *cmd, 
     if (state == NULL || cmd == NULL || !state->auth_initialized) {
         return FALSE;
     }
-    size_t packed_len = xiaomi__command__get_packed_size(cmd);
+    const size_t packed_len = xiaomi__command__get_packed_size(cmd);
     uint8_t *packed = g_malloc(packed_len);
     xiaomi__command__pack(cmd, packed);
-
-    uint8_t *encrypted = NULL;
-    size_t encrypted_len = 0;
-    if (!aes_ctr_encrypt(state->encryption_key, state->encryption_key, packed, packed_len, &encrypted, &encrypted_len)) {
-        g_free(packed);
-        return FALSE;
-    }
+    const gboolean ok = send_encrypted(state, ACTIVITY_PROTO_CHANNEL, packed, packed_len);
     g_free(packed);
-
-    GByteArray *v2payload = g_byte_array_new();
-    uint8_t chan = 1;
-    uint8_t op = 2;
-    g_byte_array_append(v2payload, &chan, 1);
-    g_byte_array_append(v2payload, &op, 1);
-    g_byte_array_append(v2payload, encrypted, encrypted_len);
-
-    gboolean ok = send_spp_v2_packet(state, 3, state->spp_v2_seq++, v2payload->data, v2payload->len);
-    if (label != NULL) {
-        gchar *line = g_strdup_printf("%s: %s", label, ok ? "sent" : "failed");
-        append_log(state, line);
-        g_free(line);
-    }
-
-    g_free(encrypted);
-    g_byte_array_unref(v2payload);
+    log_sent(state, label, ok);
     return ok;
 }
 
@@ -1649,31 +1435,9 @@ static gboolean send_encrypted_simple_command(AppState *state, uint32_t type, ui
     GByteArray *cmd = g_byte_array_new();
     pb_append_u32(cmd, 1, type);
     pb_append_u32(cmd, 2, subtype);
-
-    uint8_t *encrypted = NULL;
-    size_t encrypted_len = 0;
-    if (!aes_ctr_encrypt(state->encryption_key, state->encryption_key, cmd->data, cmd->len, &encrypted, &encrypted_len)) {
-        g_byte_array_unref(cmd);
-        return FALSE;
-    }
-
-    GByteArray *v2payload = g_byte_array_new();
-    uint8_t chan = 1;
-    uint8_t op = 2;
-    g_byte_array_append(v2payload, &chan, 1);
-    g_byte_array_append(v2payload, &op, 1);
-    g_byte_array_append(v2payload, encrypted, encrypted_len);
-
-    gboolean ok = send_spp_v2_packet(state, 3, state->spp_v2_seq++, v2payload->data, v2payload->len);
-    if (label) {
-        gchar *line = g_strdup_printf("%s: %s", label, ok ? "sent" : "failed");
-        append_log(state, line);
-        g_free(line);
-    }
-
-    g_free(encrypted);
-    g_byte_array_unref(v2payload);
+    const gboolean ok = send_encrypted(state, ACTIVITY_PROTO_CHANNEL, cmd->data, cmd->len);
     g_byte_array_unref(cmd);
+    log_sent(state, label, ok);
     return ok;
 }
 
@@ -1707,7 +1471,7 @@ static gboolean send_gb_set_current_time(AppState *state) {
     tz.zoneoffset = zone_blocks;
     tz.has_dstoffset = TRUE;
     tz.dstoffset = 0;
-    tz.name = g_strdup(tz_id);
+    tz.name = (char *)tz_id; /* only read while packing, before @now is released */
 
     Xiaomi__Clock clk = XIAOMI__CLOCK__INIT;
     clk.date = &date;
@@ -1725,33 +1489,9 @@ static gboolean send_gb_set_current_time(AppState *state) {
     cmd.subtype = 3;
     cmd.system = &sys;
 
-    size_t packed_len = xiaomi__command__get_packed_size(&cmd);
-    uint8_t *packed = g_malloc(packed_len);
-    xiaomi__command__pack(&cmd, packed);
-    g_free(tz.name);
+    const gboolean ok = miwear_wire_send_xiaomi_command(state, &cmd, NULL);
     g_date_time_unref(now);
-
-    uint8_t *encrypted = NULL;
-    size_t encrypted_len = 0;
-    if (!aes_ctr_encrypt(state->encryption_key, state->encryption_key, packed, packed_len, &encrypted, &encrypted_len)) {
-        g_free(packed);
-        append_log(state, "Failed to encrypt set-clock command.");
-        return FALSE;
-    }
-    g_free(packed);
-
-    GByteArray *v2payload = g_byte_array_new();
-    uint8_t chan = 1;
-    uint8_t op = 2;
-    g_byte_array_append(v2payload, &chan, 1);
-    g_byte_array_append(v2payload, &op, 1);
-    g_byte_array_append(v2payload, encrypted, encrypted_len);
-
-    gboolean ok = send_spp_v2_packet(state, 3, state->spp_v2_seq++, v2payload->data, v2payload->len);
     append_log(state, ok ? "Sent clock/time (GB setCurrentTime)." : "Failed to send clock/time.");
-
-    g_free(encrypted);
-    g_byte_array_unref(v2payload);
     return ok;
 }
 
@@ -1786,43 +1526,16 @@ static gboolean send_gb_user_info(AppState *state) {
     pb_append_len_bytes(health, 1, ui_packed, ui_packed_len);
     g_free(ui_packed);
 
-    GByteArray *cmd = g_byte_array_new();
-    pb_append_u32(cmd, 1, 8);
-    pb_append_u32(cmd, 2, 0);
-    pb_append_len_bytes(cmd, 10, health->data, health->len);
-
-    uint8_t *encrypted = NULL;
-    size_t encrypted_len = 0;
-    if (!aes_ctr_encrypt(state->encryption_key, state->encryption_key, cmd->data, cmd->len, &encrypted, &encrypted_len)) {
-        g_byte_array_unref(cmd);
-        g_byte_array_unref(health);
-        append_log(state, "Failed to encrypt set-user-info command.");
-        return FALSE;
-    }
-
-    GByteArray *v2payload = g_byte_array_new();
-    uint8_t chan = 1;
-    uint8_t op = 2;
-    g_byte_array_append(v2payload, &chan, 1);
-    g_byte_array_append(v2payload, &op, 1);
-    g_byte_array_append(v2payload, encrypted, encrypted_len);
-
-    gboolean ok = send_spp_v2_packet(state, 3, state->spp_v2_seq++, v2payload->data, v2payload->len);
+    const gboolean ok = send_health_command(state, 0, health, ACTIVITY_PROTO_CHANNEL);
+    g_byte_array_unref(health);
     if (ok) {
-        gchar *line = g_strdup_printf(
-            "Sent user info (GB setUserInfo): gender config=%u band=%u.",
-            state->profile_gender,
-            ui.gender);
+        gchar *line = g_strdup_printf("Sent user info (GB setUserInfo): gender config=%u band=%u.",
+                                      state->profile_gender, ui.gender);
         append_log(state, line);
         g_free(line);
     } else {
         append_log(state, "Failed to send user info.");
     }
-
-    g_free(encrypted);
-    g_byte_array_unref(v2payload);
-    g_byte_array_unref(cmd);
-    g_byte_array_unref(health);
     return ok;
 }
 
@@ -1875,6 +1588,14 @@ void miwear_wire_resync_file_lists(AppState *state, const char *today_label) {
     trigger_next_activity_fetch(state);
 }
 
+static gboolean auth_failed_idle(gpointer user_data) {
+    AppState *state = user_data;
+    disconnect_socket(state);
+    set_status(state, "Authentication failed — check the auth key.");
+    set_connect_busy(state, FALSE);
+    return G_SOURCE_REMOVE;
+}
+
 static void handle_command_payload(AppState *state, const uint8_t *payload, size_t len) {
     ParsedAuthCommand parsed;
     if (!parse_auth_message(payload, len, &parsed)) {
@@ -1889,7 +1610,11 @@ static void handle_command_payload(AppState *state, const uint8_t *payload, size
 
     if (parsed.subtype == 26 && parsed.has_watch_nonce) {
         append_log(state, "Received auth step 1 response (watch nonce).");
-        (void)send_auth_step2(state, &parsed);
+        if (!send_auth_step2(state, &parsed)) {
+            /* Usually a wrong auth key (watch HMAC mismatch): the band would just wait. Disconnect on
+             * idle, since the receive buffer is still being walked. */
+            g_idle_add(auth_failed_idle, state);
+        }
     } else if ((parsed.subtype == 27) || (parsed.subtype == 5)) {
         if (parsed.subtype == 27 || (parsed.has_auth_status && parsed.auth_status == 1)) {
             state->auth_initialized = (parsed.subtype == 27);
