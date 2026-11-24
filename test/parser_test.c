@@ -1,6 +1,7 @@
 /* Decoder tests against synthetic payloads built from the Gadgetbridge layouts. */
 
 #include "miwear/activity/daily_details.h"
+#include "miwear/activity/mi_fitness_full_day_sleep.h"
 #include "miwear/sleep/mi_sleep_packets.h"
 
 #include <glib.h>
@@ -265,6 +266,81 @@ static void test_sleep_stage_codes(void) {
     g_byte_array_unref(w.b);
 }
 
+static void put32le(Buf *w, uint32_t v) {
+    put16le(w, (int)(v & 0xffff));
+    put16le(w, (int)(v >> 16));
+}
+
+/* A v6 full_day_sleep report: HRV summary fields and an HRV series sit between the times and
+ * the HR/SpO2 series (validity bits 8-18 and 21), then snore and the featureData tail. */
+static void test_full_day_sleep_v6_layout(void) {
+    Buf w = {g_byte_array_new()};
+    put32le(&w, T0);
+    put8(&w, 4);           /* timezone */
+    put8(&w, 6);           /* version */
+    put8(&w, 8 << 2 | 1);  /* full_day_sleep report */
+    put8(&w, 0);           /* no encryption/compression */
+    put8(&w, 0xFF);        /* fields 0-7 */
+    put8(&w, 0xFF);        /* HRV summary 8-15 */
+    put8(&w, 0xE0 | 0x10 | 0x08 | 0x04 | 0x02); /* HRV 16-18, HR, SpO2, HRV series, snore */
+    put8(&w, 1);           /* sleepFull */
+    put32le(&w, T0);       /* startTime */
+    put32le(&w, T0 + 480 * 60);
+    put8(&w, 90);
+    put8(&w, 95);
+    put32le(&w, 10);
+    put32le(&w, 490);
+    put32le(&w, T0 - 600); /* goBedTime */
+    put32le(&w, T0 + 481 * 60);
+    for (int i = 0; i < 11; i++) {
+        if (i == 6) {
+            put32le(&w, T0); /* hrvTimestamp */
+        } else {
+            put16le(&w, 40 + i);
+        }
+    }
+    put16le(&w, 60); put16le(&w, 3); put32le(&w, T0); put8(&w, 55); put8(&w, 56); put8(&w, 57);
+    put16le(&w, 60); put16le(&w, 2); put32le(&w, T0); put8(&w, 97); put8(&w, 98);
+    put16le(&w, 300); put16le(&w, 2); put32le(&w, T0); put16le(&w, 41); put16le(&w, 42);
+    put16le(&w, 60); put16le(&w, 0); /* snore: no points, so no firstTime */
+    const guint feature_at = w.b->len;
+    Buf d = {g_byte_array_new()};
+    put8(&d, 0x12);
+    put16be(&d, 470); put16be(&d, 10); put16be(&d, 366); put16be(&d, 0); put16be(&d, 104);
+    put8(&d, 0); put8(&d, 0);
+    sleep_packet(&w, T0, 16, d.b->data, (int)d.b->len);
+    put32le(&w, 0); /* CRC (not checked here) */
+
+    MiwearFullDaySleepLayout l;
+    g_assert_true(miwear_full_day_sleep_layout(w.b->data, w.b->len, 6, &l));
+    g_assert_cmpuint(l.go_bed_time, ==, T0 - 600);
+    g_assert_cmpuint(l.live_bed_time, ==, T0 + 481 * 60);
+    g_assert_cmpuint(l.heart_rate.count, ==, 3);
+    g_assert_cmpuint(w.b->data[l.heart_rate.values_off], ==, 55);
+    g_assert_cmpuint(l.spo2.count, ==, 2);
+    g_assert_cmpuint(w.b->data[l.spo2.values_off + 1], ==, 98);
+    g_assert_cmpuint(l.hrv.count, ==, 2);
+    g_assert_true(l.snore.present);
+    g_assert_cmpuint(l.snore.count, ==, 0);
+    g_assert_cmpuint(l.feature_off, ==, feature_at);
+
+    const uint8_t *feature = NULL;
+    size_t feature_len = 0;
+    g_assert_true(mi_fitness_full_day_sleep_feature_tail(w.b->data, w.b->len, 6, &feature, &feature_len));
+    MiwearSleepStageRow *rows = NULL;
+    size_t n = 0;
+    MiwearSleepStageDurations dur = {0};
+    g_assert_true(mi_sleep_try_embedded_stage_packets(feature, feature_len, T0, T0 + 480 * 60, &rows, &n, &dur));
+    g_assert_cmpint(dur.deep_min, ==, 104);
+    g_assert_cmpint(dur.light_min, ==, 366);
+    g_free(rows);
+
+    /* The same bytes read as v5 (HR at bit 8) must not reach the featureData. */
+    g_assert_cmpuint(miwear_full_day_sleep_structured_end(w.b->data, w.b->len, 5), !=, feature_at);
+    g_byte_array_unref(d.b);
+    g_byte_array_unref(w.b);
+}
+
 int main(int argc, char **argv) {
     g_test_init(&argc, &argv, NULL);
     g_test_add_func("/daily-details/v4", test_daily_details_v4);
@@ -274,5 +350,6 @@ int main(int argc, char **argv) {
     g_test_add_func("/daily-details/bad-input", test_daily_details_bad_input);
     g_test_add_func("/sleep/summary-big-endian", test_sleep_summary_big_endian);
     g_test_add_func("/sleep/stage-codes", test_sleep_stage_codes);
+    g_test_add_func("/sleep/full-day-v6-layout", test_full_day_sleep_v6_layout);
     return g_test_run();
 }

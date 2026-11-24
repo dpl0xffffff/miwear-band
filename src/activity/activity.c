@@ -583,66 +583,31 @@ static void parse_sleep_stages_v2_for_log(AppState *state,
     g_free(wake_txt);
 }
 
-static size_t parse_sleep_hr_series(GArray *samples,
-                                    const uint8_t *payload,
-                                    size_t payload_len,
-                                    size_t off,
-                                    uint32_t default_first_sec,
-                                    uint16_t unit_sec,
-                                    uint16_t count) {
-    if (count == 0 || count > 4096 || off >= payload_len - 4) {
-        return off;
+/* Heart-rate or SpO2 series of a full_day_sleep report (one uint8 per point). */
+static void add_full_day_sleep_series(GArray *samples,
+                                      const uint8_t *payload,
+                                      const MiwearFullDaySleepSeries *series,
+                                      gboolean is_spo2) {
+    if (!series->present || series->count == 0 || series->first_time == 0) {
+        return;
     }
-    uint32_t first_sec = default_first_sec;
-    if (off + 4 <= payload_len - 4) {
-        first_sec = miwear_read_u32_le(payload + off);
-        off += 4;
-    }
-    for (uint16_t i = 0; i < count && off < payload_len - 4; i++) {
-        const uint8_t hr = payload[off++];
-        if (hr == 0 || hr >= 240) {
+    for (uint16_t i = 0; i < series->count; i++) {
+        const uint8_t v = payload[series->values_off + i];
+        if (v == 0 || (is_spo2 ? v > 100 : v >= 240)) {
             continue;
         }
-        const uint32_t sec = first_sec + (uint32_t)unit_sec * (uint32_t)i;
+        const uint32_t sec = series->first_time + (uint32_t)series->interval_sec * (uint32_t)i;
         RecordedSample s = {0};
         s.minute_of_day = local_minute_of_day((gint64)sec);
-        s.steps = s.active_calories = s.distance_cm = s.energy = s.spo2 = s.stress = s.sleep_stage = -1;
-        s.heart_rate = (int)hr;
+        s.steps = s.active_calories = s.distance_cm = s.energy = s.heart_rate = s.spo2 = s.stress = s.sleep_stage = -1;
+        if (is_spo2) {
+            s.spo2 = (int)v;
+        } else {
+            s.heart_rate = (int)v;
+        }
         s.sleep_source = 1;
         g_array_append_val(samples, s);
     }
-    return off;
-}
-
-static size_t parse_sleep_spo2_series(GArray *samples,
-                                        const uint8_t *payload,
-                                        size_t payload_len,
-                                        size_t off,
-                                        uint32_t default_first_sec,
-                                        uint16_t unit_sec,
-                                        uint16_t count) {
-    if (count == 0 || count > 4096 || off >= payload_len - 4) {
-        return off;
-    }
-    uint32_t first_sec = default_first_sec;
-    if (off + 4 <= payload_len - 4) {
-        first_sec = miwear_read_u32_le(payload + off);
-        off += 4;
-    }
-    for (uint16_t i = 0; i < count && off < payload_len - 4; i++) {
-        const uint8_t spo2 = payload[off++];
-        if (spo2 == 0 || spo2 > 100) {
-            continue;
-        }
-        const uint32_t sec = first_sec + (uint32_t)unit_sec * (uint32_t)i;
-        RecordedSample s = {0};
-        s.minute_of_day = local_minute_of_day((gint64)sec);
-        s.steps = s.active_calories = s.distance_cm = s.energy = s.heart_rate = s.stress = s.sleep_stage = -1;
-        s.spo2 = (int)spo2;
-        s.sleep_source = 1;
-        g_array_append_val(samples, s);
-    }
-    return off;
 }
 
 typedef struct {
@@ -848,98 +813,44 @@ static void parse_full_day_sleep_report(AppState *state,
                                         int version,
                                         const uint8_t *payload,
                                         size_t payload_len) {
-    const size_t crc_end = payload_len >= 4 ? payload_len - 4 : payload_len;
-    size_t vf_len = 0;
-    if (version == 5) {
-        vf_len = 2;
-    } else if (version == 6) {
-        vf_len = 3;
-    } else {
+    if (version != 5 && version != 6) {
         append_log(state, "Full-day sleep parser: unsupported version.");
         return;
     }
-    if (crc_end < 10 + 1) {
+    MiwearFullDaySleepLayout layout;
+    const gboolean layout_ok = miwear_full_day_sleep_layout(payload, payload_len, version, &layout);
+    const size_t vf_len = version == 5 ? 2 : 3;
+    gchar *vf_hex = payload_len > 8 + vf_len ? format_hex(payload + 8, vf_len) : g_strdup("?");
+    gchar *layout_line = g_strdup_printf(
+        "Full-day sleep v%d layout: validity=%s ok=%d HR n=%u SpO2 n=%u HRV n=%u snore n=%u "
+        "featureData=%zu bytes @%zu",
+        version, vf_hex, layout_ok, layout.heart_rate.count, layout.spo2.count, layout.hrv.count,
+        layout.snore.count, layout.crc_end > layout.feature_off ? layout.crc_end - layout.feature_off : 0,
+        layout.feature_off);
+    append_log(state, layout_line);
+    g_free(layout_line);
+    g_free(vf_hex);
+    if (layout.crc_end <= 8 + vf_len) {
         append_log(state, "Full-day sleep parser: payload too short.");
         return;
     }
 
-    const uint8_t *vf = payload + 8;
-    size_t off = 8 + vf_len;
-    const uint8_t sleep_full = payload[off++];
-
-    uint32_t start_time = 0;
-    uint32_t end_time = 0;
-    uint32_t go_bed = 0;
-    uint32_t live_bed = 0;
-
-    if (miwear_full_day_sleep_valid_bit(vf, vf_len, 0) && off + 4 <= crc_end) {
-        start_time = miwear_read_u32_le(payload + off);
-        off += 4;
-    }
-    if (miwear_full_day_sleep_valid_bit(vf, vf_len, 1) && off + 4 <= crc_end) {
-        end_time = miwear_read_u32_le(payload + off);
-        off += 4;
-    }
-    if (miwear_full_day_sleep_valid_bit(vf, vf_len, 2) && off + 1 <= crc_end) {
-        off += 1;
-    }
-    if (miwear_full_day_sleep_valid_bit(vf, vf_len, 3) && off + 1 <= crc_end) {
-        off += 1;
-    }
-    if (miwear_full_day_sleep_valid_bit(vf, vf_len, 4) && off + 4 <= crc_end) {
-        off += 4;
-    }
-    if (miwear_full_day_sleep_valid_bit(vf, vf_len, 5) && off + 4 <= crc_end) {
-        off += 4;
-    }
-    if (miwear_full_day_sleep_valid_bit(vf, vf_len, 6) && off + 4 <= crc_end) {
-        go_bed = miwear_read_u32_le(payload + off);
-        off += 4;
-    }
-    if (miwear_full_day_sleep_valid_bit(vf, vf_len, 7) && off + 4 <= crc_end) {
-        live_bed = miwear_read_u32_le(payload + off);
-        off += 4;
-    }
-
+    const uint8_t sleep_full = layout.sleep_full;
     GArray *samples = g_array_new(FALSE, FALSE, sizeof(RecordedSample));
     GArray *stage_rows = g_array_new(FALSE, FALSE, sizeof(MiwearSleepStageRow));
     GArray *pulse_rows = g_array_new(FALSE, FALSE, sizeof(MiwearHeartPulseRow));
 
-    const uint32_t bed_time = go_bed != 0 ? go_bed : start_time;
-    const uint32_t wake_time = live_bed != 0 ? live_bed : end_time;
+    const uint32_t bed_time = layout.go_bed_time != 0 ? layout.go_bed_time : layout.start_time;
+    const uint32_t wake_time = layout.live_bed_time != 0 ? layout.live_bed_time : layout.end_time;
 
-    if (miwear_full_day_sleep_valid_bit(vf, vf_len, 8) && off + 4 <= crc_end) {
-        const uint16_t unit = miwear_read_u16_le(payload + off);
-        off += 2;
-        const uint16_t count = miwear_read_u16_le(payload + off);
-        off += 2;
-        off = parse_sleep_hr_series(samples, payload, payload_len, off, bed_time, unit, count);
-    }
-    if (miwear_full_day_sleep_valid_bit(vf, vf_len, 9) && off + 4 <= crc_end) {
-        const uint16_t unit = miwear_read_u16_le(payload + off);
-        off += 2;
-        const uint16_t count = miwear_read_u16_le(payload + off);
-        off += 2;
-        off = parse_sleep_spo2_series(samples, payload, payload_len, off, bed_time, unit, count);
-    }
-    if (miwear_full_day_sleep_valid_bit(vf, vf_len, 10) && off + 4 <= crc_end) {
-        off += 2; /* snore interval */
-        const uint16_t count = miwear_read_u16_le(payload + off);
-        off += 2;
-        if (count > 0 && off + 4 <= crc_end) {
-            off += 4; /* snoreFirstTime */
-        }
-        const size_t skip = (size_t)count * 4u;
-        if (off + skip <= crc_end) {
-            off += skip;
-        } else {
-            off = crc_end;
-        }
+    if (layout_ok) {
+        add_full_day_sleep_series(samples, payload, &layout.heart_rate, FALSE);
+        add_full_day_sleep_series(samples, payload, &layout.spo2, TRUE);
     }
 
-    const size_t feature_off = miwear_full_day_sleep_structured_end(payload, payload_len, version);
-    const size_t feature_len =
-        feature_off > 0 && feature_off < crc_end ? crc_end - feature_off : 0;
+    const size_t crc_end = layout.crc_end;
+    const size_t feature_off = layout_ok ? layout.feature_off : crc_end;
+    const size_t feature_len = feature_off < crc_end ? crc_end - feature_off : 0;
     SleepSummaryMinutes summary = {0};
     guint stage_packets = 0;
     if (feature_len > 0) {

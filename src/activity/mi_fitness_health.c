@@ -146,17 +146,6 @@ static void apply_daily_activity_report_schema(AppState *state, JsonNode *decode
     g_free(line);
 }
 
-static void apply_sleep_times_to_chart(AppState *state, uint32_t bed_sec, uint32_t wake_sec, int stage) {
-    if (state == NULL || bed_sec == 0 || wake_sec == 0 || wake_sec <= bed_sec) {
-        return;
-    }
-    RecordedBatch *batch = recorded_batch_new();
-    for (uint32_t sec = bed_sec; sec < wake_sec; sec += 60u) {
-        recorded_batch_add_sleep_minute(batch, (gint64)sec, stage);
-    }
-    recorded_batch_commit(state, batch);
-}
-
 static void apply_full_day_sleep_schema(AppState *state,
                                         JsonObject *body,
                                         const uint8_t *payload,
@@ -171,9 +160,10 @@ static void apply_full_day_sleep_schema(AppState *state,
     const uint32_t bed = go_bed != 0 ? go_bed : start;
     const uint32_t wake = leave != 0 ? leave : end;
     if (bed != 0 && wake != 0 && wake > bed) {
-        apply_sleep_times_to_chart(state, bed, wake, 3);
+        /* The stages come from featureData (native parser + mi_fitness_apply_sleep_stages_from_feature).
+         * Painting bed→wake here as one stage showed every night as 100 % light. */
         gchar *line = g_strdup_printf(
-            "Sleep (schema): bed=%u wake=%u — timeline merged into Sleep tab",
+            "Sleep (schema): bed=%u wake=%u",
             bed,
             wake);
         append_log(state, line);

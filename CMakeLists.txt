@@ -126,6 +126,7 @@ add_executable(miwear-parser-test
     src/activity/daily_details.c
     src/sleep/mi_sleep_packets.c
     src/sleep/mi_sleep_duration.c
+    src/activity/mi_fitness_full_day_sleep.c
 )
 target_include_directories(miwear-parser-test PRIVATE include)
 target_link_libraries(miwear-parser-test PRIVATE PkgConfig::GLIB PkgConfig::GTK PkgConfig::ADW PkgConfig::PROTOBUF_C

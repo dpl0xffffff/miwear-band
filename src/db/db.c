@@ -575,11 +575,20 @@ gboolean miwear_db_replace_sleep_details_header(int64_t bed_ms,
     }
 
     sqlite3_stmt *st = NULL;
+    /* Several files describe the same night (sleep details, the Mi Fitness stage pipeline);
+     * one without a stage summary must not erase the durations another one stored. */
     const char *sql =
-        "INSERT OR REPLACE INTO \"XIAOMI_SLEEP_TIME_SAMPLE\" ("
+        "INSERT INTO \"XIAOMI_SLEEP_TIME_SAMPLE\" ("
         "\"timestamp\",\"deviceId\",\"userId\",\"wakeupTime\",\"isAwake\",\"totalDuration\",\"deepSleepDuration\","
         "\"lightSleepDuration\",\"remSleepDuration\",\"awakeDuration\") "
-        "VALUES (?,?,?,?,?,?,?,?,?,?);";
+        "VALUES (?,?,?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(\"timestamp\",\"deviceId\") DO UPDATE SET "
+        "\"userId\"=excluded.\"userId\",\"wakeupTime\"=excluded.\"wakeupTime\",\"isAwake\"=excluded.\"isAwake\","
+        "\"totalDuration\"=COALESCE(excluded.\"totalDuration\",\"totalDuration\"),"
+        "\"deepSleepDuration\"=COALESCE(excluded.\"deepSleepDuration\",\"deepSleepDuration\"),"
+        "\"lightSleepDuration\"=COALESCE(excluded.\"lightSleepDuration\",\"lightSleepDuration\"),"
+        "\"remSleepDuration\"=COALESCE(excluded.\"remSleepDuration\",\"remSleepDuration\"),"
+        "\"awakeDuration\"=COALESCE(excluded.\"awakeDuration\",\"awakeDuration\");";
     if (sqlite3_prepare_v2(s_db, sql, -1, &st, NULL) != SQLITE_OK) {
         g_mutex_unlock(&s_lock);
         return FALSE;
