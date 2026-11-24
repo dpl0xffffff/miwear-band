@@ -71,9 +71,109 @@ static void on_notif_test(GtkButton *b, gpointer user_data) {
     salus_notifications_send_test(user_data);
 }
 
-static void on_change_device(AdwActionRow *row, gpointer user_data) {
+static void on_add_device(AdwActionRow *row, gpointer user_data) {
     (void)row;
     salus_ui_show_setup(user_data);
+}
+
+static void on_saved_device_activated(AdwActionRow *row, gpointer user_data) {
+    SalusApp *state = user_data;
+    const char *address = g_object_get_data(G_OBJECT(row), "salus-address");
+    if (state->device != NULL && g_ascii_strcasecmp(state->device->config->address, address) == 0) {
+        return;
+    }
+    salus_app_activate_device(state, address);
+    (void)salus_config_save(state, NULL);
+    salus_ui_reload_data(state);
+    salus_device_connect(state);
+}
+
+static void on_forget_response(AdwAlertDialog *dialog, const char *response, gpointer user_data) {
+    SalusApp *state = user_data;
+    if (g_strcmp0(response, "forget") != 0) {
+        return;
+    }
+    const char *address = g_object_get_data(G_OBJECT(dialog), "salus-address");
+    salus_app_forget_device(state, address);
+    (void)salus_config_save(state, NULL);
+    if (state->device == NULL) {
+        salus_ui_show_setup(state);
+    } else {
+        salus_ui_reload_data(state);
+    }
+    salus_dashboard_refresh(state);
+}
+
+static void on_forget_clicked(GtkButton *b, gpointer user_data) {
+    SalusApp *state = user_data;
+    const char *address = g_object_get_data(G_OBJECT(b), "salus-address");
+    const char *name = g_object_get_data(G_OBJECT(b), "salus-name");
+    gchar *heading = g_strdup_printf("Forget %s?", name);
+    AdwDialog *dialog = adw_alert_dialog_new(heading, "Its pairing details are removed from Salus. Health data "
+                                                      "already synced from it stays.");
+    g_free(heading);
+    g_object_set_data_full(G_OBJECT(dialog), "salus-address", g_strdup(address), g_free);
+    adw_alert_dialog_add_responses(ADW_ALERT_DIALOG(dialog), "cancel", "_Cancel", "forget", "_Forget", NULL);
+    adw_alert_dialog_set_response_appearance(ADW_ALERT_DIALOG(dialog), "forget", ADW_RESPONSE_DESTRUCTIVE);
+    g_signal_connect(dialog, "response", G_CALLBACK(on_forget_response), state);
+    adw_dialog_present(dialog, state->window);
+}
+
+/* Saved devices: one row each (switch on activate, forget button), then "Add Device…". */
+static void rebuild_saved_devices(SalusApp *state) {
+    SalusDashboardUi *dash = state->dash_ui;
+    GtkWidget *group = dash->dev_saved_group;
+    if (dash->dev_saved_rows == NULL) {
+        dash->dev_saved_rows = g_ptr_array_new();
+    }
+    for (guint i = 0; i < dash->dev_saved_rows->len; i++) {
+        adw_preferences_group_remove(ADW_PREFERENCES_GROUP(group), g_ptr_array_index(dash->dev_saved_rows, i));
+    }
+    g_ptr_array_set_size(dash->dev_saved_rows, 0);
+    for (guint i = 0; state->saved_devices != NULL && i < state->saved_devices->len; i++) {
+        const SalusDeviceConfig *cfg = g_ptr_array_index(state->saved_devices, i);
+        const SalusDriver *driver = salus_driver_find(cfg->driver_id);
+        const gboolean active =
+            state->device != NULL && g_ascii_strcasecmp(state->device->config->address, cfg->address) == 0;
+        gchar *name = salus_device_config_display_name(cfg);
+        gchar *sub = g_strdup_printf("%s %s · %s", driver != NULL ? driver->vendor : "Unknown",
+                                     driver != NULL ? driver->model : cfg->driver_id, cfg->address);
+        GtkWidget *row = adw_action_row_new();
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), name);
+        adw_preferences_row_set_use_markup(ADW_PREFERENCES_ROW(row), FALSE);
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(row), sub);
+        adw_action_row_add_prefix(ADW_ACTION_ROW(row),
+                                  gtk_image_new_from_icon_name(driver != NULL ? driver->icon : "bluetooth-symbolic"));
+        if (active) {
+            GtkWidget *check = gtk_image_new_from_icon_name("object-select-symbolic");
+            gtk_widget_set_tooltip_text(check, "Active device");
+            adw_action_row_add_suffix(ADW_ACTION_ROW(row), check);
+        } else {
+            gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), TRUE);
+            gtk_widget_set_tooltip_text(row, "Use this device");
+            g_object_set_data_full(G_OBJECT(row), "salus-address", g_strdup(cfg->address), g_free);
+            g_signal_connect(row, "activated", G_CALLBACK(on_saved_device_activated), state);
+        }
+        GtkWidget *forget = gtk_button_new_from_icon_name("user-trash-symbolic");
+        gtk_widget_add_css_class(forget, "flat");
+        gtk_widget_set_valign(forget, GTK_ALIGN_CENTER);
+        gtk_widget_set_tooltip_text(forget, "Forget device");
+        g_object_set_data_full(G_OBJECT(forget), "salus-address", g_strdup(cfg->address), g_free);
+        g_object_set_data_full(G_OBJECT(forget), "salus-name", g_strdup(name), g_free);
+        g_signal_connect(forget, "clicked", G_CALLBACK(on_forget_clicked), state);
+        adw_action_row_add_suffix(ADW_ACTION_ROW(row), forget);
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), row);
+        g_ptr_array_add(dash->dev_saved_rows, row);
+        g_free(name);
+        g_free(sub);
+    }
+    GtkWidget *add = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(add), "Add Device…");
+    adw_action_row_add_prefix(ADW_ACTION_ROW(add), gtk_image_new_from_icon_name("list-add-symbolic"));
+    gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(add), TRUE);
+    g_signal_connect(add, "activated", G_CALLBACK(on_add_device), state);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), add);
+    g_ptr_array_add(dash->dev_saved_rows, add);
 }
 
 static void on_show_log(AdwActionRow *row, gpointer user_data) {
@@ -112,7 +212,9 @@ GtkWidget *ui_device_page_new(SalusApp *state, SalusDashboardUi *dash) {
     gtk_image_set_pixel_size(GTK_IMAGE(icon), 48);
     gtk_widget_add_css_class(icon, "salus-band-icon");
     gtk_widget_set_halign(icon, GTK_ALIGN_CENTER);
-    dash->dev_name = ui_label("Your band", "title-2", 0.5f);
+    dash->dev_icon = icon;
+    dash->dev_name = ui_label("Your device", "title-2", 0.5f);
+    dash->dev_model = ui_label("", "dimmed", 0.5f);
     dash->dev_address = ui_label("", "caption dimmed numeric", 0.5f);
     dash->dev_state = ui_label("", "dimmed", 0.5f);
     gtk_label_set_wrap(GTK_LABEL(dash->dev_state), TRUE);
@@ -124,11 +226,16 @@ GtkWidget *ui_device_page_new(SalusApp *state, SalusDashboardUi *dash) {
     g_signal_connect(dash->dev_connect, "clicked", G_CALLBACK(on_connect_clicked), state);
     gtk_box_append(GTK_BOX(hero), icon);
     gtk_box_append(GTK_BOX(hero), dash->dev_name);
+    gtk_box_append(GTK_BOX(hero), dash->dev_model);
     gtk_box_append(GTK_BOX(hero), dash->dev_address);
     gtk_box_append(GTK_BOX(hero), dash->dev_state);
     gtk_box_append(GTK_BOX(hero), dash->dev_connect);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(hero_group), hero);
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(hero_group));
+
+    dash->dev_saved_group = adw_preferences_group_new();
+    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(dash->dev_saved_group), "Saved Devices");
+    adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(dash->dev_saved_group));
 
     /* Status */
     GtkWidget *status = adw_preferences_group_new();
@@ -145,7 +252,7 @@ GtkWidget *ui_device_page_new(SalusApp *state, SalusDashboardUi *dash) {
     adw_action_row_add_suffix(ADW_ACTION_ROW(dash->dev_battery_row), dash->dev_battery_bar);
     adw_action_row_add_suffix(ADW_ACTION_ROW(dash->dev_battery_row), dash->dev_battery_label);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(status), dash->dev_battery_row);
-    dash->dev_status_row = action_row("Band state", "Unknown until connected", "salus-watch-symbolic");
+    dash->dev_status_row = action_row("Device State", "Unknown until connected", "salus-watch-symbolic");
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(status), dash->dev_status_row);
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(status));
 
@@ -156,13 +263,13 @@ GtkWidget *ui_device_page_new(SalusApp *state, SalusDashboardUi *dash) {
                                 "view-refresh-symbolic");
     dash->dev_sync_btn = row_button(row, "Sync", G_CALLBACK(on_sync_clicked), state);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(actions), row);
-    row = action_row("Find Band", "Make the band vibrate", "find-location-symbolic");
-    dash->dev_find_btn = row_button(row, "Ring", G_CALLBACK(on_find_clicked), state);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(actions), row);
+    dash->dev_find_row = action_row("Find Device", "Make it ring or vibrate", "find-location-symbolic");
+    dash->dev_find_btn = row_button(dash->dev_find_row, "Ring", G_CALLBACK(on_find_clicked), state);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(actions), dash->dev_find_row);
     dash->dev_weather_row = action_row("Weather", "Not synced yet", "weather-few-clouds-symbolic");
     dash->dev_weather_btn = row_button(dash->dev_weather_row, "Send", G_CALLBACK(on_weather_clicked), state);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(actions), dash->dev_weather_row);
-    dash->dev_find_phone_row = action_row("Band Is Looking for This Computer", "Dismiss on the band or stop here",
+    dash->dev_find_phone_row = action_row("Your Device Is Looking for This Computer", "Dismiss it on the device or stop here",
                                           "audio-volume-high-symbolic");
     GtkWidget *stop = row_button(dash->dev_find_phone_row, "Stop", G_CALLBACK(on_find_phone_stop), state);
     gtk_widget_add_css_class(stop, "destructive-action");
@@ -177,14 +284,15 @@ GtkWidget *ui_device_page_new(SalusApp *state, SalusDashboardUi *dash) {
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(dash->dev_notif_switch), "Forward Desktop Notifications");
     adw_action_row_set_subtitle(ADW_ACTION_ROW(dash->dev_notif_switch),
                                 state->notification_status != NULL ? state->notification_status
-                                                                   : "Show this computer's notifications on the band");
+                                                                   : "Show this computer's notifications on your device");
     adw_switch_row_set_active(ADW_SWITCH_ROW(dash->dev_notif_switch), state->notifications_enabled);
     g_signal_connect(dash->dev_notif_switch, "notify::active", G_CALLBACK(on_notif_toggled), state);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(notif), dash->dev_notif_switch);
-    row = action_row("Test Notification", "Send a sample notification to the band", NULL);
+    row = action_row("Test Notification", "Send a sample notification to your device", NULL);
     dash->dev_notif_test = row_button(row, "Send", G_CALLBACK(on_notif_test), state);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(notif), row);
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(notif));
+    dash->dev_notif_group = notif;
 
     /* Location */
     GtkWidget *location = adw_preferences_group_new();
@@ -192,18 +300,19 @@ GtkWidget *ui_device_page_new(SalusApp *state, SalusDashboardUi *dash) {
     GtkWidget *share = adw_switch_row_new();
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(share), "Share Location for Workouts");
     adw_action_row_set_subtitle(ADW_ACTION_ROW(share),
-                                "When an outdoor workout starts, send this device's location to the band, like "
-                                "the phone app does. Needs a GPS receiver; otherwise the band uses its own GPS");
+                                "When an outdoor workout starts, send this computer's location to your device, like "
+                                "a phone app does. Needs a GPS receiver; otherwise the device uses its own GPS");
     adw_switch_row_set_active(ADW_SWITCH_ROW(share), state->share_location_with_band);
     g_signal_connect(share, "notify::active", G_CALLBACK(on_share_location_toggled), state);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(location), share);
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(location));
+    dash->dev_location_group = location;
 
     /* Profile (read-only; edited in config.ini) */
     GtkWidget *profile = adw_preferences_group_new();
     adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(profile), "Profile");
     adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(profile),
-                                          "Sent to the band on connect. Edit in ~/.config/salus/config.ini.");
+                                          "Sent to your device on connect. Edit in ~/.config/salus/config.ini.");
     static const char *titles[5] = {"Height", "Weight", "Birthday", "Max Heart Rate", "Activity Goal"};
     for (int i = 0; i < 5; i++) {
         dash->dev_profile_rows[i] = action_row(titles[i], NULL, NULL);
@@ -211,15 +320,11 @@ GtkWidget *ui_device_page_new(SalusApp *state, SalusDashboardUi *dash) {
         adw_preferences_group_add(ADW_PREFERENCES_GROUP(profile), dash->dev_profile_rows[i]);
     }
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(profile));
+    dash->dev_profile_group = profile;
 
     /* Advanced */
     GtkWidget *adv = adw_preferences_group_new();
     adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(adv), "Advanced");
-    row = action_row("Change Device", "Pair a different band or update the auth key", "bluetooth-symbolic");
-    adw_action_row_add_suffix(ADW_ACTION_ROW(row), gtk_image_new_from_icon_name("go-next-symbolic"));
-    gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), TRUE);
-    g_signal_connect(row, "activated", G_CALLBACK(on_change_device), state);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(adv), row);
     row = action_row("Connection Log", "Protocol messages for troubleshooting", "utilities-terminal-symbolic");
     adw_action_row_add_suffix(ADW_ACTION_ROW(row), gtk_image_new_from_icon_name("go-next-symbolic"));
     gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), TRUE);
@@ -245,11 +350,27 @@ void ui_device_refresh(SalusApp *state) {
         return;
     }
     const gboolean connected = ui_is_connected(state);
-    const gboolean have_device = salus_ui_has_saved_device(state);
+    const gboolean have_device = state->device != NULL;
+    const SalusDriver *driver = have_device ? state->device->driver : NULL;
     gtk_label_set_text(GTK_LABEL(dash->dev_name),
                        state->device_display_name != NULL && state->device_display_name[0] != '\0'
                            ? state->device_display_name
-                           : (have_device ? state->selected_address : "No band set up"));
+                           : (have_device ? state->selected_address : "No device set up"));
+    gchar *model = driver != NULL ? g_strdup_printf("%s %s", driver->vendor, driver->model) : g_strdup("");
+    gtk_label_set_text(GTK_LABEL(dash->dev_model), model);
+    gtk_widget_set_visible(dash->dev_model, driver != NULL);
+    g_free(model);
+    gtk_image_set_from_icon_name(GTK_IMAGE(dash->dev_icon), driver != NULL ? driver->icon : "salus-watch-symbolic");
+    rebuild_saved_devices(state);
+
+    /* Only what the active device supports. */
+    const guint caps = driver != NULL ? driver->caps : 0;
+    gtk_widget_set_visible(dash->dev_battery_row, (caps & SALUS_CAP_BATTERY) != 0);
+    gtk_widget_set_visible(dash->dev_find_row, (caps & SALUS_CAP_FIND_DEVICE) != 0);
+    gtk_widget_set_visible(dash->dev_weather_row, (caps & SALUS_CAP_WEATHER) != 0);
+    gtk_widget_set_visible(dash->dev_notif_group, (caps & SALUS_CAP_NOTIFICATIONS) != 0);
+    gtk_widget_set_visible(dash->dev_location_group, (caps & SALUS_CAP_LOCATION_SHARE) != 0);
+    gtk_widget_set_visible(dash->dev_profile_group, (caps & SALUS_CAP_USER_PROFILE) != 0);
     gtk_label_set_text(GTK_LABEL(dash->dev_address), have_device ? state->selected_address : "");
     gtk_widget_set_visible(dash->dev_address,
                            have_device && g_strcmp0(state->device_display_name, state->selected_address) != 0);
@@ -279,7 +400,7 @@ void ui_device_refresh(SalusApp *state) {
         gtk_label_set_text(GTK_LABEL(dash->dev_battery_label), "—");
         gtk_level_bar_set_value(GTK_LEVEL_BAR(dash->dev_battery_bar), 0);
         adw_action_row_set_subtitle(ADW_ACTION_ROW(dash->dev_battery_row),
-                                    connected ? "Waiting for the band" : "Known after connecting");
+                                    connected ? "Waiting for the device" : "Known after connecting");
     }
 
     GString *st = g_string_new(NULL);
@@ -302,7 +423,7 @@ void ui_device_refresh(SalusApp *state) {
     gtk_widget_set_sensitive(dash->dev_notif_test, connected);
     adw_action_row_set_subtitle(ADW_ACTION_ROW(dash->dev_weather_row),
                                 state->weather_last_status != NULL ? state->weather_last_status
-                                                                   : "Send the current forecast to the band");
+                                                                   : "Send the current forecast to your device");
     gtk_widget_set_visible(dash->dev_find_phone_row, salus_find_phone_is_active(state));
     if (adw_switch_row_get_active(ADW_SWITCH_ROW(dash->dev_notif_switch)) != state->notifications_enabled) {
         adw_switch_row_set_active(ADW_SWITCH_ROW(dash->dev_notif_switch), state->notifications_enabled);

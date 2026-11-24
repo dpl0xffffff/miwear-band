@@ -695,9 +695,14 @@ void recorded_schedule_rebuild(SalusApp *state) {
     state->recorded_rebuild_source_id = g_idle_add(recorded_rebuild_idle_cb, state);
 }
 
-static void show_main(SalusApp *state) {
+void salus_ui_reload_data(SalusApp *state) {
     recorded_rebuild_from_db(state);
     salus_sport_load_from_db(state);
+    salus_dashboard_schedule_refresh(state);
+}
+
+static void show_main(SalusApp *state) {
+    salus_ui_reload_data(state);
     if (state->stack != NULL) {
         gtk_stack_set_visible_child_name(GTK_STACK(state->stack), "main");
     }
@@ -705,7 +710,7 @@ static void show_main(SalusApp *state) {
     salus_dashboard_schedule_refresh(state);
 }
 
-/* Auth succeeded: the band is connected. */
+/* The device connected. */
 void switch_to_dashboard(SalusApp *state) {
     show_main(state);
     gchar *msg = g_strdup_printf("Connected to %s",

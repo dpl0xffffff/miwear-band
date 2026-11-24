@@ -143,6 +143,7 @@ struct SalusDashboardUi {
     GPtrArray *calendars;
 
     /* Today */
+    GtkWidget *activity_card;
     GtkWidget *rings;
     GtkWidget *ring_steps;
     GtkWidget *ring_calories;
@@ -178,7 +179,15 @@ struct SalusDashboardUi {
     GtkWidget *sport_detail_page;
 
     /* Device */
+    GtkWidget *dev_icon;
     GtkWidget *dev_name;
+    GtkWidget *dev_model;
+    GtkWidget *dev_saved_group;
+    GPtrArray *dev_saved_rows;
+    GtkWidget *dev_find_row;
+    GtkWidget *dev_notif_group;
+    GtkWidget *dev_location_group;
+    GtkWidget *dev_profile_group;
     GtkWidget *dev_address;
     GtkWidget *dev_state;
     GtkWidget *dev_connect;
@@ -200,8 +209,8 @@ struct SalusDashboardUi {
 GtkWidget *ui_today_page_new(SalusApp *state, SalusDashboardUi *dash);
 void ui_today_refresh(SalusApp *state);
 void ui_today_redraw(SalusApp *state);
-GtkWidget *mi_sleep_page_new(SalusApp *state, SalusDashboardUi *dash);
-void mi_sleep_refresh(SalusApp *state);
+GtkWidget *ui_sleep_page_new(SalusApp *state, SalusDashboardUi *dash);
+void ui_sleep_refresh(SalusApp *state);
 GtkWidget *ui_workouts_page_new(SalusApp *state, SalusDashboardUi *dash);
 void ui_workouts_refresh_training(SalusApp *state);
 GtkWidget *ui_device_page_new(SalusApp *state, SalusDashboardUi *dash);
@@ -232,6 +241,8 @@ void salus_connect_set_busy(SalusApp *app, gboolean busy);
 void salus_connect_set_status(SalusApp *app, const char *text);
 
 /* Implemented in ui.c */
+/* Reloads the timelines and workouts after the active device changed. */
+void salus_ui_reload_data(SalusApp *state);
 void salus_ui_show_setup(SalusApp *state);
 gboolean salus_ui_has_saved_device(SalusApp *state);
 

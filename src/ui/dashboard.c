@@ -44,6 +44,9 @@ void salus_dashboard_ui_free(SalusDashboardUi *dash) {
     g_ptr_array_free(dash->date_today, TRUE);
     g_ptr_array_free(dash->calendars, TRUE);
     g_clear_object(&dash->metric_page);
+    if (dash->dev_saved_rows != NULL) {
+        g_ptr_array_unref(dash->dev_saved_rows);
+    }
     g_free(dash->night);
     g_free(dash->status_text);
     g_free(dash);
@@ -470,7 +473,7 @@ GtkWidget *salus_dashboard_build(SalusApp *state, SalusDashboardUi *dash) {
     dash->view_stack = adw_view_stack_new();
     adw_view_stack_add_titled_with_icon(ADW_VIEW_STACK(dash->view_stack), ui_today_page_new(state, dash), "today",
                                         "Health", "salus-heart-symbolic");
-    adw_view_stack_add_titled_with_icon(ADW_VIEW_STACK(dash->view_stack), mi_sleep_page_new(state, dash), "sleep",
+    adw_view_stack_add_titled_with_icon(ADW_VIEW_STACK(dash->view_stack), ui_sleep_page_new(state, dash), "sleep",
                                         "Sleep", "salus-moon-symbolic");
     adw_view_stack_add_titled_with_icon(ADW_VIEW_STACK(dash->view_stack), ui_workouts_page_new(state, dash),
                                         "workouts", "Workouts", "salus-run-symbolic");
@@ -492,7 +495,7 @@ GtkWidget *salus_dashboard_build(SalusApp *state, SalusDashboardUi *dash) {
     GMenu *menu = g_menu_new();
     GMenu *sec1 = g_menu_new();
     g_menu_append(sec1, "Sync Now", "dash.sync");
-    g_menu_append(sec1, "Change Device…", "dash.change-device");
+    g_menu_append(sec1, "Add Device…", "dash.change-device");
     g_menu_append(sec1, "Connection Log", "dash.log");
     GMenu *sec2 = g_menu_new();
     g_menu_append(sec2, "About Salus", "dash.about");
@@ -633,6 +636,7 @@ static GtkWidget *build_activity_card(SalusApp *state, SalusDashboardUi *dash) {
 
     /* The whole card opens the steps chart. */
     GtkWidget *card = gtk_button_new();
+    dash->activity_card = card;
     gtk_button_set_child(GTK_BUTTON(card), inner);
     gtk_widget_add_css_class(card, "card");
     gtk_widget_add_css_class(card, "salus-card");
@@ -1428,13 +1432,43 @@ void salus_dashboard_schedule_refresh(SalusApp *state) {
     g_idle_add(dashboard_refresh_idle, state);
 }
 
+/* With a device active, only what it can measure is shown; with none, everything (saved data). */
+static gboolean shows(SalusApp *state, guint cap) {
+    return state->device == NULL || salus_device_has(state, cap);
+}
+
+static void set_tile_visible(UiTile *t, gboolean visible) {
+    GtkWidget *child = gtk_widget_get_parent(t->root); /* the GtkFlowBoxChild */
+    gtk_widget_set_visible(child != NULL ? child : t->root, visible);
+}
+
+static void apply_capabilities(SalusApp *state) {
+    SalusDashboardUi *dash = state->dash_ui;
+    gtk_widget_set_visible(dash->activity_card, shows(state, SALUS_CAP_STEPS));
+    set_tile_visible(&dash->tile_hr, shows(state, SALUS_CAP_HEART_RATE));
+    set_tile_visible(&dash->tile_spo2, shows(state, SALUS_CAP_SPO2));
+    set_tile_visible(&dash->tile_stress, shows(state, SALUS_CAP_STRESS));
+    set_tile_visible(&dash->tile_sleep, shows(state, SALUS_CAP_SLEEP));
+    set_tile_visible(&dash->tile_vitality, shows(state, SALUS_CAP_VITALITY));
+    static const struct {
+        const char *page;
+        guint cap;
+    } tabs[] = {{"sleep", SALUS_CAP_SLEEP}, {"workouts", SALUS_CAP_WORKOUTS}};
+    for (size_t i = 0; i < G_N_ELEMENTS(tabs); i++) {
+        GtkWidget *child = adw_view_stack_get_child_by_name(ADW_VIEW_STACK(dash->view_stack), tabs[i].page);
+        AdwViewStackPage *page = adw_view_stack_get_page(ADW_VIEW_STACK(dash->view_stack), child);
+        adw_view_stack_page_set_visible(page, shows(state, tabs[i].cap));
+    }
+}
+
 void salus_dashboard_refresh(SalusApp *state) {
     if (state == NULL || state->dash_ui == NULL || state->dash_ui->rings == NULL) {
         return;
     }
     dashboard_update_date_navs(state);
+    apply_capabilities(state);
     ui_today_refresh(state);
-    mi_sleep_refresh(state);
+    ui_sleep_refresh(state);
     ui_workouts_refresh_training(state);
     salus_dashboard_update_connection(state);
 }

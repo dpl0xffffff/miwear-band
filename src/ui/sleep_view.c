@@ -279,7 +279,7 @@ static GtkWidget *sleep_hr_value, *sleep_spo2_value;
 static GtkWidget *sleep_summary_sub;
 static GtkWidget *sleep_stages_sub;
 
-GtkWidget *mi_sleep_page_new(SalusApp *state, SalusDashboardUi *dash) {
+GtkWidget *ui_sleep_page_new(SalusApp *state, SalusDashboardUi *dash) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
     gtk_widget_add_css_class(box, "salus-page");
     gtk_box_append(GTK_BOX(box), ui_date_nav_new(state, dash));
@@ -378,7 +378,7 @@ static void set_legend(int idx, int minutes, int total) {
     g_free(m);
 }
 
-void mi_sleep_refresh(SalusApp *state) {
+void ui_sleep_refresh(SalusApp *state) {
     SalusDashboardUi *dash = state->dash_ui;
     if (dash == NULL || dash->sleep_content == NULL) {
         return;
